@@ -113,6 +113,11 @@ const registry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Con
 				'markdownDescription': localize('decorations.colors', "Controls whether editor file decorations should use colors."),
 				'default': true
 			},
+			'workbench.editor.tabGroups.enabled': {
+				'type': 'boolean',
+				'markdownDescription': localize('tabGroups.enabled', "Controls whether editor tabs can be grouped into named, colored tab groups."),
+				'default': true
+			},
 			[CustomEditorLabelService.SETTING_ID_ENABLED]: {
 				'type': 'boolean',
 				'markdownDescription': localize('workbench.editor.label.enabled', "Controls whether the custom workbench editor labels should be applied."),

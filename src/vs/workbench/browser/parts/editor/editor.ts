@@ -3,8 +3,9 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { GroupIdentifier, IWorkbenchEditorConfiguration, IEditorIdentifier, IEditorCloseEvent, IEditorPartOptions, IEditorPartOptionsChangeEvent, SideBySideEditor, EditorCloseContext, IEditorPane, IEditorPartLimitOptions, IEditorPartDecorationOptions, IEditorWillOpenEvent, EditorInputWithOptions } from '../../../common/editor.js';
+import { GroupIdentifier, IWorkbenchEditorConfiguration, IEditorIdentifier, IEditorCloseEvent, IEditorPartOptions, IEditorPartOptionsChangeEvent, SideBySideEditor, EditorCloseContext, IEditorPane, IEditorPartLimitOptions, IEditorPartDecorationOptions, IEditorPartTabGroupsOptions, IEditorWillOpenEvent, EditorInputWithOptions } from '../../../common/editor.js';
 import { EditorInput } from '../../../common/editor/editorInput.js';
+import { IEditorTabGroup, IEditorTabGroupCreateOptions } from '../../../common/editor/editorTabGroup.js';
 import { MenuId } from '../../../../platform/actions/common/actions.js';
 import { IEditorGroup, GroupDirection, IMergeGroupOptions, GroupsOrder, GroupsArrangement, IAuxiliaryEditorPart, IEditorPart, IModalEditorPart, GroupActivationReason } from '../../../services/editor/common/editorGroupsService.js';
 import { IDisposable } from '../../../../base/common/lifecycle.js';
@@ -76,6 +77,7 @@ export const DEFAULT_EDITOR_PART_OPTIONS: IEditorPartOptions = {
 	// to ensure no consumer modifies the default values
 	get limit(): IEditorPartLimitOptions { return { enabled: false, value: 10, perEditorGroup: false, excludeDirty: false }; },
 	get decorations(): IEditorPartDecorationOptions { return { badges: true, colors: true }; },
+	get tabGroups(): IEditorPartTabGroupsOptions { return { enabled: true }; },
 	get autoLockGroups(): Set<string> { return new Set<string>(); }
 };
 
@@ -180,6 +182,9 @@ function validateEditorPartOptions(options: IEditorPartOptions): IEditorPartOpti
 		'decorations': new ObjectVerifier<IEditorPartDecorationOptions>(DEFAULT_EDITOR_PART_OPTIONS['decorations'], {
 			'badges': new BooleanVerifier(DEFAULT_EDITOR_PART_OPTIONS['decorations']['badges']),
 			'colors': new BooleanVerifier(DEFAULT_EDITOR_PART_OPTIONS['decorations']['colors'])
+		}),
+		'tabGroups': new ObjectVerifier<IEditorPartTabGroupsOptions>(DEFAULT_EDITOR_PART_OPTIONS['tabGroups'], {
+			'enabled': new BooleanVerifier(DEFAULT_EDITOR_PART_OPTIONS['tabGroups']['enabled'])
 		}),
 	}, options);
 }
@@ -328,6 +333,30 @@ export interface IEditorGroupView extends IDisposable, ISerializableView, IEdito
 	openEditor(editor: EditorInput, options?: IEditorOptions, internalOptions?: IInternalEditorOpenOptions): Promise<IEditorPane | undefined>;
 
 	relayout(): void;
+
+	readonly tabGroups: readonly IEditorTabGroup[];
+	getTabGroupForEditor(editor: EditorInput): IEditorTabGroup | undefined;
+	createTabGroup(editors: EditorInput[], name?: string, color?: string, options?: IEditorTabGroupCreateOptions): IEditorTabGroup | undefined;
+	dissolveTabGroup(groupId: string): void;
+	removeFromTabGroup(editors: EditorInput[]): void;
+	addToTabGroup(groupId: string, editors: EditorInput[]): void;
+	setTabGroupCollapsed(groupId: string, collapsed: boolean): void;
+	renameTabGroup(groupId: string, name: string): void;
+	recolorTabGroup(groupId: string, color: string): void;
+	moveTabGroup(groupId: string, toIndex: number): void;
+	setTabGroupSaved(groupId: string, saved: boolean): void;
+	setTabGroupLocked(groupId: string, locked: boolean): void;
+	readonly canUndoTabGroupAction: boolean;
+	undoLastTabGroupAction(): boolean;
+}
+
+/**
+ * Type guard to narrow an {@link IEditorGroup} (service API) down to an
+ * {@link IEditorGroupView} (workbench API). In the browser workbench the two
+ * are the same object, so the guard only verifies the extra surface.
+ */
+export function isEditorGroupView(group: IEditorGroup): group is IEditorGroupView {
+	return typeof (group as IEditorGroupView).createTabGroup === 'function';
 }
 
 export function fillActiveEditorViewState(group: IEditorGroup, expectedActiveEditor?: EditorInput, presetOptions?: IEditorOptions): IEditorOptions {

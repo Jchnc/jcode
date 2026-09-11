@@ -9,7 +9,7 @@ import { IResourceEditorInput, IEditorOptions } from '../../../../platform/edito
 import { IEditorPane, IEditorCloseEvent, EditorResourceAccessor, IEditorIdentifier, GroupIdentifier, EditorsOrder, SideBySideEditor, IUntypedEditorInput, isResourceEditorInput, isEditorInput, isSideBySideEditorInput, EditorCloseContext, IEditorPaneSelection, EditorPaneSelectionCompareResult, EditorPaneSelectionChangeReason, isEditorPaneWithSelection, IEditorPaneSelectionChangeEvent, IEditorPaneWithSelection, IEditorWillMoveEvent, GroupModelChangeKind } from '../../../common/editor.js';
 import { EditorInput } from '../../../common/editor/editorInput.js';
 import { IEditorService } from '../../editor/common/editorService.js';
-import { GoFilter, GoScope, IHistoryService, MOUSE_BACK_FORWARD_NAVIGATION_SETTING } from '../common/history.js';
+import { GoFilter, GoScope, IHistoryService, ISavedEditorTabGroup, MOUSE_BACK_FORWARD_NAVIGATION_SETTING } from '../common/history.js';
 import { FileChangesEvent, IFileService, FileChangeType, FILES_EXCLUDE_CONFIG, FileOperationEvent, FileOperation } from '../../../../platform/files/common/files.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { Disposable, DisposableStore, IDisposable, DisposableMap } from '../../../../base/common/lifecycle.js';
@@ -19,7 +19,7 @@ import { IConfigurationService } from '../../../../platform/configuration/common
 import { IEditorGroup, IEditorGroupsService } from '../../editor/common/editorGroupsService.js';
 import { getExcludes, ISearchConfiguration, SEARCH_EXCLUDE_CONFIG } from '../../search/common/search.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
-import { EditorServiceImpl } from '../../../browser/parts/editor/editor.js';
+import { EditorServiceImpl, isEditorGroupView } from '../../../browser/parts/editor/editor.js';
 import { IWorkbenchLayoutService } from '../../layout/browser/layoutService.js';
 import { IContextKey, IContextKeyService, RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
 import { coalesce } from '../../../../base/common/arrays.js';
@@ -34,6 +34,8 @@ import { IUriIdentityService } from '../../../../platform/uriIdentity/common/uri
 import { ILifecycleService, LifecyclePhase } from '../../lifecycle/common/lifecycle.js';
 import { ILogService, LogLevel } from '../../../../platform/log/common/log.js';
 import { mainWindow } from '../../../../base/browser/window.js';
+import { parse, stringify } from '../../../../base/common/marshalling.js';
+import { IEditorTabGroup } from '../../../common/editor/editorTabGroup.js';
 
 interface ISerializedEditorHistoryEntry {
 	readonly editor: Omit<IResourceEditorInput, 'resource'> & { resource: string };
@@ -62,11 +64,13 @@ export class HistoryService extends Disposable implements IHistoryService {
 	declare readonly _serviceBrand: undefined;
 
 	private static readonly NAVIGATION_SCOPE_SETTING = 'workbench.editor.navigationScope';
+	private static readonly SAVED_TAB_GROUPS_STORAGE_KEY = 'history.savedTabGroups';
 
 	private readonly activeEditorListeners = this._register(new DisposableStore());
 	private lastActiveEditor: IEditorIdentifier | undefined = undefined;
 
 	private readonly editorHelper: EditorHelper;
+	private savedTabGroups: ISavedEditorTabGroup[] = [];
 
 	constructor(
 		@IEditorService private readonly editorService: EditorServiceImpl,
@@ -84,6 +88,7 @@ export class HistoryService extends Disposable implements IHistoryService {
 		super();
 
 		this.editorHelper = this.instantiationService.createInstance(EditorHelper);
+		this.savedTabGroups = this.loadSavedTabGroups();
 
 		this.canNavigateBackContextKey = (new RawContextKey<boolean>('canNavigateBack', false, localize('canNavigateBack', "Whether it is possible to navigate back in editor history"))).bindTo(this.contextKeyService);
 		this.canNavigateForwardContextKey = (new RawContextKey<boolean>('canNavigateForward', false, localize('canNavigateForward', "Whether it is possible to navigate forward in editor history"))).bindTo(this.contextKeyService);
@@ -747,6 +752,97 @@ export class HistoryService extends Disposable implements IHistoryService {
 		this.canReopenClosedEditorContextKey.set(this.recentlyClosedEditors.length > 0);
 
 		return reopenClosedEditorPromise;
+	}
+
+	getSavedTabGroups(): readonly ISavedEditorTabGroup[] {
+		return this.savedTabGroups;
+	}
+
+	saveClosedTabGroup(tabGroup: IEditorTabGroup, editors: readonly { editor: EditorInput; index: number }[]): void {
+		const reopenableEditors = coalesce(editors.map(({ editor, index }) => {
+			if (!editor.canReopen()) {
+				return undefined;
+			}
+			const untypedEditor = editor.toUntyped();
+			return untypedEditor ? { editor: untypedEditor, index } : undefined;
+		}));
+		if (reopenableEditors.length === 0) {
+			return;
+		}
+
+		this.savedTabGroups = this.savedTabGroups.filter(group => group.id !== tabGroup.id);
+		this.savedTabGroups.push({
+			id: tabGroup.id,
+			name: tabGroup.name,
+			color: tabGroup.color,
+			collapsed: tabGroup.collapsed,
+			locked: tabGroup.locked,
+			icon: tabGroup.icon,
+			metadata: tabGroup.metadata,
+			editors: reopenableEditors
+		});
+		this.persistSavedTabGroups();
+	}
+
+	async reopenSavedTabGroup(id: string): Promise<void> {
+		const savedGroup = this.savedTabGroups.find(group => group.id === id);
+		if (!savedGroup) {
+			return;
+		}
+
+		const targetGroup = this.editorGroupService.activeGroup;
+		const reopenedEditors: EditorInput[] = [];
+		let targetIndex = targetGroup.count;
+		for (const entry of [...savedGroup.editors].sort((first, second) => first.index - second.index)) {
+			const editorPane = await this.editorService.openEditor({
+				...entry.editor,
+				options: { ...entry.editor.options, pinned: true, index: targetIndex++ }
+			}, targetGroup);
+			if (editorPane?.input) {
+				reopenedEditors.push(editorPane.input);
+			}
+		}
+
+		if (reopenedEditors.length > 0 && isEditorGroupView(targetGroup)) {
+			const reopenedGroup = targetGroup.createTabGroup(reopenedEditors, savedGroup.name, savedGroup.color, {
+				id: savedGroup.id,
+				collapsed: savedGroup.collapsed,
+				saved: true,
+				locked: savedGroup.locked,
+				icon: savedGroup.icon,
+				metadata: savedGroup.metadata,
+				skipUndo: true
+			});
+			if (reopenedGroup) {
+				this.deleteSavedTabGroup(id);
+			}
+		}
+	}
+
+	deleteSavedTabGroup(id: string): void {
+		const remainingGroups = this.savedTabGroups.filter(group => group.id !== id);
+		if (remainingGroups.length !== this.savedTabGroups.length) {
+			this.savedTabGroups = remainingGroups;
+			this.persistSavedTabGroups();
+		}
+	}
+
+	private loadSavedTabGroups(): ISavedEditorTabGroup[] {
+		const stored = this.storageService.get(HistoryService.SAVED_TAB_GROUPS_STORAGE_KEY, StorageScope.WORKSPACE);
+		if (!stored) {
+			return [];
+		}
+		try {
+			const groups = parse(stored);
+			return Array.isArray(groups) ? groups.filter(group => typeof group?.id === 'string' && Array.isArray(group.editors)) : [];
+		} catch (error) {
+			onUnexpectedError(error);
+			return [];
+		}
+	}
+
+	private persistSavedTabGroups(): void {
+		this.storageService.store(HistoryService.SAVED_TAB_GROUPS_STORAGE_KEY, stringify(this.savedTabGroups), StorageScope.WORKSPACE, StorageTarget.MACHINE);
 	}
 
 	private takeLastClosedEditorsBatch(): IRecentlyClosedEditor[] {

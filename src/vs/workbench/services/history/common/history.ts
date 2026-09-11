@@ -5,13 +5,25 @@
 
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { IResourceEditorInput } from '../../../../platform/editor/common/editor.js';
-import { GroupIdentifier } from '../../../common/editor.js';
+import { GroupIdentifier, IUntypedEditorInput } from '../../../common/editor.js';
 import { EditorInput } from '../../../common/editor/editorInput.js';
+import { IEditorTabGroup } from '../../../common/editor/editorTabGroup.js';
 import { URI } from '../../../../base/common/uri.js';
 
 export const IHistoryService = createDecorator<IHistoryService>('historyService');
 
 export const MOUSE_BACK_FORWARD_NAVIGATION_SETTING = 'workbench.editor.mouseBackForwardToNavigate';
+
+export interface ISavedEditorTabGroup {
+	readonly id: string;
+	readonly name: string;
+	readonly color: string;
+	readonly collapsed: boolean;
+	readonly locked: boolean;
+	readonly icon?: string;
+	readonly metadata?: Record<string, unknown>;
+	readonly editors: readonly { editor: IUntypedEditorInput; index: number }[];
+}
 
 /**
  * Limit editor navigation to certain kinds.
@@ -90,6 +102,18 @@ export interface IHistoryService {
 	 * Re-opens the last closed editor if any.
 	 */
 	reopenLastClosedEditor(): Promise<void>;
+
+	/** Saved tab groups that are currently closed in this workspace. */
+	getSavedTabGroups(): readonly ISavedEditorTabGroup[];
+
+	/** Stores a closed group so it can be reopened across workbench sessions. */
+	saveClosedTabGroup(tabGroup: IEditorTabGroup, editors: readonly { editor: EditorInput; index: number }[]): void;
+
+	/** Reopens a saved tab group into the active editor group. */
+	reopenSavedTabGroup(id: string): Promise<void>;
+
+	/** Permanently removes a closed saved tab group. */
+	deleteSavedTabGroup(id: string): void;
 
 	/**
 	 * Get the entire history of editors that were opened.

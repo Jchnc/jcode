@@ -1,0 +1,365 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/*
+ * Browser-style tab groups. `--tab-group-color` is deliberately used as an
+ * accent rather than a foreground/background pair so custom colors remain
+ * readable in every VS Code theme and with Custom UI Style overrides.
+ */
+
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	box-sizing: border-box;
+	height: 26px;
+	min-width: 0;
+	padding: 0 6px 0 8px;
+	margin: auto 4px auto 6px;
+	border: 0;
+	border-radius: var(--vscode-cornerRadius-medium);
+	background: transparent;
+	color: var(--vscode-tab-inactiveForeground);
+	font-size: var(--vscode-fontSize-label1);
+	font-weight: var(--vscode-fontWeight-semiBold);
+	line-height: 1;
+	cursor: grab;
+	flex: 0 0 auto;
+	white-space: nowrap;
+	user-select: none;
+	position: relative;
+	isolation: isolate;
+	transition: background-color 120ms ease, color 120ms ease;
+}
+
+/* The rail is the signature: it identifies the group without tinting its text. */
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header::before {
+	content: '';
+	position: absolute;
+	left: 0;
+	top: 5px;
+	bottom: 5px;
+	width: 3px;
+	border-radius: var(--vscode-cornerRadius-xSmall);
+	background-color: var(--tab-group-color);
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container.active > .title .tabs-container > .tab-group-header {
+	color: var(--vscode-tab-activeForeground);
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header:hover {
+	background-color: color-mix(in srgb, var(--vscode-tab-hoverBackground) 72%, transparent);
+	color: var(--vscode-tab-hoverForeground);
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header:active {
+	cursor: grabbing;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header.locked,
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header.locked:active {
+	cursor: default;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header > .tab-group-color-dot {
+	display: none;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header > .tab-group-icon {
+	font-size: var(--vscode-fontSize-label1);
+	color: var(--tab-group-color);
+	flex: 0 0 auto;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header > .tab-group-name {
+	max-width: 132px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header > .tab-group-count {
+	display: none;
+	align-items: center;
+	justify-content: center;
+	min-width: 8px;
+	height: auto;
+	padding: 0;
+	color: var(--vscode-tab-inactiveForeground);
+	font-size: var(--vscode-fontSize-label3);
+	font-weight: var(--vscode-fontWeight-regular);
+	line-height: 1;
+	opacity: 0.58;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header > .tab-group-dirty-indicator {
+	display: none;
+	color: var(--vscode-tab-activeModifiedBorder, var(--tab-group-color));
+	font-size: 7px;
+	line-height: 1;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header > .tab-group-saved {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	color: var(--tab-group-color);
+	font-size: var(--vscode-fontSize-label3);
+	opacity: 0.82;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header.collapsed > .tab-group-dirty-indicator {
+	display: inline-flex;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header > .tab-group-lock {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	color: inherit;
+	font-size: var(--vscode-fontSize-label3);
+	opacity: 0.72;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header > .tab-group-chevron {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 16px;
+	height: 16px;
+	font-size: var(--vscode-fontSize-label1);
+	color: inherit;
+	opacity: 0.68;
+	flex: 0 0 16px;
+}
+
+/* Collapsed retains the name and only strengthens the neutral surface. */
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header.collapsed {
+	background-color: color-mix(in srgb, var(--vscode-tab-activeBackground) 82%, var(--vscode-tab-inactiveForeground));
+	color: var(--vscode-tab-activeForeground);
+	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vscode-tab-activeForeground) 12%, transparent);
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header.collapsed::before {
+	top: 3px;
+	bottom: 3px;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header.collapsed > .tab-group-count {
+	display: inline-flex;
+	color: var(--vscode-tab-activeForeground);
+	opacity: 0.68;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header.dragged {
+	opacity: 0.42;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header.drop-target {
+	background-color: color-mix(in srgb, var(--tab-group-color) 14%, var(--vscode-tab-hoverBackground));
+	outline: 1px solid var(--tab-group-color);
+	outline-offset: -1px;
+}
+
+/*
+ * Expanded tabs sit in a shallow browser-like tray. The color rail is kept at
+ * the bottom edge; theme backgrounds and foregrounds remain untouched.
+ */
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab.in-tab-group {
+	border-top: 0;
+	border-bottom: 2px solid var(--tab-group-color);
+	background-image: linear-gradient(color-mix(in srgb, var(--tab-group-color) 5%, transparent), color-mix(in srgb, var(--tab-group-color) 5%, transparent));
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab.in-tab-group.tab-group-first {
+	border-left: 0;
+	border-radius: var(--vscode-cornerRadius-medium) 0 0 0;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab.in-tab-group.tab-group-last {
+	border-right: 0;
+	border-radius: 0 var(--vscode-cornerRadius-medium) 0 0;
+}
+
+/* Modern UI puts the visible surface in `.tab-fill`; tint that surface too. */
+.modern-ui-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab.in-tab-group > .tab-fill {
+	box-shadow:
+		inset calc(-1 * var(--vscode-strokeThickness)) 0 var(--modern-ui-editor-tab-border),
+		inset 0 -2px var(--tab-group-color);
+}
+
+.modern-ui-tabs.monaco-workbench .part.editor > .content .editor-group-container.active > .title .tabs-container > .tab.in-tab-group.active > .tab-fill {
+	box-shadow:
+		inset calc(-1 * var(--vscode-strokeThickness)) 0 var(--modern-ui-editor-tab-active-border),
+		inset 0 -2px var(--tab-group-color);
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab.tab-group-collapsed {
+	display: none;
+}
+
+/*
+ * The group editor is a focused context surface rather than a flat action
+ * list: identity leads, color follows, and operational actions sit below.
+ */
+.context-view.tab-group-context-view {
+	overflow: hidden;
+	border: var(--vscode-strokeThickness) solid var(--vscode-menu-border, transparent);
+	border-radius: var(--vscode-cornerRadius-large);
+	background-color: var(--vscode-menu-background);
+	color: var(--vscode-menu-foreground);
+	box-shadow: 0 2px 8px var(--vscode-widget-shadow);
+}
+
+.context-view.tab-group-context-view > .tab-group-context-menu {
+	box-sizing: border-box;
+	width: 312px;
+	font-size: var(--vscode-fontSize-body1);
+	font-weight: var(--vscode-fontWeight-regular);
+}
+
+.context-view.tab-group-context-view .tab-group-menu-identity {
+	display: flex;
+	flex-direction: column;
+	gap: var(--vscode-spacing-size100);
+	padding: var(--vscode-spacing-size160);
+}
+
+.context-view.tab-group-context-view .tab-group-menu-name {
+	box-sizing: border-box;
+	width: 100%;
+	height: 32px;
+	padding: 0 var(--vscode-spacing-size100);
+	border: var(--vscode-strokeThickness) solid var(--vscode-input-border, transparent);
+	border-radius: var(--vscode-cornerRadius-small);
+	outline: none;
+	background-color: var(--vscode-input-background);
+	color: var(--vscode-input-foreground);
+	font: inherit;
+}
+
+.context-view.tab-group-context-view .tab-group-menu-name::placeholder {
+	color: var(--vscode-input-placeholderForeground);
+}
+
+.context-view.tab-group-context-view .tab-group-menu-name:focus {
+	border-color: var(--vscode-focusBorder);
+	outline: var(--vscode-strokeThickness) solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.context-view.tab-group-context-view .tab-group-menu-name[aria-invalid='true'] {
+	border-color: var(--vscode-inputValidation-errorBorder);
+}
+
+.context-view.tab-group-context-view .tab-group-menu-colors {
+	display: flex;
+	align-items: center;
+	gap: var(--vscode-spacing-size100);
+}
+
+.context-view.tab-group-context-view .tab-group-menu-color {
+	box-sizing: border-box;
+	width: var(--vscode-spacing-size160);
+	height: var(--vscode-spacing-size160);
+	padding: 0;
+	border: 0;
+	border-radius: var(--vscode-cornerRadius-circle);
+	outline: none;
+	cursor: pointer;
+	transition: transform 120ms ease;
+}
+
+.context-view.tab-group-context-view .tab-group-menu-color:hover {
+	transform: scale(1.12);
+}
+
+.context-view.tab-group-context-view .tab-group-menu-color.selected,
+.context-view.tab-group-context-view .tab-group-menu-color:focus-visible {
+	outline: var(--vscode-strokeThickness) solid var(--vscode-focusBorder);
+	outline-offset: 2px;
+}
+
+.context-view.tab-group-context-view .tab-group-menu-actions {
+	padding: var(--vscode-spacing-size40) var(--vscode-spacing-size80) var(--vscode-spacing-size80);
+	border-top: var(--vscode-strokeThickness) solid var(--vscode-menu-separatorBackground);
+}
+
+.context-view.tab-group-context-view .tab-group-menu-action {
+	display: grid;
+	grid-template-columns: var(--vscode-spacing-size240) minmax(0, 1fr) auto;
+	align-items: center;
+	box-sizing: border-box;
+	width: 100%;
+	height: 32px;
+	padding: 0 var(--vscode-spacing-size80);
+	border: 0;
+	border-radius: var(--vscode-cornerRadius-small);
+	outline: none;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.context-view.tab-group-context-view .tab-group-menu-action:hover,
+.context-view.tab-group-context-view .tab-group-menu-action:focus-visible {
+	background-color: var(--vscode-menu-selectionBackground);
+	color: var(--vscode-menu-selectionForeground);
+}
+
+.context-view.tab-group-context-view .tab-group-menu-action:disabled {
+	background: transparent;
+	color: var(--vscode-disabledForeground);
+	cursor: default;
+	opacity: 0.64;
+}
+
+.context-view.tab-group-context-view .tab-group-menu-action-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: flex-start;
+	font-size: var(--vscode-codiconFontSize);
+}
+
+.context-view.tab-group-context-view .tab-group-menu-action-label {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.context-view.tab-group-context-view .tab-group-menu-keybinding {
+	padding-left: var(--vscode-spacing-size160);
+	color: var(--vscode-menu-foreground);
+	font-size: var(--vscode-fontSize-label2);
+	opacity: 0.72;
+}
+
+.context-view.tab-group-context-view .tab-group-menu-action:hover .tab-group-menu-keybinding,
+.context-view.tab-group-context-view .tab-group-menu-action:focus-visible .tab-group-menu-keybinding {
+	color: var(--vscode-menu-selectionForeground);
+}
+
+.context-view.tab-group-context-view .tab-group-menu-separator {
+	height: 0;
+	margin: var(--vscode-spacing-size40) calc(-1 * var(--vscode-spacing-size80));
+	border-top: var(--vscode-strokeThickness) solid var(--vscode-menu-separatorBackground);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header {
+		transition: none;
+	}
+
+	.context-view.tab-group-context-view .tab-group-menu-color:hover {
+		transform: none;
+	}
+}

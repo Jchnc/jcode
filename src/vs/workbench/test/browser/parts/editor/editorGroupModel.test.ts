@@ -381,6 +381,73 @@ suite('EditorGroupModel', () => {
 		toDispose.dispose();
 	});
 
+	test('collapsing tab group activates nearest visible editor on the right', () => {
+		const group = createEditorGroupModel();
+		const editors = [input(), input(), input(), input(), input()];
+
+		for (let index = 0; index < editors.length; index++) {
+			group.openEditor(editors[index], { pinned: true, active: index === 2, index });
+		}
+
+		const tabGroup = group.createTabGroup(editors.slice(1, 4), 'Group');
+		assert.ok(tabGroup);
+
+		group.setTabGroupCollapsed(tabGroup.id, true);
+
+		assert.strictEqual(group.activeEditor, editors[4]);
+	});
+
+	test('collapsing tab group activates nearest visible editor on the left when none is visible on the right', () => {
+		const group = createEditorGroupModel();
+		const editors = [input(), input(), input(), input()];
+
+		for (let index = 0; index < editors.length; index++) {
+			group.openEditor(editors[index], { pinned: true, active: index === 2, index });
+		}
+
+		const tabGroup = group.createTabGroup(editors.slice(1), 'Group');
+		assert.ok(tabGroup);
+
+		group.setTabGroupCollapsed(tabGroup.id, true);
+
+		assert.strictEqual(group.activeEditor, editors[0]);
+	});
+
+	test('collapsing tab group skips other collapsed tab groups when activating an editor', () => {
+		const group = createEditorGroupModel();
+		const editors = [input(), input(), input(), input(), input(), input()];
+
+		for (let index = 0; index < editors.length; index++) {
+			group.openEditor(editors[index], { pinned: true, active: index === 2, index });
+		}
+
+		const activeTabGroup = group.createTabGroup(editors.slice(1, 4), 'Active Group');
+		const collapsedTabGroup = group.createTabGroup([editors[4]], 'Collapsed Group');
+		assert.ok(activeTabGroup);
+		assert.ok(collapsedTabGroup);
+		group.setTabGroupCollapsed(collapsedTabGroup.id, true);
+
+		group.setTabGroupCollapsed(activeTabGroup.id, true);
+
+		assert.strictEqual(group.activeEditor, editors[5]);
+	});
+
+	test('collapsing the only visible tab group keeps its active editor', () => {
+		const group = createEditorGroupModel();
+		const editors = [input(), input(), input()];
+
+		for (let index = 0; index < editors.length; index++) {
+			group.openEditor(editors[index], { pinned: true, active: index === 1, index });
+		}
+
+		const tabGroup = group.createTabGroup(editors, 'Group');
+		assert.ok(tabGroup);
+
+		group.setTabGroupCollapsed(tabGroup.id, true);
+
+		assert.strictEqual(group.activeEditor, editors[1]);
+	});
+
 	test('isActive - untyped', () => {
 		const group = createEditorGroupModel();
 		const input = disposables.add(new TestFileEditorInput('testInput', URI.file('fake')));

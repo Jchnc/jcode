@@ -28,6 +28,7 @@ suite('MultiEditorTabsControl', () => {
 
 	let container: HTMLElement;
 	let hostService: TestHostService;
+	let model: EditorGroupModel;
 
 	setup(() => {
 		disposables = new DisposableStore();
@@ -43,7 +44,7 @@ suite('MultiEditorTabsControl', () => {
 
 		hostService = instantiationService.get(IHostService) as TestHostService;
 
-		const model = disposables.add(instantiationService.createInstance(EditorGroupModel, undefined));
+		model = disposables.add(instantiationService.createInstance(EditorGroupModel, undefined));
 		for (let i = 0; i < 2; i++) {
 			const editor = disposables.add(new TestFileEditorInput(URI.file(`/path/file${i}.txt`), 'testEditorInput'));
 			model.openEditor(editor, { pinned: true, active: i === 0 });
@@ -61,6 +62,17 @@ suite('MultiEditorTabsControl', () => {
 			override getEditorByIndex(index: number) { return model.getEditorByIndex(index); }
 			override getIndexOfEditor(editor: EditorInput) { return model.indexOf(editor); }
 			override getEditors(order: EditorsOrder, options?: { excludeSticky?: boolean }) { return model.getEditors(order, options); }
+			override get tabGroups() { return model.tabGroups; }
+			override getTabGroupForEditor(editor: EditorInput) { return model.getTabGroupForEditor(editor); }
+			override createTabGroup(editors: EditorInput[], name?: string, color?: string) { return model.createTabGroup(editors, name, color); }
+			override dissolveTabGroup(groupId: string) { model.dissolveTabGroup(groupId); }
+			override addToTabGroup(groupId: string, editors: EditorInput[]) { model.addToTabGroup(groupId, editors); }
+			override renameTabGroup(groupId: string, name: string) { model.renameTabGroup(groupId, name); }
+			override recolorTabGroup(groupId: string, color: string) { model.recolorTabGroup(groupId, color); }
+			override setTabGroupSaved(groupId: string, saved: boolean) { model.setTabGroupSaved(groupId, saved); }
+			override setTabGroupLocked(groupId: string, locked: boolean) { model.setTabGroupLocked(groupId, locked); }
+			override get canUndoTabGroupAction() { return model.canUndoTabGroupAction; }
+			override undoLastTabGroupAction() { return model.undoLastTabGroupAction(); }
 			override isActive(editor: EditorInput) { return model.isActive(editor); }
 			override isPinned(editorOrIndex: EditorInput | number) { return model.isPinned(editorOrIndex); }
 			override isSticky(editorOrIndex: EditorInput | number) { return model.isSticky(editorOrIndex); }
@@ -121,6 +133,70 @@ suite('MultiEditorTabsControl', () => {
 	function alt(pressed: boolean): void {
 		mainWindow.dispatchEvent(new KeyboardEvent(pressed ? EventType.KEY_DOWN : EventType.KEY_UP, { key: 'Alt', altKey: pressed }));
 	}
+
+	test('tab group context menu exposes identity, colors and group actions', () => {
+		const tabGroup = model.createTabGroup(model.getEditors(EditorsOrder.SEQUENTIAL), 'Work', 'blue');
+		assert.ok(tabGroup);
+
+		const header = container.querySelector<HTMLElement>('.tab-group-header');
+		assert.ok(header);
+		header.dispatchEvent(new MouseEvent(EventType.CONTEXT_MENU, { bubbles: true, cancelable: true, button: 2 }));
+
+		const menu = mainWindow.document.querySelector<HTMLElement>('.context-view.tab-group-context-view .tab-group-context-menu');
+		const nameInput = menu?.querySelector<HTMLInputElement>('.tab-group-menu-name');
+		const colorButtons = Array.from(menu?.querySelectorAll<HTMLButtonElement>('.tab-group-menu-color') ?? []);
+		const actionLabels = Array.from(menu?.querySelectorAll<HTMLElement>('.tab-group-menu-action-label') ?? []).map(element => element.textContent);
+
+		assert.deepStrictEqual({
+			name: nameInput?.value,
+			colors: colorButtons.length,
+			selectedColor: colorButtons.find(button => button.classList.contains('selected'))?.getAttribute('aria-label'),
+			actions: actionLabels
+		}, {
+			name: 'Work',
+			colors: 8,
+			selectedColor: 'Blue',
+			actions: ['New Tab in Group', 'Move Group into New Window', 'Close Group', 'Ungroup Tabs']
+		});
+
+		colorButtons.find(button => button.getAttribute('aria-label') === 'Red')?.click();
+		assert.strictEqual(tabGroup.color, 'red');
+
+		assert.ok(nameInput);
+		nameInput.value = 'Frontend';
+		nameInput.dispatchEvent(new InputEvent(EventType.INPUT, { bubbles: true }));
+		nameInput.dispatchEvent(new KeyboardEvent(EventType.KEY_DOWN, { key: 'Enter', bubbles: true }));
+		assert.strictEqual(tabGroup.name, 'Frontend');
+	});
+
+	test('tab group context menu closes on outside pointer and focus loss', () => {
+		const tabGroup = model.createTabGroup(model.getEditors(EditorsOrder.SEQUENTIAL), 'Work', 'blue');
+		assert.ok(tabGroup);
+
+		const header = container.querySelector<HTMLElement>('.tab-group-header');
+		assert.ok(header);
+
+		const openMenu = () => {
+			header.dispatchEvent(new MouseEvent(EventType.CONTEXT_MENU, { bubbles: true, cancelable: true, button: 2 }));
+			const contextView = mainWindow.document.querySelector<HTMLElement>('.context-view.tab-group-context-view');
+			assert.ok(contextView);
+			assert.notStrictEqual(contextView.style.display, 'none');
+			return contextView;
+		};
+
+		let contextView = openMenu();
+		mainWindow.document.body.dispatchEvent(new PointerEvent(EventType.POINTER_DOWN, { bubbles: true }));
+		assert.strictEqual(contextView.style.display, 'none');
+
+		contextView = openMenu();
+		const nameInput = contextView.querySelector<HTMLInputElement>('.tab-group-menu-name');
+		assert.ok(nameInput);
+		const outside = mainWindow.document.body.appendChild(document.createElement('button'));
+		nameInput.focus();
+		outside.focus();
+		assert.strictEqual(contextView.style.display, 'none');
+		outside.remove();
+	});
 
 	test('Alt swaps the close action of the hovered tab only', () => {
 		const actions = [tabActions()];

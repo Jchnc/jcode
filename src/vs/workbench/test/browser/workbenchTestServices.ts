@@ -127,6 +127,7 @@ import { TextResourceEditor } from '../../browser/parts/editor/textResourceEdito
 import { IPaneCompositePart } from '../../browser/parts/paneCompositePart.js';
 import { EditorExtensions, EditorInputCapabilities, EditorInputWithOptions, EditorPaneSelectionChangeReason, EditorsOrder, EditorExtensions as Extensions, GroupIdentifier, IActiveEditorChangeEvent, IEditorCloseEvent, IEditorFactoryRegistry, IEditorIdentifier, IEditorOpenContext, IEditorPane, IEditorPaneSelection, IEditorPartOptions, IEditorSerializer, IEditorWillMoveEvent, IEditorWillOpenEvent, IFileEditorInput, IMoveResult, IResourceDiffEditorInput, IRevertOptions, ISaveOptions, ITextDiffEditorPane, IToolbarActions, IUntitledTextResourceEditorInput, IUntypedEditorInput, IVisibleEditorPane } from '../../common/editor.js';
 import { IGroupModelChangeEvent } from '../../common/editor/editorGroupModel.js';
+import { IEditorTabGroup } from '../../common/editor/editorTabGroup.js';
 import { EditorInput } from '../../common/editor/editorInput.js';
 import { SideBySideEditorInput } from '../../common/editor/sideBySideEditorInput.js';
 import { TextResourceEditorInput } from '../../common/editor/textResourceEditorInput.js';
@@ -1009,6 +1010,20 @@ export class TestEditorGroupView implements IEditorGroupView {
 	pinEditor(_editor?: EditorInput): void { }
 	stickEditor(editor?: EditorInput | undefined): void { }
 	unstickEditor(editor?: EditorInput | undefined): void { }
+	get tabGroups(): readonly IEditorTabGroup[] { return []; }
+	getTabGroupForEditor(_editor: EditorInput): IEditorTabGroup | undefined { return undefined; }
+	createTabGroup(_editors: EditorInput[], _name?: string, _color?: string): undefined { return undefined; }
+	dissolveTabGroup(_groupId: string): void { }
+	removeFromTabGroup(_editors: EditorInput[]): void { }
+	addToTabGroup(_groupId: string, _editors: EditorInput[]): void { }
+	setTabGroupCollapsed(_groupId: string, _collapsed: boolean): void { }
+	renameTabGroup(_groupId: string, _name: string): void { }
+	recolorTabGroup(_groupId: string, _color: string): void { }
+	moveTabGroup(_groupId: string, _toIndex: number): void { }
+	setTabGroupSaved(_groupId: string, _saved: boolean): void { }
+	setTabGroupLocked(_groupId: string, _locked: boolean): void { }
+	get canUndoTabGroupAction(): boolean { return false; }
+	undoLastTabGroupAction(): boolean { return false; }
 	lock(locked: boolean): void { }
 	focus(): void { }
 	get scopedContextKeyService(): IContextKeyService { throw new Error('not implemented'); }

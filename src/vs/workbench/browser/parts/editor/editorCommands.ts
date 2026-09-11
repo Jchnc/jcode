@@ -22,12 +22,12 @@ import { IInstantiationService, ServicesAccessor } from '../../../../platform/in
 import { KeybindingWeight, KeybindingsRegistry } from '../../../../platform/keybinding/common/keybindingsRegistry.js';
 import { IListService, IOpenEvent, RawWorkbenchListFocusContextKey, WorkbenchTreeFindOpen, WorkbenchTreeStickyScrollFocused } from '../../../../platform/list/browser/listService.js';
 import { IOpenerService } from '../../../../platform/opener/common/opener.js';
-import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
+import { IQuickInputService, IQuickPickItem } from '../../../../platform/quickinput/common/quickInput.js';
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
 import { ActiveGroupEditorsByMostRecentlyUsedQuickAccess } from './editorQuickAccess.js';
 import { SideBySideEditor } from './sideBySideEditor.js';
 import { TextDiffEditor } from './textDiffEditor.js';
-import { ActiveEditorCanSplitInGroupContext, ActiveEditorGroupEmptyContext, ActiveEditorGroupLockedContext, ActiveEditorStickyContext, EditorPartModalContext, EditorPartModalMaximizedContext, EditorPartModalNavigationContext, EditorPartModalSidebarContext, IsSessionsWindowContext, MultipleEditorGroupsContext, SideBySideEditorActiveContext, TextCompareEditorActiveContext } from '../../../common/contextkeys.js';
+import { ActiveEditorCanSplitInGroupContext, ActiveEditorGroupEmptyContext, ActiveEditorGroupLockedContext, ActiveEditorStickyContext, ActiveEditorInTabGroupContext, EditorPartModalContext, EditorPartModalMaximizedContext, EditorPartModalNavigationContext, EditorPartModalSidebarContext, IsSessionsWindowContext, MultipleEditorGroupsContext, SideBySideEditorActiveContext, TextCompareEditorActiveContext } from '../../../common/contextkeys.js';
 import { CloseDirection, EditorInputCapabilities, EditorsOrder, IResourceDiffEditorInput, IUntitledTextResourceEditorInput, isDiffEditorInput, isEditorInputWithOptionsAndGroup } from '../../../common/editor.js';
 import { IMultiDiffEditorOptions } from '../../../../editor/common/multiDiffEditor.js';
 import { EditorInput } from '../../../common/editor/editorInput.js';
@@ -44,8 +44,10 @@ import { IWorkingCopyEditorService } from '../../../services/workingCopy/common/
 import { IWorkingCopyService } from '../../../services/workingCopy/common/workingCopyService.js';
 import { DIFF_FOCUS_OTHER_SIDE, DIFF_FOCUS_PRIMARY_SIDE, DIFF_FOCUS_SECONDARY_SIDE, registerDiffEditorCommands } from './diffEditorCommands.js';
 import { IResolvedEditorCommandsContext, resolveCommandsContext } from './editorCommandsContext.js';
-import { prepareMoveCopyEditors } from './editor.js';
+import { IEditorGroupView, isEditorGroupView, prepareMoveCopyEditors } from './editor.js';
+import { EDITOR_TAB_GROUP_COLORS, getEditorTabGroupColor, IEditorTabGroup } from '../../../common/editor/editorTabGroup.js';
 import { IRange } from '../../../../editor/common/core/range.js';
+import { IHistoryService } from '../../../services/history/common/history.js';
 
 export const CLOSE_SAVED_EDITORS_COMMAND_ID = 'workbench.action.closeUnmodifiedEditors';
 export const CLOSE_EDITORS_IN_GROUP_COMMAND_ID = 'workbench.action.closeEditorsInGroup';
@@ -70,6 +72,23 @@ export const REOPEN_ACTIVE_EDITOR_WITH_COMMAND_ID = 'reopenActiveEditorWith';
 
 export const PIN_EDITOR_COMMAND_ID = 'workbench.action.pinEditor';
 export const UNPIN_EDITOR_COMMAND_ID = 'workbench.action.unpinEditor';
+
+export const ADD_TO_NEW_TAB_GROUP_COMMAND_ID = 'workbench.action.editor.addToNewTabGroup';
+export const REMOVE_FROM_TAB_GROUP_COMMAND_ID = 'workbench.action.editor.removeFromTabGroup';
+export const DISSOLVE_TAB_GROUP_COMMAND_ID = 'workbench.action.editor.dissolveTabGroup';
+export const COLLAPSE_TAB_GROUP_COMMAND_ID = 'workbench.action.editor.collapseTabGroup';
+export const EXPAND_TAB_GROUP_COMMAND_ID = 'workbench.action.editor.expandTabGroup';
+export const RENAME_TAB_GROUP_COMMAND_ID = 'workbench.action.editor.renameTabGroup';
+export const RECOLOR_TAB_GROUP_COMMAND_ID = 'workbench.action.editor.recolorTabGroup';
+export const MOVE_TO_TAB_GROUP_COMMAND_ID = 'workbench.action.editor.moveToTabGroup';
+export const CLOSE_TAB_GROUP_COMMAND_ID = 'workbench.action.editor.closeTabGroup';
+export const SAVE_TAB_GROUP_COMMAND_ID = 'workbench.action.editor.saveTabGroup';
+export const UNSAVE_TAB_GROUP_COMMAND_ID = 'workbench.action.editor.unsaveTabGroup';
+export const LOCK_TAB_GROUP_COMMAND_ID = 'workbench.action.editor.lockTabGroup';
+export const UNLOCK_TAB_GROUP_COMMAND_ID = 'workbench.action.editor.unlockTabGroup';
+export const OPEN_SAVED_TAB_GROUP_COMMAND_ID = 'workbench.action.editor.openSavedTabGroup';
+export const DELETE_SAVED_TAB_GROUP_COMMAND_ID = 'workbench.action.editor.deleteSavedTabGroup';
+export const UNDO_TAB_GROUP_ACTION_COMMAND_ID = 'workbench.action.editor.undoTabGroupAction';
 
 export const SPLIT_EDITOR = 'workbench.action.splitEditor';
 export const SPLIT_EDITOR_UP = 'workbench.action.splitEditorUp';
@@ -1447,6 +1466,409 @@ function registerOtherEditorCommands(): void {
 	});
 }
 
+export function getTabGroupMembers(groupView: IEditorGroupView, groupId: string): EditorInput[] {
+	return groupView.getEditors(EditorsOrder.SEQUENTIAL).filter(editor => groupView.getTabGroupForEditor(editor)?.id === groupId);
+}
+
+export async function pickTabGroupName(quickInputService: IQuickInputService, currentName: string): Promise<string | undefined> {
+	return quickInputService.input({
+		prompt: localize('tabGroup.namePrompt', 'Enter a name for the tab group'),
+		value: currentName,
+		validateInput: async value => value.trim().length > 0 ? null : localize('tabGroup.nameRequired', 'A name is required')
+	});
+}
+
+export async function pickTabGroupColor(quickInputService: IQuickInputService, currentColor?: string): Promise<string | undefined> {
+	type TabGroupColorPick = IQuickPickItem & { id: string };
+
+	const picks: TabGroupColorPick[] = [
+		...EDITOR_TAB_GROUP_COLORS.map(color => ({ id: color.id, label: color.id })),
+		{ id: 'custom', label: localize('tabGroup.colorCustom', 'Custom…') }
+	];
+
+	const pick = await quickInputService.pick(picks, {
+		placeHolder: localize('tabGroup.colorPlaceHolder', 'Select a group color'),
+		matchOnDescription: true
+	});
+	if (!pick) {
+		return undefined;
+	}
+
+	if (pick.id === 'custom') {
+		const value = await quickInputService.input({
+			prompt: localize('tabGroup.colorCustomPrompt', 'Enter a custom color (#hex or rgb(...))'),
+			value: currentColor && getEditorTabGroupColor(currentColor) || '',
+			validateInput: async input => /^(#[0-9a-fA-F]{3,8}|rgb\(.*\)|rgba\(.*\)|[a-z]+)$/.test(input.trim()) ? null : localize('tabGroup.colorInvalid', 'Invalid color. Use #hex or rgb(...).')
+		});
+
+		return value ? value.trim() : undefined;
+	}
+
+	return pick.id;
+}
+
+type MoveTabGroupTarget =
+	| { kind: 'newGroup' }
+	| { kind: 'removeFromGroup' }
+	| { kind: 'group'; groupId: string };
+
+export async function pickMoveTabGroupTarget(quickInputService: IQuickInputService, groups: readonly IEditorTabGroup[], activeGroup: IEditorTabGroup | undefined): Promise<MoveTabGroupTarget | undefined> {
+	type Pick = IQuickPickItem & { target?: MoveTabGroupTarget };
+
+	const picks: Pick[] = [
+		{ label: localize('tabGroup.moveNewGroup', 'New Group'), target: { kind: 'newGroup' } },
+		...groups
+			.filter(group => group !== activeGroup)
+			.map(group => ({ label: group.name || group.color, target: { kind: 'group' as const, groupId: group.id } }))
+	];
+
+	if (activeGroup) {
+		picks.push({ label: localize('tabGroup.moveRemoveFromGroup', 'Remove from Group'), target: { kind: 'removeFromGroup' } });
+	}
+
+	const pick = await quickInputService.pick(picks, {
+		placeHolder: localize('tabGroup.movePlaceHolder', 'Move selected tabs to a tab group'),
+		matchOnDescription: true
+	});
+
+	return pick?.target;
+}
+
+function registerTabGroupCommands(): void {
+	function getActiveTabGroup(accessor: ServicesAccessor, args: unknown[]): { group: IEditorGroupView; tabGroup: IEditorTabGroup } | undefined {
+		const resolvedContext = resolveCommandsContext(args, accessor.get(IEditorService), accessor.get(IEditorGroupsService), accessor.get(IListService));
+		const group = resolvedContext.groupedEditors[0]?.group;
+		if (!isEditorGroupView(group)) {
+			return undefined;
+		}
+		const editor = resolvedContext.groupedEditors[0].editors[0] ?? group.activeEditor ?? undefined;
+		const tabGroup = editor ? group.getTabGroupForEditor(editor) : undefined;
+		return tabGroup ? { group, tabGroup } : undefined;
+	}
+
+	registerAction2(class extends Action2 {
+		constructor() {
+			super({
+				id: ADD_TO_NEW_TAB_GROUP_COMMAND_ID,
+				title: localize2('addToNewTabGroup', 'Add to New Tab Group'),
+				category: Categories.View,
+				f1: true,
+				precondition: ActiveEditorStickyContext.toNegated()
+			});
+		}
+		async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
+			const resolvedContext = resolveCommandsContext(args, accessor.get(IEditorService), accessor.get(IEditorGroupsService), accessor.get(IListService));
+			for (const { group, editors } of resolvedContext.groupedEditors) {
+				if (isEditorGroupView(group)) {
+					group.createTabGroup(editors);
+				}
+			}
+		}
+	});
+
+	for (const action of [
+		{ id: SAVE_TAB_GROUP_COMMAND_ID, title: localize2('saveTabGroup', 'Save Tab Group'), saved: true },
+		{ id: UNSAVE_TAB_GROUP_COMMAND_ID, title: localize2('unsaveTabGroup', 'Stop Saving Tab Group'), saved: false }
+	]) {
+		registerAction2(class extends Action2 {
+			constructor() {
+				super({ id: action.id, title: action.title, category: Categories.View, f1: true, precondition: ActiveEditorInTabGroupContext });
+			}
+			run(accessor: ServicesAccessor, ...args: unknown[]): void {
+				const active = getActiveTabGroup(accessor, args);
+				if (active) {
+					active.group.setTabGroupSaved(active.tabGroup.id, action.saved);
+				}
+			}
+		});
+	}
+
+	for (const action of [
+		{ id: LOCK_TAB_GROUP_COMMAND_ID, title: localize2('lockTabGroup', 'Lock Tab Group'), locked: true },
+		{ id: UNLOCK_TAB_GROUP_COMMAND_ID, title: localize2('unlockTabGroup', 'Unlock Tab Group'), locked: false }
+	]) {
+		registerAction2(class extends Action2 {
+			constructor() {
+				super({ id: action.id, title: action.title, category: Categories.View, f1: true, precondition: ActiveEditorInTabGroupContext });
+			}
+			run(accessor: ServicesAccessor, ...args: unknown[]): void {
+				const active = getActiveTabGroup(accessor, args);
+				if (active) {
+					active.group.setTabGroupLocked(active.tabGroup.id, action.locked);
+				}
+			}
+		});
+	}
+
+	registerAction2(class extends Action2 {
+		constructor() {
+			super({ id: UNDO_TAB_GROUP_ACTION_COMMAND_ID, title: localize2('undoTabGroupAction', 'Undo Last Tab Group Change'), category: Categories.View, f1: true });
+		}
+		run(accessor: ServicesAccessor): void {
+			const group = accessor.get(IEditorGroupsService).activeGroup;
+			if (isEditorGroupView(group)) {
+				group.undoLastTabGroupAction();
+			}
+		}
+	});
+
+	registerAction2(class extends Action2 {
+		constructor() {
+			super({ id: OPEN_SAVED_TAB_GROUP_COMMAND_ID, title: localize2('openSavedTabGroup', 'Open Saved Tab Group…'), category: Categories.View, f1: true });
+		}
+		async run(accessor: ServicesAccessor): Promise<void> {
+			const historyService = accessor.get(IHistoryService);
+			const groups = historyService.getSavedTabGroups();
+			const pick = await accessor.get(IQuickInputService).pick(groups.map(group => ({
+				label: group.name,
+				description: localize('savedTabGroupCount', '{0} tabs', group.editors.length),
+				groupId: group.id
+			})), { placeHolder: groups.length ? localize('openSavedTabGroupPlaceholder', 'Select a saved tab group to open') : localize('noSavedTabGroups', 'There are no closed saved tab groups') });
+			if (pick) {
+				await historyService.reopenSavedTabGroup(pick.groupId);
+			}
+		}
+	});
+
+	registerAction2(class extends Action2 {
+		constructor() {
+			super({ id: DELETE_SAVED_TAB_GROUP_COMMAND_ID, title: localize2('deleteSavedTabGroup', 'Delete Saved Tab Group…'), category: Categories.View, f1: true });
+		}
+		async run(accessor: ServicesAccessor): Promise<void> {
+			const historyService = accessor.get(IHistoryService);
+			const groups = historyService.getSavedTabGroups();
+			const pick = await accessor.get(IQuickInputService).pick(groups.map(group => ({ label: group.name, groupId: group.id })), {
+				placeHolder: groups.length ? localize('deleteSavedTabGroupPlaceholder', 'Select a saved tab group to delete') : localize('noSavedTabGroups', 'There are no closed saved tab groups')
+			});
+			if (pick) {
+				historyService.deleteSavedTabGroup(pick.groupId);
+			}
+		}
+	});
+
+	registerAction2(class extends Action2 {
+		constructor() {
+			super({
+				id: REMOVE_FROM_TAB_GROUP_COMMAND_ID,
+				title: localize2('removeFromTabGroup', 'Remove from Tab Group'),
+				category: Categories.View,
+				f1: true,
+				precondition: ActiveEditorInTabGroupContext
+			});
+		}
+		async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
+			const resolvedContext = resolveCommandsContext(args, accessor.get(IEditorService), accessor.get(IEditorGroupsService), accessor.get(IListService));
+			for (const { group, editors } of resolvedContext.groupedEditors) {
+				if (isEditorGroupView(group)) {
+					group.removeFromTabGroup(editors);
+				}
+			}
+		}
+	});
+
+	registerAction2(class extends Action2 {
+		constructor() {
+			super({
+				id: DISSOLVE_TAB_GROUP_COMMAND_ID,
+				title: localize2('dissolveTabGroup', 'Ungroup Tabs'),
+				category: Categories.View,
+				f1: true,
+				precondition: ActiveEditorInTabGroupContext
+			});
+		}
+		async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
+			const resolvedContext = resolveCommandsContext(args, accessor.get(IEditorService), accessor.get(IEditorGroupsService), accessor.get(IListService));
+			const seenGroups = new Set<string>();
+			for (const { group, editors } of resolvedContext.groupedEditors) {
+				if (!isEditorGroupView(group)) {
+					continue;
+				}
+				for (const editor of editors) {
+					const tabGroup = group.getTabGroupForEditor(editor);
+					if (tabGroup && !seenGroups.has(tabGroup.id)) {
+						seenGroups.add(tabGroup.id);
+						group.dissolveTabGroup(tabGroup.id);
+					}
+				}
+			}
+		}
+	});
+
+	function setTabGroupCollapsed(accessor: ServicesAccessor, collapsed: boolean, ...args: unknown[]): void {
+		const resolvedContext = resolveCommandsContext(args, accessor.get(IEditorService), accessor.get(IEditorGroupsService), accessor.get(IListService));
+		const group = resolvedContext.groupedEditors[0]?.group;
+		if (!isEditorGroupView(group)) {
+			return;
+		}
+		const editor = resolvedContext.groupedEditors[0].editors[0] ?? group.activeEditor ?? undefined;
+		const tabGroup = editor ? group.getTabGroupForEditor(editor) : undefined;
+		if (tabGroup) {
+			group.setTabGroupCollapsed(tabGroup.id, collapsed);
+		}
+	}
+
+	registerAction2(class extends Action2 {
+		constructor() {
+			super({
+				id: COLLAPSE_TAB_GROUP_COMMAND_ID,
+				title: localize2('collapseTabGroup', 'Collapse Tab Group'),
+				category: Categories.View,
+				precondition: ActiveEditorInTabGroupContext
+			});
+		}
+		async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
+			setTabGroupCollapsed(accessor, true, ...args);
+		}
+	});
+
+	registerAction2(class extends Action2 {
+		constructor() {
+			super({
+				id: EXPAND_TAB_GROUP_COMMAND_ID,
+				title: localize2('expandTabGroup', 'Expand Tab Group'),
+				category: Categories.View,
+				precondition: ActiveEditorInTabGroupContext
+			});
+		}
+		async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
+			setTabGroupCollapsed(accessor, false, ...args);
+		}
+	});
+
+	registerAction2(class extends Action2 {
+		constructor() {
+			super({
+				id: RENAME_TAB_GROUP_COMMAND_ID,
+				title: localize2('renameTabGroup', 'Rename Tab Group'),
+				category: Categories.View,
+				f1: true,
+				precondition: ActiveEditorInTabGroupContext
+			});
+		}
+		async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
+			const quickInputService = accessor.get(IQuickInputService);
+			const resolvedContext = resolveCommandsContext(args, accessor.get(IEditorService), accessor.get(IEditorGroupsService), accessor.get(IListService));
+			const group = resolvedContext.groupedEditors[0]?.group;
+			if (!isEditorGroupView(group)) {
+				return;
+			}
+			const editor = resolvedContext.groupedEditors[0].editors[0] ?? group.activeEditor ?? undefined;
+			const tabGroup = editor ? group.getTabGroupForEditor(editor) : undefined;
+			if (!tabGroup) {
+				return;
+			}
+			const name = await pickTabGroupName(quickInputService, tabGroup.name);
+			if (name) {
+				group.renameTabGroup(tabGroup.id, name.trim());
+			}
+		}
+	});
+
+	registerAction2(class extends Action2 {
+		constructor() {
+			super({
+				id: RECOLOR_TAB_GROUP_COMMAND_ID,
+				title: localize2('recolorTabGroup', 'Change Group Color'),
+				category: Categories.View,
+				f1: true,
+				precondition: ActiveEditorInTabGroupContext
+			});
+		}
+		async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
+			const quickInputService = accessor.get(IQuickInputService);
+			const resolvedContext = resolveCommandsContext(args, accessor.get(IEditorService), accessor.get(IEditorGroupsService), accessor.get(IListService));
+			const group = resolvedContext.groupedEditors[0]?.group;
+			if (!isEditorGroupView(group)) {
+				return;
+			}
+			const editor = resolvedContext.groupedEditors[0].editors[0] ?? group.activeEditor ?? undefined;
+			const tabGroup = editor ? group.getTabGroupForEditor(editor) : undefined;
+			if (!tabGroup) {
+				return;
+			}
+			const color = await pickTabGroupColor(quickInputService, tabGroup.color);
+			if (color) {
+				group.recolorTabGroup(tabGroup.id, color);
+			}
+		}
+	});
+
+	registerAction2(class extends Action2 {
+		constructor() {
+			super({
+				id: MOVE_TO_TAB_GROUP_COMMAND_ID,
+				title: localize2('moveToTabGroup', 'Move to Tab Group…'),
+				category: Categories.View,
+				f1: true,
+				precondition: ActiveEditorStickyContext.toNegated()
+			});
+		}
+		async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
+			const quickInputService = accessor.get(IQuickInputService);
+			const resolvedContext = resolveCommandsContext(args, accessor.get(IEditorService), accessor.get(IEditorGroupsService), accessor.get(IListService));
+			const group = resolvedContext.groupedEditors[0]?.group;
+			if (!isEditorGroupView(group)) {
+				return;
+			}
+			const editors = resolvedContext.groupedEditors[0].editors;
+			if (editors.length === 0) {
+				return;
+			}
+			const activeGroup = group.getTabGroupForEditor(editors[0]);
+			const target = await pickMoveTabGroupTarget(quickInputService, group.tabGroups, activeGroup);
+			if (!target) {
+				return;
+			}
+			if (target.kind === 'newGroup') {
+				group.createTabGroup(editors);
+			} else if (target.kind === 'removeFromGroup') {
+				group.removeFromTabGroup(editors);
+			} else {
+				group.addToTabGroup(target.groupId, editors);
+			}
+		}
+	});
+
+	registerAction2(class extends Action2 {
+		constructor() {
+			super({
+				id: CLOSE_TAB_GROUP_COMMAND_ID,
+				title: localize2('closeTabGroup', 'Close Group'),
+				category: Categories.View,
+				f1: true,
+				precondition: ActiveEditorInTabGroupContext
+			});
+		}
+		async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
+			const resolvedContext = resolveCommandsContext(args, accessor.get(IEditorService), accessor.get(IEditorGroupsService), accessor.get(IListService));
+			const historyService = accessor.get(IHistoryService);
+			const seenGroups = new Set<string>();
+			for (const { group, editors } of resolvedContext.groupedEditors) {
+				if (!isEditorGroupView(group)) {
+					continue;
+				}
+				for (const editor of editors) {
+					const tabGroup = group.getTabGroupForEditor(editor);
+					if (!tabGroup) {
+						continue;
+					}
+					if (tabGroup.locked || seenGroups.has(tabGroup.id)) {
+						continue;
+					}
+					seenGroups.add(tabGroup.id);
+					const members = getTabGroupMembers(group, tabGroup.id);
+					const savedEditors = members.map(member => ({ editor: member, index: group.getIndexOfEditor(member) }));
+					const closed = await group.closeEditors(members, { preserveFocus: resolvedContext.preserveFocus });
+					if (closed && tabGroup.saved) {
+						historyService.saveClosedTabGroup(tabGroup, savedEditors);
+					}
+					break;
+				}
+			}
+		}
+	});
+}
+
 function registerModalEditorCommands(): void {
 
 	registerAction2(class extends Action2 {
@@ -1699,4 +2121,5 @@ export function setup(): void {
 	registerSplitEditorCommands();
 	registerFocusEditorGroupWihoutWrapCommands();
 	registerModalEditorCommands();
+	registerTabGroupCommands();
 }

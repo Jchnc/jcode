@@ -12,6 +12,8 @@ import { IConfigurationChangeEvent, IConfigurationService } from '../../../platf
 import { dispose, Disposable, DisposableStore } from '../../../base/common/lifecycle.js';
 import { Registry } from '../../../platform/registry/common/platform.js';
 import { coalesce } from '../../../base/common/arrays.js';
+import { DEFAULT_EDITOR_TAB_GROUP_COLOR, getRandomEditorTabGroupColor, IEditorTabGroup, IEditorTabGroupCreateOptions } from './editorTabGroup.js';
+import { localize } from '../../../nls.js';
 
 const EditorOpenPositioning = {
 	LEFT: 'left',
@@ -40,6 +42,18 @@ export interface ISerializedEditorInput {
 	readonly value: string;
 }
 
+export interface ISerializedEditorTabGroup {
+	readonly id: string;
+	readonly name: string;
+	readonly color: string;
+	readonly collapsed?: boolean;
+	readonly saved?: boolean;
+	readonly locked?: boolean;
+	readonly icon?: string;
+	readonly metadata?: Record<string, unknown>;
+	readonly members: number[];
+}
+
 export interface ISerializedEditorGroupModel {
 	readonly id: number;
 	readonly locked?: boolean;
@@ -47,6 +61,7 @@ export interface ISerializedEditorGroupModel {
 	readonly mru: number[];
 	readonly preview?: number;
 	sticky?: number;
+	readonly tabGroups?: ISerializedEditorTabGroup[];
 }
 
 export function isSerializedEditorGroupModel(group?: unknown): group is ISerializedEditorGroupModel {
@@ -74,6 +89,12 @@ export interface IGroupModelChangeEvent {
 	 * is about.
 	 */
 	readonly editorIndex?: number;
+
+	/**
+	 * Only applies when a tab group changes providing
+	 * access to the group the event is about.
+	 */
+	readonly tabGroup?: IEditorTabGroup;
 }
 
 export interface IGroupEditorChangeEvent extends IGroupModelChangeEvent {
@@ -172,6 +193,9 @@ export interface IReadonlyEditorGroupModel {
 	isLast(editor: EditorInput, editors?: EditorInput[]): boolean;
 	findEditor(editor: EditorInput | null, options?: IMatchEditorOptions): [EditorInput, number /* index */] | undefined;
 	contains(editor: EditorInput | IUntypedEditorInput, options?: IMatchEditorOptions): boolean;
+
+	readonly tabGroups: readonly IEditorTabGroup[];
+	getTabGroupForEditor(editor: EditorInput): IEditorTabGroup | undefined;
 }
 
 interface IEditorGroupModel extends IReadonlyEditorGroupModel {
@@ -180,6 +204,24 @@ interface IEditorGroupModel extends IReadonlyEditorGroupModel {
 	moveEditor(editor: EditorInput, toIndex: number): EditorInput | undefined;
 	setActive(editor: EditorInput | undefined): EditorInput | undefined;
 	setSelection(activeSelectedEditor: EditorInput, inactiveSelectedEditors: EditorInput[]): void;
+
+	createTabGroup(editors: EditorInput[], name?: string, color?: string, options?: IEditorTabGroupCreateOptions): IEditorTabGroup | undefined;
+	dissolveTabGroup(groupId: string): void;
+	removeFromTabGroup(editors: EditorInput[]): void;
+	addToTabGroup(groupId: string, editors: EditorInput[]): void;
+	setTabGroupCollapsed(groupId: string, collapsed: boolean): void;
+	renameTabGroup(groupId: string, name: string): void;
+	recolorTabGroup(groupId: string, color: string): void;
+	moveTabGroup(groupId: string, toIndex: number): void;
+	setTabGroupSaved(groupId: string, saved: boolean): void;
+	setTabGroupLocked(groupId: string, locked: boolean): void;
+	readonly canUndoTabGroupAction: boolean;
+	undoLastTabGroupAction(): boolean;
+}
+
+let TAB_GROUP_ID_COUNTER = 0;
+function generateTabGroupId(): string {
+	return `editor.tabGroup.${TAB_GROUP_ID_COUNTER++}`;
 }
 
 export class EditorGroupModel extends Disposable implements IEditorGroupModel {
@@ -212,6 +254,10 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 	private preview: EditorInput | null = null; 			// editor in preview state
 	private sticky = -1;									// index of first editor in sticky state
 	private readonly transient = new Set<EditorInput>(); 	// editors in transient state
+
+	private _tabGroups: IEditorTabGroup[] = [];						// ordered tab groups
+	private readonly editorTabGroups = new Map<EditorInput, string>();	// editor -> tab group id
+	private readonly tabGroupUndoStack: { groups: IEditorTabGroup[]; membership: Map<EditorInput, string>; editors: EditorInput[] }[] = [];
 
 	private editorOpenPositioning: ('left' | 'right' | 'first' | 'last') | undefined;
 	private focusRecentEditorAfterClose: boolean | undefined;
@@ -578,6 +624,13 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 
 		// Remove from transient
 		this.transient.delete(editor);
+
+		// Remove from tab group (if any) and prune empty groups
+		const tabGroupId = this.editorTabGroups.get(editor);
+		if (tabGroupId) {
+			this.editorTabGroups.delete(editor);
+			this.pruneTabGroup(tabGroupId);
+		}
 
 		// Remove from arrays
 		this.splice(index, true);
@@ -1142,6 +1195,333 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 		}
 	}
 
+	//#region Tab Groups
+
+	get tabGroups(): readonly IEditorTabGroup[] {
+		return this._tabGroups;
+	}
+
+	getTabGroupForEditor(editor: EditorInput): IEditorTabGroup | undefined {
+		const groupId = this.editorTabGroups.get(editor);
+		if (!groupId) {
+			return undefined;
+		}
+
+		return this._tabGroups.find(group => group.id === groupId);
+	}
+
+	private getTabGroup(groupId: string): IEditorTabGroup | undefined {
+		return this._tabGroups.find(group => group.id === groupId);
+	}
+
+	createTabGroup(editors: EditorInput[], name?: string, color?: string, options?: IEditorTabGroupCreateOptions): IEditorTabGroup | undefined {
+		// Editors must be present, non-sticky and not already part of a group
+		const candidates = editors.filter(editor => {
+			const index = this.indexOf(editor);
+			return index >= 0 && !this.isSticky(index) && !this.editorTabGroups.has(editor);
+		});
+		if (candidates.length === 0) {
+			return undefined;
+		}
+
+		if (!options?.skipUndo) {
+			this.pushTabGroupUndoState();
+		}
+
+		let id = options?.id ?? generateTabGroupId();
+		while (this.getTabGroup(id)) {
+			id = generateTabGroupId();
+		}
+		const group: IEditorTabGroup = {
+			id,
+			name: name?.trim() || localize('defaultTabGroupName', "Tab Group"),
+			color: color || getRandomEditorTabGroupColor(),
+			collapsed: !!options?.collapsed,
+			saved: !!options?.saved,
+			locked: !!options?.locked,
+			icon: options?.icon,
+			metadata: options?.metadata
+		};
+
+		this._tabGroups.push(group);
+		for (const editor of candidates) {
+			this.editorTabGroups.set(editor, group.id);
+		}
+
+		this._onDidModelChange.fire({ kind: GroupModelChangeKind.TAB_GROUP_CREATED, tabGroup: group });
+
+		return group;
+	}
+
+	dissolveTabGroup(groupId: string): void {
+		const group = this.getTabGroup(groupId);
+		if (!group) {
+			return;
+		}
+		if (group.locked) {
+			return;
+		}
+
+		this.pushTabGroupUndoState();
+
+		for (const [editor, id] of this.editorTabGroups) {
+			if (id === groupId) {
+				this.editorTabGroups.delete(editor);
+			}
+		}
+
+		this._tabGroups = this._tabGroups.filter(candidate => candidate.id !== groupId);
+
+		this._onDidModelChange.fire({ kind: GroupModelChangeKind.TAB_GROUP_REMOVED, tabGroup: group });
+	}
+
+	removeFromTabGroup(editors: EditorInput[]): void {
+		const affectedGroups = new Set<IEditorTabGroup>();
+		const removableEditors = editors.filter(editor => {
+			const group = this.getTabGroupForEditor(editor);
+			return !!group && !group.locked;
+		});
+		if (removableEditors.length === 0) {
+			return;
+		}
+
+		this.pushTabGroupUndoState();
+
+		for (const editor of removableEditors) {
+			const group = this.getTabGroupForEditor(editor);
+			if (!group) {
+				continue;
+			}
+
+			this.editorTabGroups.delete(editor);
+			affectedGroups.add(group);
+		}
+
+		for (const group of affectedGroups) {
+			this.pruneTabGroup(group.id);
+			this._onDidModelChange.fire({ kind: GroupModelChangeKind.TAB_GROUP_CHANGED, tabGroup: group });
+		}
+	}
+
+	addToTabGroup(groupId: string, editors: EditorInput[]): void {
+		const group = this.getTabGroup(groupId);
+		if (!group || group.locked) {
+			return;
+		}
+
+		const candidates = editors.filter(editor => {
+			const index = this.indexOf(editor);
+			if (index < 0 || this.isSticky(index)) {
+				return false;
+			}
+
+			const existingGroupId = this.editorTabGroups.get(editor);
+			if (existingGroupId === groupId) {
+				return false;
+			}
+			return !existingGroupId || !this.getTabGroup(existingGroupId)?.locked;
+		});
+		if (candidates.length === 0) {
+			return;
+		}
+
+		this.pushTabGroupUndoState();
+		const affectedGroups = new Set<IEditorTabGroup>();
+		for (const editor of candidates) {
+			const existingGroupId = this.editorTabGroups.get(editor);
+
+			if (existingGroupId) {
+				const existingGroup = this.getTabGroup(existingGroupId);
+				if (existingGroup) {
+					affectedGroups.add(existingGroup);
+				}
+				this.editorTabGroups.delete(editor);
+			}
+
+			this.editorTabGroups.set(editor, groupId);
+		}
+
+		for (const affectedGroup of affectedGroups) {
+			this.pruneTabGroup(affectedGroup.id);
+		}
+		this._onDidModelChange.fire({ kind: GroupModelChangeKind.TAB_GROUP_CHANGED, tabGroup: group });
+	}
+
+	setTabGroupCollapsed(groupId: string, collapsed: boolean): void {
+		const group = this.getTabGroup(groupId);
+		if (!group || group.collapsed === collapsed) {
+			return;
+		}
+		this.pushTabGroupUndoState();
+
+		group.collapsed = collapsed;
+
+		if (collapsed && this.activeEditor && this.editorTabGroups.get(this.activeEditor) === groupId) {
+			const activeEditorIndex = this.indexOf(this.activeEditor);
+			const nextActiveEditor = this.findVisibleEditor(activeEditorIndex + 1, 1, groupId) ?? this.findVisibleEditor(activeEditorIndex - 1, -1, groupId);
+
+			if (nextActiveEditor) {
+				this.setSelection(nextActiveEditor, []);
+			}
+		}
+
+		this._onDidModelChange.fire({ kind: GroupModelChangeKind.TAB_GROUP_CHANGED, tabGroup: group });
+	}
+
+	private findVisibleEditor(startIndex: number, direction: -1 | 1, excludedTabGroupId: string): EditorInput | undefined {
+		for (let index = startIndex; index >= 0 && index < this.editors.length; index += direction) {
+			const editor = this.editors[index];
+			const editorTabGroup = this.getTabGroupForEditor(editor);
+			if (editorTabGroup?.id !== excludedTabGroupId && editorTabGroup?.collapsed !== true) {
+				return editor;
+			}
+		}
+
+		return undefined;
+	}
+
+	renameTabGroup(groupId: string, name: string): void {
+		const group = this.getTabGroup(groupId);
+		if (!group || group.name === name) {
+			return;
+		}
+		this.pushTabGroupUndoState();
+
+		group.name = name;
+		this._onDidModelChange.fire({ kind: GroupModelChangeKind.TAB_GROUP_CHANGED, tabGroup: group });
+	}
+
+	recolorTabGroup(groupId: string, color: string): void {
+		const group = this.getTabGroup(groupId);
+		if (!group || group.color === color) {
+			return;
+		}
+		this.pushTabGroupUndoState();
+
+		group.color = color;
+		this._onDidModelChange.fire({ kind: GroupModelChangeKind.TAB_GROUP_CHANGED, tabGroup: group });
+	}
+
+	moveTabGroup(groupId: string, toIndex: number): void {
+		const group = this.getTabGroup(groupId);
+		if (!group || group.locked) {
+			return;
+		}
+
+		// Collect the group's editors in their current visual order
+		const groupEditors = this.editors.filter(editor => this.editorTabGroups.get(editor) === groupId);
+		if (groupEditors.length === 0) {
+			return;
+		}
+
+		// The drop index refers to the current list. Account for group members
+		// that disappear before that boundary when we remove the group.
+		const clampedTargetIndex = Math.max(0, Math.min(toIndex, this.editors.length));
+		const removedBeforeTarget = groupEditors.reduce((count, editor) => count + (this.editors.indexOf(editor) < clampedTargetIndex ? 1 : 0), 0);
+		let insertIndex = clampedTargetIndex - removedBeforeTarget;
+		if (insertIndex <= this.sticky) {
+			insertIndex = this.sticky + 1;
+		}
+
+		const remainingEditors = this.editors.filter(editor => this.editorTabGroups.get(editor) !== groupId);
+		const reorderedEditors = remainingEditors.toSpliced(insertIndex, 0, ...groupEditors);
+		if (reorderedEditors.every((editor, index) => editor === this.editors[index])) {
+			return;
+		}
+
+		this.pushTabGroupUndoState();
+
+		// Remove the group's editors from the current order
+		for (const editor of groupEditors) {
+			const index = this.editors.indexOf(editor);
+			if (index >= 0) {
+				this.editors.splice(index, 1);
+			}
+		}
+
+		// Re-insert them contiguously at the adjusted target index
+		this.editors.splice(insertIndex, 0, ...groupEditors);
+
+		this._onDidModelChange.fire({ kind: GroupModelChangeKind.TAB_GROUP_CHANGED, tabGroup: group });
+	}
+
+	setTabGroupSaved(groupId: string, saved: boolean): void {
+		const group = this.getTabGroup(groupId);
+		if (!group || group.saved === saved) {
+			return;
+		}
+		this.pushTabGroupUndoState();
+		group.saved = saved;
+		this._onDidModelChange.fire({ kind: GroupModelChangeKind.TAB_GROUP_CHANGED, tabGroup: group });
+	}
+
+	setTabGroupLocked(groupId: string, locked: boolean): void {
+		const group = this.getTabGroup(groupId);
+		if (!group || group.locked === locked) {
+			return;
+		}
+		this.pushTabGroupUndoState();
+		group.locked = locked;
+		this._onDidModelChange.fire({ kind: GroupModelChangeKind.TAB_GROUP_CHANGED, tabGroup: group });
+	}
+
+	get canUndoTabGroupAction(): boolean {
+		return this.tabGroupUndoStack.length > 0;
+	}
+
+	undoLastTabGroupAction(): boolean {
+		const snapshot = this.tabGroupUndoStack.pop();
+		if (!snapshot) {
+			return false;
+		}
+
+		const currentEditors = new Set(this.editors);
+		const restoredOrder = snapshot.editors.filter(editor => currentEditors.has(editor));
+		for (const editor of this.editors) {
+			if (!restoredOrder.includes(editor)) {
+				restoredOrder.push(editor);
+			}
+		}
+		this.editors = restoredOrder;
+		this._tabGroups = snapshot.groups.map(group => ({ ...group }));
+		this.editorTabGroups.clear();
+		const restoredGroupIds = new Set(this._tabGroups.map(group => group.id));
+		for (const [editor, groupId] of snapshot.membership) {
+			if (currentEditors.has(editor) && restoredGroupIds.has(groupId)) {
+				this.editorTabGroups.set(editor, groupId);
+			}
+		}
+
+		this._onDidModelChange.fire({ kind: GroupModelChangeKind.TAB_GROUP_CHANGED });
+		return true;
+	}
+
+	private pushTabGroupUndoState(): void {
+		this.tabGroupUndoStack.push({
+			groups: this._tabGroups.map(group => ({ ...group })),
+			membership: new Map(this.editorTabGroups),
+			editors: this.editors.slice()
+		});
+		if (this.tabGroupUndoStack.length > 20) {
+			this.tabGroupUndoStack.shift();
+		}
+	}
+
+	private pruneTabGroup(groupId: string): void {
+		const group = this.getTabGroup(groupId);
+		if (!group) {
+			return;
+		}
+
+		const hasMembers = [...this.editorTabGroups.values()].some(id => id === groupId);
+		if (!hasMembers) {
+			this._tabGroups = this._tabGroups.filter(candidate => candidate.id !== groupId);
+			this._onDidModelChange.fire({ kind: GroupModelChangeKind.TAB_GROUP_REMOVED, tabGroup: group });
+		}
+	}
+
+	//#endregion
+
 	clone(): EditorGroupModel {
 		const clone = this.instantiationService.createInstance(EditorGroupModel, undefined);
 
@@ -1151,6 +1531,14 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 		clone.preview = this.preview;
 		clone.selection = this.selection.slice(0);
 		clone.sticky = this.sticky;
+
+		// Copy over tab groups (descriptors and membership). Editors are
+		// shared between the clone and the source, so the editor-keyed
+		// membership map can be copied as-is.
+		clone._tabGroups = this._tabGroups.map(group => ({ ...group }));
+		for (const [editor, groupId] of this.editorTabGroups) {
+			clone.editorTabGroups.set(editor, groupId);
+		}
 
 		// Ensure to register listeners for each editor
 		for (const editor of clone.editors) {
@@ -1205,13 +1593,41 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 
 		const serializableMru = this.mru.map(editor => this.indexOf(editor, serializableEditors)).filter(i => i >= 0);
 
+		// Serialize tab groups together with their member indices into the
+		// serializable editors array. Groups that end up without any
+		// serializable member are dropped.
+		const serializableTabGroups: ISerializedEditorTabGroup[] = [];
+		for (const group of this._tabGroups) {
+			const members: number[] = [];
+			for (let i = 0; i < serializableEditors.length; i++) {
+				if (this.editorTabGroups.get(serializableEditors[i]) === group.id) {
+					members.push(i);
+				}
+			}
+
+			if (members.length > 0) {
+				serializableTabGroups.push({
+					id: group.id,
+					name: group.name,
+					color: group.color,
+					collapsed: group.collapsed || undefined,
+					saved: group.saved || undefined,
+					locked: group.locked || undefined,
+					icon: group.icon,
+					metadata: group.metadata,
+					members
+				});
+			}
+		}
+
 		return {
 			id: this.id,
 			locked: this.locked ? true : undefined,
 			editors: serializedEditors,
 			mru: serializableMru,
 			preview: serializablePreviewIndex,
-			sticky: serializableSticky >= 0 ? serializableSticky : undefined
+			sticky: serializableSticky >= 0 ? serializableSticky : undefined,
+			tabGroups: serializableTabGroups.length > 0 ? serializableTabGroups : undefined
 		};
 	}
 
@@ -1261,6 +1677,31 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 			this.sticky = data.sticky;
 		}
 
+		// Restore tab groups and their membership
+		if (Array.isArray(data.tabGroups)) {
+			for (const serializedGroup of data.tabGroups) {
+				const group: IEditorTabGroup = {
+					id: serializedGroup.id,
+					name: serializedGroup.name,
+					color: serializedGroup.color || DEFAULT_EDITOR_TAB_GROUP_COLOR,
+					collapsed: !!serializedGroup.collapsed,
+					saved: !!serializedGroup.saved,
+					locked: !!serializedGroup.locked,
+					icon: serializedGroup.icon,
+					metadata: serializedGroup.metadata
+				};
+
+				this._tabGroups.push(group);
+
+				for (const memberIndex of serializedGroup.members) {
+					const editor = this.editors[memberIndex];
+					if (editor) {
+						this.editorTabGroups.set(editor, group.id);
+					}
+				}
+			}
+		}
+
 		return this._id;
 	}
 
@@ -1269,6 +1710,8 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 		this.editorListeners.clear();
 
 		this.transient.clear();
+		this.editorTabGroups.clear();
+		this._tabGroups = [];
 
 		super.dispose();
 	}

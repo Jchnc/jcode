@@ -21,12 +21,12 @@ import { IKeybindingService } from '../../../../platform/keybinding/common/keybi
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
 import { IThemeService, Themable } from '../../../../platform/theme/common/themeService.js';
-import { DraggedEditorGroupIdentifier, DraggedEditorIdentifier, fillEditorsDragData, isWindowDraggedOver } from '../../dnd.js';
+import { DraggedEditorGroupIdentifier, DraggedEditorIdentifier, DraggedEditorTabGroupIdentifier, fillEditorsDragData, isWindowDraggedOver } from '../../dnd.js';
 import { EditorPane } from './editorPane.js';
 import { IEditorGroupMenuIds, IEditorGroupsView, IEditorGroupView, IEditorPartsView, IInternalEditorOpenOptions } from './editor.js';
 import { IEditorCommandsContext, EditorResourceAccessor, IEditorPartOptions, SideBySideEditor, EditorsOrder, EditorInputCapabilities, IToolbarActions, GroupIdentifier, Verbosity } from '../../../common/editor.js';
 import { EditorInput } from '../../../common/editor/editorInput.js';
-import { ResourceContextKey, ActiveEditorPinnedContext, ActiveEditorStickyContext, ActiveEditorDirtyContext, ActiveEditorGroupLockedContext, ActiveEditorCanSplitInGroupContext, SideBySideEditorActiveContext, ActiveEditorFirstInGroupContext, ActiveEditorAvailableEditorIdsContext, applyAvailableEditorIds, ActiveEditorLastInGroupContext, ActiveEditorCannotCloseContext } from '../../../common/contextkeys.js';
+import { ResourceContextKey, ActiveEditorPinnedContext, ActiveEditorStickyContext, ActiveEditorDirtyContext, ActiveEditorGroupLockedContext, ActiveEditorCanSplitInGroupContext, SideBySideEditorActiveContext, ActiveEditorFirstInGroupContext, ActiveEditorAvailableEditorIdsContext, applyAvailableEditorIds, ActiveEditorLastInGroupContext, ActiveEditorCannotCloseContext, ActiveEditorInTabGroupContext } from '../../../common/contextkeys.js';
 import { AnchorAlignment } from '../../../../base/browser/ui/contextview/contextview.js';
 import { assertReturnsDefined } from '../../../../base/common/types.js';
 import { isFirefox } from '../../../../base/browser/browser.js';
@@ -101,6 +101,7 @@ export abstract class EditorTabsControl extends Themable implements IEditorTabsC
 
 	protected readonly editorTransfer = LocalSelectionTransfer.getInstance<DraggedEditorIdentifier>();
 	protected readonly groupTransfer = LocalSelectionTransfer.getInstance<DraggedEditorGroupIdentifier>();
+	protected readonly tabGroupTransfer = LocalSelectionTransfer.getInstance<DraggedEditorTabGroupIdentifier>();
 	protected readonly treeItemsTransfer = LocalSelectionTransfer.getInstance<DraggedTreeItemsIdentifier>();
 
 	private static readonly EDITOR_TAB_HEIGHT = {
@@ -136,6 +137,7 @@ export abstract class EditorTabsControl extends Themable implements IEditorTabsC
 	private editorDirtyContext: IContextKey<boolean>;
 	private editorAvailableEditorIds: IContextKey<string>;
 	private editorCannotCloseContext: IContextKey<boolean>;
+	private editorInTabGroupContext: IContextKey<boolean>;
 
 	private editorCanSplitInGroupContext: IContextKey<boolean>;
 	private sideBySideEditorContext: IContextKey<boolean>;
@@ -185,6 +187,7 @@ export abstract class EditorTabsControl extends Themable implements IEditorTabsC
 		this.editorDirtyContext = ActiveEditorDirtyContext.bindTo(this.contextMenuContextKeyService);
 		this.editorAvailableEditorIds = ActiveEditorAvailableEditorIdsContext.bindTo(this.contextMenuContextKeyService);
 		this.editorCannotCloseContext = ActiveEditorCannotCloseContext.bindTo(this.contextMenuContextKeyService);
+		this.editorInTabGroupContext = ActiveEditorInTabGroupContext.bindTo(this.contextMenuContextKeyService);
 
 		this.editorCanSplitInGroupContext = ActiveEditorCanSplitInGroupContext.bindTo(this.contextMenuContextKeyService);
 		this.sideBySideEditorContext = SideBySideEditorActiveContext.bindTo(this.contextMenuContextKeyService);
@@ -588,6 +591,7 @@ export abstract class EditorTabsControl extends Themable implements IEditorTabsC
 		this.editorStickyContext.set(this.tabsModel.isSticky(editor));
 		this.editorDirtyContext.set(editor.isDirty() && !editor.isSaving());
 		this.editorCannotCloseContext.set(editor.hasCapability(EditorInputCapabilities.CannotClose));
+		this.editorInTabGroupContext.set(this.tabsModel.getTabGroupForEditor(editor) !== undefined);
 		this.groupLockedContext.set(this.tabsModel.isLocked);
 		this.editorCanSplitInGroupContext.set(editor.hasCapability(EditorInputCapabilities.CanSplitInGroup));
 		this.sideBySideEditorContext.set(editor.typeId === SideBySideEditorInput.ID);

@@ -8,6 +8,7 @@ import { EditorInput } from './editorInput.js';
 import { Emitter } from '../../../base/common/event.js';
 import { IGroupModelChangeEvent, IReadonlyEditorGroupModel } from './editorGroupModel.js';
 import { Disposable } from '../../../base/common/lifecycle.js';
+import { IEditorTabGroup } from './editorTabGroup.js';
 
 abstract class FilteredEditorGroupModel extends Disposable implements IReadonlyEditorGroupModel {
 
@@ -52,6 +53,14 @@ abstract class FilteredEditorGroupModel extends Disposable implements IReadonlyE
 		return this.model.isLast(editor, this.getEditors(EditorsOrder.SEQUENTIAL));
 	}
 
+	get tabGroups(): readonly IEditorTabGroup[] {
+		return this.model.tabGroups;
+	}
+
+	getTabGroupForEditor(editor: EditorInput): IEditorTabGroup | undefined {
+		return this.model.getTabGroupForEditor(editor);
+	}
+
 	getEditors(order: EditorsOrder, options?: { excludeSticky?: boolean }): EditorInput[] {
 		const editors = this.model.getEditors(order, options);
 		return editors.filter(e => this.filter(e));
@@ -76,6 +85,14 @@ abstract class FilteredEditorGroupModel extends Disposable implements IReadonlyE
 
 export class StickyEditorGroupModel extends FilteredEditorGroupModel {
 	get count(): number { return this.model.stickyCount; }
+
+	override get tabGroups(): readonly IEditorTabGroup[] {
+		return []; // sticky tabs cannot belong to a tab group
+	}
+
+	override getTabGroupForEditor(editor: EditorInput): IEditorTabGroup | undefined {
+		return undefined;
+	}
 
 	override getEditors(order: EditorsOrder, options?: { excludeSticky?: boolean }): EditorInput[] {
 		if (options?.excludeSticky) {

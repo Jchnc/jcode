@@ -37,7 +37,8 @@ import { ChatEntitlement, ChatEntitlementContext, IChatEntitlementService } from
 import { Lazy } from '../../../base/common/lazy.js';
 import { NullExtensionService } from '../../services/extensions/common/extensions.js';
 import { IAutoSaveConfiguration, IAutoSaveMode, IFilesConfigurationService } from '../../services/filesConfiguration/common/filesConfigurationService.js';
-import { IHistoryService } from '../../services/history/common/history.js';
+import { IHistoryService, ISavedEditorTabGroup } from '../../services/history/common/history.js';
+import { IEditorTabGroup } from '../../common/editor/editorTabGroup.js';
 import { BeforeShutdownErrorEvent, ILifecycleService, InternalBeforeShutdownEvent, LifecyclePhase, ShutdownReason, StartupKind, WillShutdownEvent } from '../../services/lifecycle/common/lifecycle.js';
 import { IResourceEncoding } from '../../services/textfile/common/textfiles.js';
 import { IUserDataProfileService } from '../../services/userDataProfile/common/userDataProfile.js';
@@ -179,6 +180,10 @@ export class TestHistoryService implements IHistoryService {
 	constructor(private root?: URI) { }
 
 	async reopenLastClosedEditor(): Promise<void> { }
+	getSavedTabGroups(): readonly ISavedEditorTabGroup[] { return []; }
+	saveClosedTabGroup(_tabGroup: IEditorTabGroup, _editors: readonly { editor: EditorInput; index: number }[]): void { }
+	async reopenSavedTabGroup(_id: string): Promise<void> { }
+	deleteSavedTabGroup(_id: string): void { }
 	async goForward(): Promise<void> { }
 	async goBack(): Promise<void> { }
 	async goPrevious(): Promise<void> { }

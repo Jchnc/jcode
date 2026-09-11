@@ -1240,6 +1240,11 @@ export const enum GroupModelChangeKind {
 	/* Editors Change */
 	EDITORS_SELECTION,
 
+	/* Tab Group Changes */
+	TAB_GROUP_CREATED,
+	TAB_GROUP_CHANGED,
+	TAB_GROUP_REMOVED,
+
 	/* Editor Changes */
 	EDITOR_OPEN,
 	EDITOR_CLOSE,
@@ -1276,6 +1281,12 @@ interface IEditorPartDecorationsConfiguration {
 }
 
 export interface IEditorPartDecorationOptions extends Required<IEditorPartDecorationsConfiguration> { }
+
+interface IEditorPartTabGroupsConfiguration {
+	enabled?: boolean;
+}
+
+export interface IEditorPartTabGroupsOptions extends Required<IEditorPartTabGroupsConfiguration> { }
 
 interface IEditorPartConfiguration {
 	showTabs?: 'multiple' | 'single' | 'none';
@@ -1322,6 +1333,7 @@ interface IEditorPartConfiguration {
 	editorActionsLocation?: 'default' | 'titleBar' | 'hidden';
 	limit?: IEditorPartLimitConfiguration;
 	decorations?: IEditorPartDecorationsConfiguration;
+	tabGroups?: IEditorPartTabGroupsConfiguration;
 }
 
 export interface IEditorPartOptions extends DeepRequiredNonNullable<IEditorPartConfiguration> {

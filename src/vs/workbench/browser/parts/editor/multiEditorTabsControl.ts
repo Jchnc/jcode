@@ -4,17 +4,19 @@
  *--------------------------------------------------------------------------------------------*/
 
 import './media/multieditortabscontrol.css';
+import './media/tabgroups.css';
 import { isLinux, isMacintosh, isWindows } from '../../../../base/common/platform.js';
 import { shorten } from '../../../../base/common/labels.js';
-import { EditorResourceAccessor, Verbosity, IEditorPartOptions, SideBySideEditor, DEFAULT_EDITOR_ASSOCIATION, EditorInputCapabilities, IUntypedEditorInput, preventEditorClose, EditorCloseMethod, EditorsOrder, IToolbarActions } from '../../../common/editor.js';
+import { EditorResourceAccessor, Verbosity, IEditorPartOptions, SideBySideEditor, DEFAULT_EDITOR_ASSOCIATION, EditorInputCapabilities, IUntypedEditorInput, preventEditorClose, EditorCloseMethod, EditorsOrder, IToolbarActions, GroupModelChangeKind } from '../../../common/editor.js';
 import { EditorInput } from '../../../common/editor/editorInput.js';
+import { EDITOR_TAB_GROUP_COLORS, IEditorTabGroup, getEditorTabGroupColor } from '../../../common/editor/editorTabGroup.js';
 import { computeEditorAriaLabel } from '../../editor.js';
 import { StandardKeyboardEvent } from '../../../../base/browser/keyboardEvent.js';
 import { EventType as TouchEventType, GestureEvent, Gesture } from '../../../../base/browser/touch.js';
 import { KeyCode } from '../../../../base/common/keyCodes.js';
 import { ResourceLabels, IResourceLabel, DEFAULT_LABELS_CONTAINER } from '../../labels.js';
 import { ActionBar } from '../../../../base/browser/ui/actionbar/actionbar.js';
-import { IContextMenuService } from '../../../../platform/contextview/browser/contextView.js';
+import { IContextMenuService, IContextViewService } from '../../../../platform/contextview/browser/contextView.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { IKeybindingService } from '../../../../platform/keybinding/common/keybinding.js';
 import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
@@ -28,14 +30,15 @@ import { getOrSet } from '../../../../base/common/map.js';
 import { IThemeService, registerThemingParticipant } from '../../../../platform/theme/common/themeService.js';
 import { TAB_INACTIVE_BACKGROUND, TAB_ACTIVE_BACKGROUND, TAB_BORDER, EDITOR_DRAG_AND_DROP_BACKGROUND, TAB_UNFOCUSED_ACTIVE_BACKGROUND, TAB_UNFOCUSED_ACTIVE_BORDER, TAB_ACTIVE_BORDER, TAB_HOVER_BACKGROUND, TAB_HOVER_BORDER, TAB_UNFOCUSED_HOVER_BACKGROUND, TAB_UNFOCUSED_HOVER_BORDER, EDITOR_GROUP_HEADER_TABS_BACKGROUND, WORKBENCH_BACKGROUND, TAB_ACTIVE_BORDER_TOP, TAB_UNFOCUSED_ACTIVE_BORDER_TOP, TAB_ACTIVE_MODIFIED_BORDER, TAB_INACTIVE_MODIFIED_BORDER, TAB_UNFOCUSED_ACTIVE_MODIFIED_BORDER, TAB_UNFOCUSED_INACTIVE_MODIFIED_BORDER, TAB_UNFOCUSED_INACTIVE_BACKGROUND, TAB_HOVER_FOREGROUND, TAB_UNFOCUSED_HOVER_FOREGROUND, EDITOR_GROUP_HEADER_TABS_BORDER, TAB_LAST_PINNED_BORDER, TAB_SELECTED_BORDER_TOP } from '../../../common/theme.js';
 import { activeContrastBorder, contrastBorder, editorBackground } from '../../../../platform/theme/common/colorRegistry.js';
-import { ResourcesDropHandler, DraggedEditorIdentifier, DraggedEditorGroupIdentifier, extractTreeDropData, isWindowDraggedOver } from '../../dnd.js';
+import { ResourcesDropHandler, DraggedEditorIdentifier, DraggedEditorGroupIdentifier, DraggedEditorTabGroupIdentifier, extractTreeDropData, isWindowDraggedOver } from '../../dnd.js';
 import { Color } from '../../../../base/common/color.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { MergeGroupMode, IMergeGroupOptions } from '../../../services/editor/common/editorGroupsService.js';
 import { addDisposableListener, EventType, EventHelper, Dimension, scheduleAtNextAnimationFrame, findParentWithClass, clearNode, DragAndDropObserver, isMouseEvent, getWindow, ModifierKeyEmitter, $ } from '../../../../base/browser/dom.js';
 import { localize } from '../../../../nls.js';
-import { IEditorGroupMenuIds, IEditorGroupsView, EditorServiceImpl, IEditorGroupView, IInternalEditorOpenOptions, IEditorPartsView, prepareMoveCopyEditors } from './editor.js';
+import { IEditorGroupMenuIds, IEditorGroupsView, EditorServiceImpl, IEditorGroupView, IInternalEditorOpenOptions, IEditorPartsView, isEditorGroupView, prepareMoveCopyEditors } from './editor.js';
 import { CloseEditorTabAction, CloseOtherEditorTabsInGroupAction, UnpinEditorAction } from './editorActions.js';
+import { CLOSE_TAB_GROUP_COMMAND_ID, DISSOLVE_TAB_GROUP_COMMAND_ID, LOCK_TAB_GROUP_COMMAND_ID, SAVE_TAB_GROUP_COMMAND_ID, UNDO_TAB_GROUP_ACTION_COMMAND_ID, UNLOCK_GROUP_COMMAND_ID, UNLOCK_TAB_GROUP_COMMAND_ID, UNSAVE_TAB_GROUP_COMMAND_ID, getTabGroupMembers } from './editorCommands.js';
 import { assertReturnsAllDefined, assertReturnsDefined } from '../../../../base/common/types.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { basenameOrAuthority } from '../../../../base/common/resources.js';
@@ -47,7 +50,6 @@ import { isHighContrast } from '../../../../platform/theme/common/theme.js';
 import { isSafari } from '../../../../base/browser/browser.js';
 import { equals } from '../../../../base/common/objects.js';
 import { EditorActivation, IEditorOptions } from '../../../../platform/editor/common/editor.js';
-import { UNLOCK_GROUP_COMMAND_ID } from './editorCommands.js';
 import { StandardMouseEvent } from '../../../../base/browser/mouseEvent.js';
 import { ITreeViewsDnDService } from '../../../../editor/common/services/treeViewsDndService.js';
 import { DraggedTreeItemsIdentifier } from '../../../../editor/common/services/treeViewsDnd.js';
@@ -56,8 +58,11 @@ import { IEditorTitleControlDimensions } from './editorTitleControl.js';
 import { StickyEditorGroupModel, UnstickyEditorGroupModel } from '../../../common/editor/filteredEditorGroupModel.js';
 import { IReadonlyEditorGroupModel } from '../../../common/editor/editorGroupModel.js';
 import { IHostService } from '../../../services/host/browser/host.js';
-import { BugIndicatingError } from '../../../../base/common/errors.js';
+import { BugIndicatingError, onUnexpectedError } from '../../../../base/common/errors.js';
 import { applyDragImage } from '../../../../base/browser/ui/dnd/dnd.js';
+import { Codicon } from '../../../../base/common/codicons.js';
+import { ThemeIcon } from '../../../../base/common/themables.js';
+import { IHistoryService } from '../../../services/history/common/history.js';
 
 interface IEditorInputLabel {
 	readonly editor: EditorInput;
@@ -155,7 +160,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		@IContextMenuService contextMenuService: IContextMenuService,
 		@IInstantiationService instantiationService: IInstantiationService,
 		@IContextKeyService contextKeyService: IContextKeyService,
-		@IKeybindingService keybindingService: IKeybindingService,
+		@IKeybindingService private readonly tabGroupKeybindingService: IKeybindingService,
 		@INotificationService notificationService: INotificationService,
 		@IQuickInputService quickInputService: IQuickInputService,
 		@IThemeService themeService: IThemeService,
@@ -165,8 +170,10 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		@IEditorResolverService editorResolverService: IEditorResolverService,
 		@IHostService hostService: IHostService,
 		@IMenuService menuService: IMenuService,
+		@IContextViewService private readonly contextViewService: IContextViewService,
+		@IHistoryService private readonly historyService: IHistoryService,
 	) {
-		super(parent, editorPartsView, groupsView, groupView, tabsModel, menuIds, breadcrumbsInHeader, useModernUITabs, contextMenuService, instantiationService, contextKeyService, keybindingService, notificationService, quickInputService, themeService, editorResolverService, hostService, menuService);
+		super(parent, editorPartsView, groupsView, groupView, tabsModel, menuIds, breadcrumbsInHeader, useModernUITabs, contextMenuService, instantiationService, contextKeyService, tabGroupKeybindingService, notificationService, quickInputService, themeService, editorResolverService, hostService, menuService);
 
 		// Resolve the correct path library for the OS we are on
 		// If we are connected to remote, this accounts for the
@@ -175,6 +182,13 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 
 		// React to decorations changing for our resource labels
 		this._register(this.tabResourceLabels.onDidChangeDecorations(() => this.doHandleDecorationsChange()));
+
+		// React to tab group model changes (create, rename, recolor, collapse, move, remove)
+		this._register(this.tabsModel.onDidModelChange(e => {
+			if (e.kind === GroupModelChangeKind.TAB_GROUP_CREATED || e.kind === GroupModelChangeKind.TAB_GROUP_CHANGED || e.kind === GroupModelChangeKind.TAB_GROUP_REMOVED) {
+				this.rebuildTabs();
+			}
+		}));
 
 		// React to Alt being held/released to swap in the "Close Others" tab action
 		// for the currently hovered tab only (if any).
@@ -293,7 +307,13 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 
 	private get tabCount(): number {
 		const tabsContainer = assertReturnsDefined(this.tabsContainer);
-		return this.addTabContainer ? tabsContainer.children.length - 1 : tabsContainer.children.length;
+		let count = 0;
+		for (const child of tabsContainer.children) {
+			if (child.classList.contains('tab')) {
+				count++;
+			}
+		}
+		return count;
 	}
 
 	private appendTab(tab: HTMLElement, tabsContainer: HTMLElement): void {
@@ -305,10 +325,16 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 	}
 
 	private removeLastTab(tabsContainer: HTMLElement): void {
-		if (this.addTabContainer) {
-			this.addTabContainer.previousElementSibling?.remove();
-		} else {
-			tabsContainer.lastChild?.remove();
+		// Remove the last `.tab` child, skipping over any interleaved group headers
+		for (let i = tabsContainer.children.length - 1; i >= 0; i--) {
+			const child = tabsContainer.children[i] as HTMLElement;
+			if (child === this.addTabContainer) {
+				continue;
+			}
+			if (child.classList.contains('tab')) {
+				child.remove();
+				return;
+			}
 		}
 	}
 
@@ -501,6 +527,15 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 					return;
 				}
 
+				// Tab-group header drag: only allow a move operation
+				if (this.getDraggedTabGroupIdentifier()) {
+					if (e.dataTransfer) {
+						e.dataTransfer.dropEffect = 'move';
+					}
+					this.updateDropFeedback(tabsContainer, true, e);
+					return;
+				}
+
 				// Update the dropEffect to "copy" if there is no local data to be dragged because
 				// in that case we can only copy the data into and not move it from its source
 				if (!this.editorTransfer.hasData(DraggedEditorIdentifier.prototype)) {
@@ -528,9 +563,15 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 				this.updateDropFeedback(tabsContainer, false, e);
 				tabsContainer.classList.remove('scroll');
 
+				// Group header drag dropped onto the empty tab bar: move to the end
+				if (this.getDraggedTabGroupIdentifier()) {
+					this.dropTabGroupToIndex(this.tabsModel.count);
+					return;
+				}
+
 				if (e.target === tabsContainer) {
 					const isGroupTransfer = this.groupTransfer.hasData(DraggedEditorGroupIdentifier.prototype);
-					this.onDrop(e, isGroupTransfer ? this.groupView.count : this.tabsModel.count, tabsContainer);
+					this.onDrop(e, isGroupTransfer ? this.groupView.count : this.tabsModel.count, tabsContainer, null);
 				}
 			}
 		}));
@@ -676,6 +717,9 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 			this.layout(this.dimensions, { forceRevealActiveTab: true });
 		}
 
+		// Ensure tab group headers are in sync
+		this.redrawTabGroups();
+
 		return didChange;
 	}
 
@@ -755,6 +799,9 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 
 			// Redraw all tabs
 			this.redraw({ forceRevealActiveTab: true });
+
+			// Ensure tab group headers are in sync
+			this.redrawTabGroups();
 		}
 
 		// No tabs to show
@@ -949,8 +996,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 	}
 
 	private doWithTab(tabIndex: number, editor: EditorInput, fn: (editor: EditorInput, tabIndex: number, tabContainer: HTMLElement, tabLabelWidget: IResourceLabel, tabLabel: IEditorInputLabel, tabActionBar: ActionBar) => void): void {
-		const tabsContainer = assertReturnsDefined(this.tabsContainer);
-		const tabContainer = tabsContainer.children[tabIndex] as HTMLElement;
+		const tabContainer = this.getTabAtIndex(tabIndex);
 		const tabResourceLabel = this.tabResourceLabels.get(tabIndex);
 		const tabLabel = this.tabLabels[tabIndex];
 		const tabActionBar = this.tabActionBars[tabIndex];
@@ -1296,6 +1342,15 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 					return;
 				}
 
+				// Tab-group header drag: only allow a move operation
+				if (this.getDraggedTabGroupIdentifier()) {
+					if (e.dataTransfer) {
+						e.dataTransfer.dropEffect = 'move';
+					}
+					this.updateDropFeedback(tab, true, e, tabIndex);
+					return;
+				}
+
 				// Update the dropEffect to "copy" if there is no local data to be dragged because
 				// in that case we can only copy the data into and not move it from its source
 				if (!this.editorTransfer.hasData(DraggedEditorIdentifier.prototype)) {
@@ -1308,7 +1363,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 			},
 
 			onDragOver: (e, dragDuration) => {
-				if (dragDuration >= MultiEditorTabsControl.DRAG_OVER_OPEN_TAB_THRESHOLD) {
+				if (!this.getDraggedTabGroupIdentifier() && dragDuration >= MultiEditorTabsControl.DRAG_OVER_OPEN_TAB_THRESHOLD) {
 					const draggedOverTab = this.tabsModel.getEditorByIndex(tabIndex);
 					if (draggedOverTab && this.tabsModel.activeEditor !== draggedOverTab) {
 						this.groupView.openEditor(draggedOverTab, { preserveFocus: true });
@@ -1351,13 +1406,37 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 			onDrop: e => {
 				this.updateDropFeedback(tab, false, e, tabIndex);
 
+				// Group header drag: reposition the whole group at this tab
+				const draggedTabGroup = this.getDraggedTabGroupIdentifier();
+				if (draggedTabGroup) {
+					const editor = this.tabsModel.getEditorByIndex(tabIndex);
+					if (editor && this.tabsModel.getTabGroupForEditor(editor)?.id === draggedTabGroup.tabGroup.id && draggedTabGroup.sourceGroupId === this.groupView.id) {
+						return; // dropping the group onto itself is a no-op
+					}
+
+					let targetIndex = tabIndex;
+					if (this.getTabDragOverLocation(e, tab) === 'right') {
+						targetIndex++;
+					}
+
+					this.dropTabGroupToIndex(targetIndex);
+					return;
+				}
+
 				// compute the target index
 				let targetIndex = tabIndex;
 				if (this.getTabDragOverLocation(e, tab) === 'right') {
 					targetIndex++;
 				}
 
-				this.onDrop(e, targetIndex, tabsContainer);
+				const targetEditor = this.tabsModel.getEditorByIndex(tabIndex);
+				const targetGroup = targetEditor ? this.tabsModel.getTabGroupForEditor(targetEditor) : undefined;
+				const location = this.getTabDragOverLocation(e, tab);
+				const joinsTargetGroup = !!targetGroup && !targetGroup.locked && !(
+					(location === 'left' && tab.classList.contains('tab-group-first')) ||
+					(location === 'right' && tab.classList.contains('tab-group-last'))
+				);
+				this.onDrop(e, targetIndex, tabsContainer, joinsTargetGroup ? targetGroup.id : null);
 			}
 		}));
 
@@ -1365,6 +1444,10 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 	}
 
 	private isSupportedDropTransfer(e: DragEvent): boolean {
+		if (this.tabGroupTransfer.hasData(DraggedEditorTabGroupIdentifier.prototype)) {
+			return true;
+		}
+
 		if (this.groupTransfer.hasData(DraggedEditorGroupIdentifier.prototype)) {
 			const data = this.groupTransfer.getData(DraggedEditorGroupIdentifier.prototype);
 			if (Array.isArray(data) && data.length > 0) {
@@ -1451,8 +1534,8 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		}
 
 		// Between two tabs
-		const tabBefore = isLeftSideOfTab ? targetTab.previousElementSibling : targetTab;
-		const tabAfter = isLeftSideOfTab ? targetTab : targetTab.nextElementSibling;
+		const tabBefore = isLeftSideOfTab ? this.getPreviousTab(targetTab) : targetTab;
+		const tabAfter = isLeftSideOfTab ? targetTab : this.getNextTab(targetTab);
 
 		return { leftElement: tabBefore as HTMLElement, rightElement: tabAfter as HTMLElement };
 	}
@@ -1765,6 +1848,25 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 			tabContainer.style.left = 'auto';
 		}
 
+		// Tab group membership
+		const tabGroup = this.tabsModel.getTabGroupForEditor(editor);
+		tabContainer.classList.toggle('in-tab-group', !!tabGroup);
+		if (tabGroup) {
+			tabContainer.style.setProperty('--tab-group-color', getEditorTabGroupColor(tabGroup.color));
+			const isHiddenByCollapse = tabGroup.collapsed && !this.tabsModel.isActive(editor);
+			tabContainer.classList.toggle('tab-group-collapsed', isHiddenByCollapse);
+
+			const previousEditor = tabIndex > 0 ? this.tabsModel.getEditorByIndex(tabIndex - 1) : undefined;
+			const nextEditor = this.tabsModel.getEditorByIndex(tabIndex + 1);
+			const isFirstInGroup = !previousEditor || this.tabsModel.getTabGroupForEditor(previousEditor)?.id !== tabGroup.id;
+			const isLastInGroup = !nextEditor || this.tabsModel.getTabGroupForEditor(nextEditor)?.id !== tabGroup.id;
+			tabContainer.classList.toggle('tab-group-first', isFirstInGroup);
+			tabContainer.classList.toggle('tab-group-last', isLastInGroup);
+		} else {
+			tabContainer.style.removeProperty('--tab-group-color');
+			tabContainer.classList.remove('tab-group-collapsed', 'tab-group-first', 'tab-group-last');
+		}
+
 		// Borders / outline
 		this.redrawTabBorders(tabIndex, tabContainer);
 
@@ -1917,8 +2019,12 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		const isTabLastSticky = isTabSticky && this.tabsModel.stickyCount === tabIndex + 1;
 		const showLastStickyTabBorderColor = this.tabsModel.stickyCount !== this.tabsModel.count;
 
+		const editor = this.tabsModel.getEditorByIndex(tabIndex);
+		const isInTabGroup = editor ? this.tabsModel.getTabGroupForEditor(editor) !== undefined : false;
+
 		// Borders / Outline
-		const borderRightColor = ((isTabLastSticky && showLastStickyTabBorderColor ? this.getColor(TAB_LAST_PINNED_BORDER) : undefined) || this.getColor(TAB_BORDER) || this.getColor(contrastBorder));
+		// Grouped tabs render their own container edges (see tabgroups.css), so no separator border between members.
+		const borderRightColor = isInTabGroup ? undefined : ((isTabLastSticky && showLastStickyTabBorderColor ? this.getColor(TAB_LAST_PINNED_BORDER) : undefined) || this.getColor(TAB_BORDER) || this.getColor(contrastBorder));
 		tabContainer.style.borderRight = borderRightColor ? `1px solid ${borderRightColor}` : '';
 		tabContainer.style.outlineColor = this.getColor(activeContrastBorder) || '';
 	}
@@ -2155,8 +2261,8 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 			let currentTabsPosY: number | undefined = undefined;
 			let lastTab: HTMLElement | undefined = undefined;
 			for (const child of tabsContainer.children) {
-				if (child === this.addTabContainer) {
-					continue;
+				if (child === this.addTabContainer || !child.classList.contains('tab')) {
+					continue; // skip add-tab control and group headers
 				}
 				const tab = child as HTMLElement;
 				const tabPosY = tab.offsetTop;
@@ -2373,7 +2479,42 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		if (tabIndex >= 0) {
 			const tabsContainer = assertReturnsDefined(this.tabsContainer);
 
-			return tabsContainer.children[tabIndex] as HTMLElement | undefined;
+			let currentTabIndex = 0;
+			for (const child of tabsContainer.children) {
+				if (!child.classList.contains('tab')) {
+					continue; // skip group headers and other non-tab children
+				}
+
+				if (currentTabIndex === tabIndex) {
+					return child as HTMLElement;
+				}
+
+				currentTabIndex++;
+			}
+		}
+
+		return undefined;
+	}
+
+	private getPreviousTab(tab: HTMLElement): HTMLElement | undefined {
+		let sibling = tab.previousElementSibling;
+		while (sibling) {
+			if (sibling.classList.contains('tab')) {
+				return sibling as HTMLElement;
+			}
+			sibling = sibling.previousElementSibling;
+		}
+
+		return undefined;
+	}
+
+	private getNextTab(tab: HTMLElement): HTMLElement | undefined {
+		let sibling = tab.nextElementSibling;
+		while (sibling) {
+			if (sibling.classList.contains('tab')) {
+				return sibling as HTMLElement;
+			}
+			sibling = sibling.nextElementSibling;
 		}
 
 		return undefined;
@@ -2381,6 +2522,548 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 
 	private getLastTab(): HTMLElement | undefined {
 		return this.getTabAtIndex(this.tabsModel.count - 1);
+	}
+
+	private tabGroupHeaderDisposables: IDisposable[] = [];
+
+	private rebuildTabs(): void {
+		const tabsContainer = this.tabsContainer;
+		if (!tabsContainer) {
+			return;
+		}
+
+		clearNode(tabsContainer);
+		if (this.addTabContainer) {
+			tabsContainer.appendChild(this.addTabContainer);
+		}
+
+		this.tabDisposables = dispose(this.tabDisposables);
+		this.tabGroupHeaderDisposables = dispose(this.tabGroupHeaderDisposables);
+		this.tabResourceLabels.clear();
+		this.tabLabels = [];
+		this.activeTabLabel = undefined;
+		this.tabActionBars = [];
+
+		this.handleOpenedEditors();
+	}
+
+	private redrawTabGroups(): void {
+		const tabsContainer = this.tabsContainer;
+		if (!tabsContainer) {
+			return;
+		}
+
+		// Remove existing headers
+		this.tabGroupHeaderDisposables = dispose(this.tabGroupHeaderDisposables);
+		for (const child of Array.from(tabsContainer.children)) {
+			if (child.classList.contains('tab-group-header')) {
+				child.remove();
+			}
+		}
+
+		// Compute the first tab index for each group
+		const groupFirstIndex = new Map<string, number>();
+		const groupCount = new Map<string, number>();
+		const groupDirtyCount = new Map<string, number>();
+		this.tabsModel.getEditors(EditorsOrder.SEQUENTIAL).forEach((editor, index) => {
+			const group = this.tabsModel.getTabGroupForEditor(editor);
+			if (!group) {
+				return;
+			}
+			if (!groupFirstIndex.has(group.id)) {
+				groupFirstIndex.set(group.id, index);
+			}
+			groupCount.set(group.id, (groupCount.get(group.id) ?? 0) + 1);
+			if (editor.isDirty()) {
+				groupDirtyCount.set(group.id, (groupDirtyCount.get(group.id) ?? 0) + 1);
+			}
+		});
+
+		// Render a header before the first tab of each group
+		for (const group of this.tabsModel.tabGroups) {
+			const firstIndex = groupFirstIndex.get(group.id);
+			const firstTab = typeof firstIndex === 'number' ? this.getTabAtIndex(firstIndex) : undefined;
+			if (!firstTab) {
+				continue;
+			}
+
+			const header = this.createTabGroupHeader(group, groupCount.get(group.id) ?? 0, groupDirtyCount.get(group.id) ?? 0);
+			tabsContainer.insertBefore(header, firstTab);
+		}
+	}
+
+	private getTabGroupFirstIndex(groupId: string): number | undefined {
+		const editors = this.tabsModel.getEditors(EditorsOrder.SEQUENTIAL);
+		for (let i = 0; i < editors.length; i++) {
+			if (this.tabsModel.getTabGroupForEditor(editors[i])?.id === groupId) {
+				return i;
+			}
+		}
+
+		return undefined;
+	}
+
+	private moveTabGroupToIndex(groupId: string, targetTabIndex: number): void {
+		const clamped = Math.max(0, Math.min(targetTabIndex, this.tabsModel.count));
+
+		let targetEditorIndex: number;
+		if (clamped >= this.tabsModel.count) {
+			targetEditorIndex = this.groupView.count;
+		} else {
+			targetEditorIndex = this.toEditorIndex(clamped);
+		}
+
+		this.groupView.moveTabGroup(groupId, targetEditorIndex);
+	}
+
+	private getDraggedTabGroupIdentifier(): { sourceGroupId: number; tabGroup: IEditorTabGroup } | undefined {
+		const data = this.tabGroupTransfer.getData(DraggedEditorTabGroupIdentifier.prototype);
+		return Array.isArray(data) ? data[0]?.identifier : undefined;
+	}
+
+	private clearDraggedTabGroup(): void {
+		this.tabGroupTransfer.clearData(DraggedEditorTabGroupIdentifier.prototype);
+	}
+
+	private dropTabGroupToIndex(targetTabIndex: number): void {
+		const dragged = this.getDraggedTabGroupIdentifier();
+		if (!dragged || dragged.tabGroup.locked) {
+			this.clearDraggedTabGroup();
+			return;
+		}
+
+		const sourceGroup = this.editorPartsView.getGroup(dragged.sourceGroupId);
+		if (!sourceGroup || !isEditorGroupView(sourceGroup)) {
+			this.clearDraggedTabGroup();
+			return;
+		}
+
+		if (sourceGroup === this.groupView) {
+			this.moveTabGroupToIndex(dragged.tabGroup.id, targetTabIndex);
+		} else {
+			const members = getTabGroupMembers(sourceGroup, dragged.tabGroup.id);
+			const targetEditorIndex = targetTabIndex >= this.tabsModel.count ? this.groupView.count : this.toEditorIndex(targetTabIndex);
+			const moved = sourceGroup.moveEditors(prepareMoveCopyEditors(sourceGroup, members).map((entry, index) => ({ ...entry, options: { ...entry.options, index: targetEditorIndex + index } })), this.groupView);
+			if (moved) {
+				this.groupView.createTabGroup(members, dragged.tabGroup.name, dragged.tabGroup.color, {
+					id: dragged.tabGroup.id,
+					collapsed: dragged.tabGroup.collapsed,
+					saved: dragged.tabGroup.saved,
+					locked: dragged.tabGroup.locked,
+					icon: dragged.tabGroup.icon,
+					metadata: dragged.tabGroup.metadata
+				});
+			}
+		}
+
+		this.clearDraggedTabGroup();
+		this.groupView.focus();
+	}
+
+	private createTabGroupHeader(group: IEditorTabGroup, count: number, dirtyCount: number): HTMLElement {
+		const header = $('.tab-group-header');
+		header.dataset.tabGroupId = group.id;
+		header.setAttribute('draggable', String(!group.locked));
+		header.setAttribute('role', 'button');
+		header.tabIndex = 0;
+		header.classList.toggle('collapsed', group.collapsed);
+		header.classList.toggle('saved', group.saved);
+		header.classList.toggle('locked', group.locked);
+		header.setAttribute('aria-expanded', String(!group.collapsed));
+		header.style.setProperty('--tab-group-color', getEditorTabGroupColor(group.color));
+
+		if (group.icon) {
+			const icon = $('span.tab-group-icon');
+			icon.classList.add('codicon', `codicon-${group.icon}`);
+			header.appendChild(icon);
+		}
+
+		const dot = $('span.tab-group-color-dot');
+		header.appendChild(dot);
+
+		const name = $('span.tab-group-name');
+		name.textContent = group.name || localize('tabGroup.unnamed', 'Tab Group');
+		header.appendChild(name);
+
+		if (group.saved) {
+			const savedIndicator = $('span.tab-group-saved');
+			savedIndicator.classList.add(...ThemeIcon.asClassNameArray(Codicon.bookmark));
+			savedIndicator.setAttribute('aria-hidden', 'true');
+			header.appendChild(savedIndicator);
+		}
+
+		const countBadge = $('span.tab-group-count');
+		countBadge.textContent = String(count);
+		header.appendChild(countBadge);
+
+		if (dirtyCount > 0) {
+			const dirtyIndicator = $('span.tab-group-dirty-indicator');
+			dirtyIndicator.classList.add(...ThemeIcon.asClassNameArray(Codicon.circleFilled));
+			dirtyIndicator.setAttribute('aria-hidden', 'true');
+			dirtyIndicator.title = localize('tabGroup.dirtyCount', '{0} unsaved tabs', dirtyCount);
+			header.appendChild(dirtyIndicator);
+		}
+
+		if (group.locked) {
+			const lockIndicator = $('span.tab-group-lock');
+			lockIndicator.classList.add(...ThemeIcon.asClassNameArray(Codicon.lockSmall));
+			lockIndicator.setAttribute('aria-hidden', 'true');
+			header.appendChild(lockIndicator);
+		}
+
+		const chevron = $('span.tab-group-chevron');
+		chevron.classList.add('codicon', group.collapsed ? 'codicon-chevron-right' : 'codicon-chevron-down');
+		header.appendChild(chevron);
+
+		const label = group.name || localize('tabGroup.unnamed', 'Tab Group');
+		const status = dirtyCount > 0 ? localize('tabGroup.headerStatusDirty', '{0} tabs, {1} unsaved', count, dirtyCount) : localize('tabGroup.headerStatus', '{0} tabs', count);
+		const accessibilityStatus = [status, group.saved ? localize('tabGroup.saved', 'saved') : undefined, group.locked ? localize('tabGroup.locked', 'locked') : undefined].filter(Boolean).join(', ');
+		header.setAttribute('aria-label', group.collapsed ? localize('tabGroup.collapsedAria', '{0}, collapsed, {1}', label, accessibilityStatus) : localize('tabGroup.expandedAria', '{0}, {1}', label, accessibilityStatus));
+		const savedStatus = group.saved ? localize('tabGroup.savedStatus', ', saved') : '';
+		header.title = group.locked ? localize('tabGroup.headerTitleLocked', '{0} ({1}, locked{2})', label, status, savedStatus) : localize('tabGroup.headerTitle', '{0} ({1}{2})', label, status, savedStatus);
+
+		this.tabGroupHeaderDisposables.push(this.registerTabGroupHeaderListeners(header, group));
+
+		return header;
+	}
+
+	private registerTabGroupHeaderListeners(header: HTMLElement, group: IEditorTabGroup): IDisposable {
+		const disposables = new DisposableStore();
+
+		disposables.add(addDisposableListener(header, EventType.CLICK, e => {
+			EventHelper.stop(e);
+			this.groupView.setTabGroupCollapsed(group.id, !group.collapsed);
+		}));
+
+		disposables.add(addDisposableListener(header, EventType.KEY_UP, e => {
+			const event = new StandardKeyboardEvent(e);
+			if (event.equals(KeyCode.Enter) || event.equals(KeyCode.Space)) {
+				EventHelper.stop(e);
+				this.groupView.setTabGroupCollapsed(group.id, !group.collapsed);
+			}
+		}));
+
+		disposables.add(addDisposableListener(header, EventType.CONTEXT_MENU, e => {
+			EventHelper.stop(e, true);
+			this.showTabGroupContextMenu(group, header, e);
+		}));
+
+		// Drag & drop: move a whole group onto another group's header
+		disposables.add(addDisposableListener(header, EventType.DRAG_START, (e: DragEvent) => {
+			e.stopPropagation();
+			if (group.locked) {
+				e.preventDefault();
+				return;
+			}
+			this.tabGroupTransfer.setData([new DraggedEditorTabGroupIdentifier({ sourceGroupId: this.groupView.id, tabGroup: { ...group } })], DraggedEditorTabGroupIdentifier.prototype);
+			if (e.dataTransfer) {
+				e.dataTransfer.effectAllowed = 'move';
+				e.dataTransfer.setData('text/plain', group.id);
+			}
+			header.classList.add('dragged');
+		}));
+
+		disposables.add(addDisposableListener(header, EventType.DRAG_OVER, (e: DragEvent) => {
+			const dragged = this.getDraggedTabGroupIdentifier();
+			if (dragged && !(dragged.sourceGroupId === this.groupView.id && dragged.tabGroup.id === group.id)) {
+				e.preventDefault();
+				e.stopPropagation();
+				header.classList.add('drop-target');
+				return;
+			}
+			if (!group.locked && this.editorTransfer.hasData(DraggedEditorIdentifier.prototype)) {
+				e.preventDefault();
+				e.stopPropagation();
+				header.classList.add('drop-target');
+				return;
+			}
+		}));
+
+		disposables.add(addDisposableListener(header, EventType.DRAG_LEAVE, () => {
+			header.classList.remove('drop-target');
+		}));
+
+		disposables.add(addDisposableListener(header, EventType.DROP, (e: DragEvent) => {
+			e.preventDefault();
+			e.stopPropagation();
+			header.classList.remove('drop-target');
+
+			const dragged = this.getDraggedTabGroupIdentifier();
+			if (dragged) {
+				if (dragged.sourceGroupId === this.groupView.id && dragged.tabGroup.id === group.id) {
+					return;
+				}
+				const firstIndex = this.getTabGroupFirstIndex(group.id);
+				if (typeof firstIndex === 'number') {
+					this.dropTabGroupToIndex(firstIndex);
+				}
+				return;
+			}
+
+			if (!group.locked && this.editorTransfer.hasData(DraggedEditorIdentifier.prototype)) {
+				const members = getTabGroupMembers(this.groupView, group.id);
+				const lastIndex = members.reduce((index, editor) => Math.max(index, this.groupView.getIndexOfEditor(editor)), -1);
+				void this.onDrop(e, lastIndex + 1, this.tabsContainer ?? header.parentElement ?? header, group.id);
+			}
+		}));
+
+		disposables.add(addDisposableListener(header, EventType.DRAG_END, () => {
+			this.clearDraggedTabGroup();
+			header.classList.remove('dragged', 'drop-target');
+		}));
+
+		return disposables;
+	}
+
+	private showTabGroupContextMenu(group: IEditorTabGroup, header: HTMLElement, e: Event): void {
+		let anchor: HTMLElement | StandardMouseEvent = header;
+		if (isMouseEvent(e)) {
+			anchor = new StandardMouseEvent(getWindow(header), e);
+		}
+
+		let nameInput: HTMLInputElement | undefined;
+		let commitName = () => true;
+
+		this.contextViewService.showContextView({
+			getAnchor: () => anchor,
+			canRelayout: false,
+			render: container => {
+				container.classList.add('tab-group-context-view');
+				const disposables = new DisposableStore();
+
+				const menu = container.appendChild($('.tab-group-context-menu'));
+				menu.setAttribute('role', 'dialog');
+				menu.setAttribute('aria-label', localize('tabGroup.contextMenuLabel', 'Edit Tab Group {0}', group.name));
+
+				const identitySection = menu.appendChild($('.tab-group-menu-identity'));
+				nameInput = identitySection.appendChild($('input.tab-group-menu-name')) as HTMLInputElement;
+				nameInput.type = 'text';
+				nameInput.value = group.name;
+				nameInput.placeholder = localize('tabGroup.namePlaceholder', 'Tab Group Name');
+				nameInput.setAttribute('aria-label', localize('tabGroup.nameAriaLabel', 'Tab Group Name'));
+				nameInput.spellcheck = false;
+
+				commitName = () => {
+					const name = nameInput?.value.trim();
+					if (!name) {
+						nameInput?.setAttribute('aria-invalid', 'true');
+						return false;
+					}
+
+					nameInput?.removeAttribute('aria-invalid');
+					if (name !== group.name) {
+						this.groupView.renameTabGroup(group.id, name);
+					}
+					return true;
+				};
+
+				disposables.add(addDisposableListener(nameInput, EventType.INPUT, () => {
+					if (nameInput?.value.trim()) {
+						nameInput.removeAttribute('aria-invalid');
+					} else {
+						nameInput?.setAttribute('aria-invalid', 'true');
+					}
+				}));
+				disposables.add(addDisposableListener(nameInput, EventType.KEY_DOWN, event => {
+					const keyboardEvent = event as KeyboardEvent;
+					if (keyboardEvent.key === 'Enter' && commitName()) {
+						EventHelper.stop(keyboardEvent);
+						this.contextViewService.hideContextView();
+					}
+				}));
+
+				const colorLabels = new Map([
+					['grey', localize('tabGroup.colorGrey', 'Grey')],
+					['blue', localize('tabGroup.colorBlue', 'Blue')],
+					['red', localize('tabGroup.colorRed', 'Red')],
+					['yellow', localize('tabGroup.colorYellow', 'Yellow')],
+					['green', localize('tabGroup.colorGreen', 'Green')],
+					['pink', localize('tabGroup.colorPink', 'Pink')],
+					['purple', localize('tabGroup.colorPurple', 'Purple')],
+					['cyan', localize('tabGroup.colorCyan', 'Cyan')]
+				]);
+				const colorPicker = identitySection.appendChild($('.tab-group-menu-colors'));
+				colorPicker.setAttribute('role', 'radiogroup');
+				colorPicker.setAttribute('aria-label', localize('tabGroup.colorAriaLabel', 'Tab Group Color'));
+				const swatches: HTMLButtonElement[] = [];
+
+				for (const color of EDITOR_TAB_GROUP_COLORS) {
+					const swatch = colorPicker.appendChild($('button.tab-group-menu-color')) as HTMLButtonElement;
+					swatch.type = 'button';
+					swatch.style.backgroundColor = color.value;
+					swatch.setAttribute('role', 'radio');
+					swatch.setAttribute('aria-label', colorLabels.get(color.id) ?? color.id);
+					const selected = color.id === group.color;
+					swatch.classList.toggle('selected', selected);
+					swatch.setAttribute('aria-checked', String(selected));
+					swatch.tabIndex = selected || (!EDITOR_TAB_GROUP_COLORS.some(candidate => candidate.id === group.color) && swatches.length === 0) ? 0 : -1;
+					swatches.push(swatch);
+
+					disposables.add(addDisposableListener(swatch, EventType.CLICK, event => {
+						EventHelper.stop(event);
+						this.groupView.recolorTabGroup(group.id, color.id);
+						for (const candidate of swatches) {
+							const isSelected = candidate === swatch;
+							candidate.classList.toggle('selected', isSelected);
+							candidate.setAttribute('aria-checked', String(isSelected));
+							candidate.tabIndex = isSelected ? 0 : -1;
+						}
+					}));
+					disposables.add(addDisposableListener(swatch, EventType.KEY_DOWN, event => {
+						const keyboardEvent = event as KeyboardEvent;
+						const direction = keyboardEvent.key === 'ArrowRight' || keyboardEvent.key === 'ArrowDown' ? 1 : keyboardEvent.key === 'ArrowLeft' || keyboardEvent.key === 'ArrowUp' ? -1 : 0;
+						if (direction !== 0) {
+							EventHelper.stop(keyboardEvent);
+							const nextIndex = (swatches.indexOf(swatch) + direction + swatches.length) % swatches.length;
+							swatches[nextIndex].focus();
+							swatches[nextIndex].click();
+						}
+					}));
+				}
+
+				const actionList = menu.appendChild($('.tab-group-menu-actions'));
+				actionList.setAttribute('role', 'menu');
+				const actionButtons: HTMLButtonElement[] = [];
+				const appendAction = (commandId: string | undefined, label: string, icon: ThemeIcon, run: () => void | Promise<void>, disabled = false) => {
+					const button = actionList.appendChild($('button.tab-group-menu-action')) as HTMLButtonElement;
+					button.type = 'button';
+					button.setAttribute('role', 'menuitem');
+					button.disabled = disabled;
+					button.setAttribute('aria-disabled', String(disabled));
+					if (!disabled) {
+						actionButtons.push(button);
+					}
+
+					const iconElement = button.appendChild($('span.tab-group-menu-action-icon'));
+					iconElement.classList.add(...ThemeIcon.asClassNameArray(icon));
+					const labelElement = button.appendChild($('span.tab-group-menu-action-label'));
+					labelElement.textContent = label;
+					if (commandId) {
+						const keybinding = this.tabGroupKeybindingService.lookupKeybinding(commandId)?.getLabel();
+						if (keybinding) {
+							const keybindingElement = button.appendChild($('span.tab-group-menu-keybinding'));
+							keybindingElement.textContent = keybinding;
+						}
+					}
+
+					disposables.add(addDisposableListener(button, EventType.CLICK, event => {
+						EventHelper.stop(event);
+						this.contextViewService.hideContextView();
+						try {
+							const result = run();
+							if (result) {
+								void result.catch(onUnexpectedError);
+							}
+						} catch (error) {
+							onUnexpectedError(error);
+						}
+					}));
+					disposables.add(addDisposableListener(button, EventType.KEY_DOWN, event => {
+						const keyboardEvent = event as KeyboardEvent;
+						const direction = keyboardEvent.key === 'ArrowDown' ? 1 : keyboardEvent.key === 'ArrowUp' ? -1 : 0;
+						if (direction !== 0) {
+							EventHelper.stop(keyboardEvent);
+							const nextIndex = (actionButtons.indexOf(button) + direction + actionButtons.length) % actionButtons.length;
+							actionButtons[nextIndex].focus();
+						}
+					}));
+				};
+
+				appendAction('workbench.action.files.newUntitledFile', localize('newTabInGroup', 'New Tab in Group'), Codicon.newFile, () => this.openNewTabInGroup(group), group.locked);
+				appendAction(undefined, localize('moveTabGroupToNewWindow', 'Move Group into New Window'), Codicon.emptyWindow, () => this.moveTabGroupToNewWindow(group), group.locked);
+				appendAction(group.saved ? UNSAVE_TAB_GROUP_COMMAND_ID : SAVE_TAB_GROUP_COMMAND_ID, group.saved ? localize('unsaveTabGroup', 'Stop Saving Group') : localize('saveTabGroup', 'Save Group'), Codicon.bookmark, () => this.groupView.setTabGroupSaved(group.id, !group.saved));
+				appendAction(group.locked ? UNLOCK_TAB_GROUP_COMMAND_ID : LOCK_TAB_GROUP_COMMAND_ID, group.locked ? localize('unlockTabGroup', 'Unlock Group') : localize('lockTabGroup', 'Lock Group'), group.locked ? Codicon.unlock : Codicon.lock, () => this.groupView.setTabGroupLocked(group.id, !group.locked));
+				appendAction(CLOSE_TAB_GROUP_COMMAND_ID, localize('closeTabGroup', 'Close Group'), Codicon.closeAll, () => this.closeTabGroup(group), group.locked);
+
+				const separator = actionList.appendChild($('.tab-group-menu-separator'));
+				separator.setAttribute('role', 'separator');
+
+				appendAction(UNDO_TAB_GROUP_ACTION_COMMAND_ID, localize('undoTabGroupAction', 'Undo Last Group Change'), Codicon.history, () => { this.groupView.undoLastTabGroupAction(); }, !this.groupView.canUndoTabGroupAction);
+				appendAction(DISSOLVE_TAB_GROUP_COMMAND_ID, localize('dissolveTabGroup', 'Ungroup Tabs'), Codicon.ungroupByRefType, () => this.groupView.dissolveTabGroup(group.id), group.locked);
+
+				disposables.add(addDisposableListener(getWindow(menu).document, EventType.POINTER_DOWN, event => {
+					if (!menu.contains(event.target as Node)) {
+						this.contextViewService.hideContextView();
+					}
+				}, true));
+				disposables.add(addDisposableListener(menu, EventType.FOCUS_OUT, event => {
+					const nextFocus = event.relatedTarget as Node | null;
+					if (!nextFocus || !menu.contains(nextFocus)) {
+						this.contextViewService.hideContextView();
+					}
+				}));
+				disposables.add(addDisposableListener(menu, EventType.KEY_DOWN, event => {
+					if (event.key === 'Escape') {
+						EventHelper.stop(event);
+						this.contextViewService.hideContextView();
+					}
+				}));
+				disposables.add(addDisposableListener(getWindow(menu), EventType.BLUR, () => this.contextViewService.hideContextView()));
+				disposables.add(scheduleAtNextAnimationFrame(getWindow(nameInput), () => {
+					nameInput?.focus();
+					nameInput?.select();
+				}));
+
+				return disposables;
+			},
+			focus: () => {
+				nameInput?.focus();
+				nameInput?.select();
+			},
+			onHide: () => {
+				commitName();
+				for (const candidate of Array.from(this.tabsContainer?.children ?? [])) {
+					const candidateElement = candidate as HTMLElement;
+					if (candidateElement.classList.contains('tab-group-header') && candidateElement.dataset.tabGroupId === group.id) {
+						candidateElement.focus();
+						break;
+					}
+				}
+			}
+		});
+	}
+
+	private async openNewTabInGroup(group: IEditorTabGroup): Promise<void> {
+		const members = getTabGroupMembers(this.groupView, group.id);
+		const lastMemberIndex = members.reduce((index, editor) => Math.max(index, this.groupView.getIndexOfEditor(editor)), -1);
+		if (group.collapsed) {
+			this.groupView.setTabGroupCollapsed(group.id, false);
+		}
+
+		const pane = await this.editorService.openEditor({ resource: undefined, options: { pinned: true, index: lastMemberIndex + 1 } }, this.groupView);
+		if (pane?.input) {
+			this.groupView.addToTabGroup(group.id, [pane.input]);
+		}
+	}
+
+	private async closeTabGroup(group: IEditorTabGroup): Promise<void> {
+		if (group.locked) {
+			return;
+		}
+		const members = getTabGroupMembers(this.groupView, group.id);
+		const savedEditors = members.map(editor => ({ editor, index: this.groupView.getIndexOfEditor(editor) }));
+		const closed = await this.groupView.closeEditors(members, { preserveFocus: true });
+		if (closed && group.saved) {
+			this.historyService.saveClosedTabGroup(group, savedEditors);
+		}
+	}
+
+	private async moveTabGroupToNewWindow(group: IEditorTabGroup): Promise<void> {
+		if (group.locked) {
+			return;
+		}
+		const members = getTabGroupMembers(this.groupView, group.id);
+		if (members.length === 0) {
+			return;
+		}
+
+		const auxiliaryEditorPart = await this.editorPartsView.createAuxiliaryEditorPart();
+		const moved = this.groupView.moveEditors(prepareMoveCopyEditors(this.groupView, members), auxiliaryEditorPart.activeGroup);
+		if (moved && isEditorGroupView(auxiliaryEditorPart.activeGroup)) {
+			auxiliaryEditorPart.activeGroup.createTabGroup(members, group.name, group.color, { id: group.id, collapsed: group.collapsed, saved: group.saved, locked: group.locked, icon: group.icon, metadata: group.metadata });
+		}
+
+		auxiliaryEditorPart.activeGroup.focus();
 	}
 
 	private blockRevealActiveTabOnce(): void {
@@ -2404,7 +3087,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		return !!findParentWithClass(element, 'action-item', 'tab');
 	}
 
-	private async onDrop(e: DragEvent, targetTabIndex: number, tabsContainer: HTMLElement): Promise<void> {
+	private async onDrop(e: DragEvent, targetTabIndex: number, tabsContainer: HTMLElement, targetTabGroupId?: string | null): Promise<void> {
 		EventHelper.stop(e, true);
 
 		this.updateDropFeedback(tabsContainer, false, e, targetTabIndex);
@@ -2439,8 +3122,21 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		else if (this.editorTransfer.hasData(DraggedEditorIdentifier.prototype)) {
 			const data = this.editorTransfer.getData(DraggedEditorIdentifier.prototype);
 			if (Array.isArray(data) && data.length > 0) {
+				if (targetTabGroupId !== undefined) {
+					const targetGroup = targetTabGroupId ? this.tabsModel.tabGroups.find(group => group.id === targetTabGroupId) : undefined;
+					const changesLockedGroup = data.some(item => {
+						const sourceGroup = this.editorPartsView.getGroup(item.identifier.groupId);
+						return !!sourceGroup && isEditorGroupView(sourceGroup) && sourceGroup.getTabGroupForEditor(item.identifier.editor)?.locked && sourceGroup.getTabGroupForEditor(item.identifier.editor)?.id !== targetTabGroupId;
+					});
+					if (changesLockedGroup || (targetGroup?.locked && data.some(item => this.tabsModel.getTabGroupForEditor(item.identifier.editor)?.id !== targetTabGroupId))) {
+						this.editorTransfer.clearData(DraggedEditorIdentifier.prototype);
+						return;
+					}
+				}
+
 				const sourceGroup = this.editorPartsView.getGroup(data[0].identifier.groupId);
 				if (sourceGroup) {
+					const droppedEditors: EditorInput[] = [];
 					for (const de of data) {
 						const editor = de.identifier.editor;
 
@@ -2456,16 +3152,25 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 						}
 
 						if (this.isMoveOperation(e, de.identifier.groupId, editor)) {
-							sourceGroup.moveEditor(editor, this.groupView, { ...options, index: targetEditorIndex });
+							if (sourceGroup.moveEditor(editor, this.groupView, { ...options, index: targetEditorIndex })) {
+								droppedEditors.push(editor);
+							}
 
 							if (this.tabsModel instanceof UnstickyEditorGroupModel && this.groupView.isSticky(editor)) {
 								this.groupView.unstickEditor(editor);
 							}
 						} else {
 							sourceGroup.copyEditor(editor, this.groupView, { ...options, index: targetEditorIndex });
+							droppedEditors.push(editor);
 						}
 
 						targetEditorIndex++;
+					}
+
+					if (targetTabGroupId) {
+						this.groupView.addToTabGroup(targetTabGroupId, droppedEditors);
+					} else if (targetTabGroupId === null) {
+						this.groupView.removeFromTabGroup(droppedEditors);
 					}
 				}
 			}
@@ -2504,6 +3209,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		super.dispose();
 
 		this.tabDisposables = dispose(this.tabDisposables);
+		this.tabGroupHeaderDisposables = dispose(this.tabGroupHeaderDisposables);
 	}
 }
 

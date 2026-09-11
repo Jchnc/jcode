@@ -37,6 +37,7 @@ import { IWorkspaceEditingService } from '../services/workspaces/common/workspac
 import { IEditorOptions } from '../../platform/editor/common/editor.js';
 import { mainWindow } from '../../base/browser/window.js';
 import { BroadcastDataChannel } from '../../base/browser/broadcast.js';
+import { IEditorTabGroup } from '../common/editor/editorTabGroup.js';
 
 //#region Editor / Resources DND
 
@@ -48,6 +49,11 @@ export class DraggedEditorIdentifier {
 export class DraggedEditorGroupIdentifier {
 
 	constructor(readonly identifier: GroupIdentifier) { }
+}
+
+export class DraggedEditorTabGroupIdentifier {
+
+	constructor(readonly identifier: { sourceGroupId: GroupIdentifier; tabGroup: IEditorTabGroup }) { }
 }
 
 export async function extractTreeDropData(dataTransfer: VSDataTransfer): Promise<Array<IDraggedResourceEditorInput>> {

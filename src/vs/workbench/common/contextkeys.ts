@@ -84,6 +84,7 @@ export const ActiveEditorCanToggleReadonlyContext = new RawContextKey<boolean>('
 export const ActiveEditorCanRevertContext = new RawContextKey<boolean>('activeEditorCanRevert', false, localize('activeEditorCanRevert', "Whether the active editor can revert"));
 export const ActiveEditorCanSplitInGroupContext = new RawContextKey<boolean>('activeEditorCanSplitInGroup', true);
 export const ActiveEditorCannotCloseContext = new RawContextKey<boolean>('activeEditorCannotClose', false, localize('activeEditorCannotClose', "Whether the active editor cannot be closed through standard user actions"));
+export const ActiveEditorInTabGroupContext = new RawContextKey<boolean>('activeEditorInTabGroup', false, localize('activeEditorInTabGroup', "Whether the active editor is part of a tab group"));
 
 // Editor Kind Context Keys
 export const ActiveEditorContext = new RawContextKey<string | null>('activeEditor', null, { type: 'string', description: localize('activeEditor', "The identifier of the active editor") });
