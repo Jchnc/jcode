@@ -148,17 +148,41 @@
  * Expanded tabs retain their native theme surfaces. The shared underline alone
  * communicates membership and stays continuous across classic and Modern UI.
  */
-.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab.in-tab-group {
+.monaco-workbench:not(.modern-ui-tabs) .part.editor > .content .editor-group-container > .title .tabs-container > .tab.in-tab-group {
 	border-top: 0;
 	border-bottom: 3px solid var(--tab-group-color);
 }
 
-.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab.in-tab-group.tab-group-first {
+.monaco-workbench:not(.modern-ui-tabs) .part.editor > .content .editor-group-container > .title .tabs-container > .tab.in-tab-group.tab-group-first {
 	border-left: 0;
 }
 
-.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab.in-tab-group.tab-group-last {
+.monaco-workbench:not(.modern-ui-tabs) .part.editor > .content .editor-group-container > .title .tabs-container > .tab.in-tab-group.tab-group-last {
 	border-right: 0;
+}
+
+/* Modern UI keeps each pill native and paints a square group stripe across its full slot. */
+.modern-ui-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header {
+	margin-inline: var(--vscode-spacing-size20);
+}
+
+.modern-ui-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab.in-tab-group {
+	border-radius: 0;
+	background-image: linear-gradient(var(--tab-group-color), var(--tab-group-color)) !important;
+	background-position: left bottom !important;
+	background-repeat: no-repeat !important;
+	background-size: 100% 3px !important;
+	background-origin: border-box !important;
+	background-clip: border-box !important;
+}
+
+.modern-ui-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header::before {
+	right: calc(-1 * var(--vscode-spacing-size20));
+	bottom: calc((26px - var(--editor-group-tab-height)) / 2 - var(--vscode-spacing-size40));
+}
+
+.modern-ui-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header.collapsed::before {
+	right: 0;
 }
 
 .monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab.tab-group-collapsed {
