@@ -2986,12 +2986,6 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 						this.contextViewService.hideContextView();
 					}
 				}, true));
-				disposables.add(addDisposableListener(menu, EventType.FOCUS_OUT, event => {
-					const nextFocus = event.relatedTarget as Node | null;
-					if (!nextFocus || !menu.contains(nextFocus)) {
-						this.contextViewService.hideContextView();
-					}
-				}));
 				disposables.add(addDisposableListener(menu, EventType.KEY_DOWN, event => {
 					if (event.key === 'Escape') {
 						EventHelper.stop(event);
