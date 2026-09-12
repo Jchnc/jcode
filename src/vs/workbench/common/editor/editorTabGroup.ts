@@ -66,14 +66,17 @@ export interface IEditorTabGroupColor {
 }
 
 export const EDITOR_TAB_GROUP_COLORS: readonly IEditorTabGroupColor[] = [
-	{ id: 'grey', value: '#a8a8a8' },
-	{ id: 'blue', value: '#5c9df2' },
-	{ id: 'red', value: '#ef6b6b' },
-	{ id: 'yellow', value: '#e8c458' },
-	{ id: 'green', value: '#6bc46e' },
-	{ id: 'pink', value: '#e78ac1' },
-	{ id: 'purple', value: '#a98ae0' },
-	{ id: 'cyan', value: '#5ac4ce' },
+	{ id: 'grey', value: '#94a3b8' },
+	{ id: 'blue', value: '#60a5fa' },
+	{ id: 'cyan', value: '#22d3ee' },
+	{ id: 'teal', value: '#2dd4bf' },
+	{ id: 'red', value: '#fb7185' },
+	{ id: 'yellow', value: '#fbbf24' },
+	{ id: 'orange', value: '#fb923c' },
+	{ id: 'green', value: '#34d399' },
+	{ id: 'pink', value: '#f472b6' },
+	{ id: 'purple', value: '#a78bfa' },
+	{ id: 'indigo', value: '#818cf8' },
 ];
 
 export const DEFAULT_EDITOR_TAB_GROUP_COLOR = EDITOR_TAB_GROUP_COLORS[1].id; // 'blue'
@@ -85,7 +88,7 @@ export const DEFAULT_EDITOR_TAB_GROUP_COLOR = EDITOR_TAB_GROUP_COLORS[1].id; // 
  */
 export function getEditorTabGroupColor(color: string): string {
 	const preset = EDITOR_TAB_GROUP_COLORS.find(c => c.id === color);
-	return preset ? preset.value : color;
+	return preset?.value ?? color;
 }
 
 /** Returns a random preset color identifier. */

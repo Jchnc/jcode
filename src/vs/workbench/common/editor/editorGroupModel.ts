@@ -212,6 +212,7 @@ interface IEditorGroupModel extends IReadonlyEditorGroupModel {
 	setTabGroupCollapsed(groupId: string, collapsed: boolean): void;
 	renameTabGroup(groupId: string, name: string): void;
 	recolorTabGroup(groupId: string, color: string): void;
+	setTabGroupIcon(groupId: string, icon: string | undefined): void;
 	moveTabGroup(groupId: string, toIndex: number): void;
 	setTabGroupSaved(groupId: string, saved: boolean): void;
 	setTabGroupLocked(groupId: string, locked: boolean): void;
@@ -1399,6 +1400,17 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 		this.pushTabGroupUndoState();
 
 		group.color = color;
+		this._onDidModelChange.fire({ kind: GroupModelChangeKind.TAB_GROUP_CHANGED, tabGroup: group });
+	}
+
+	setTabGroupIcon(groupId: string, icon: string | undefined): void {
+		const group = this.getTabGroup(groupId);
+		if (!group || group.icon === icon) {
+			return;
+		}
+		this.pushTabGroupUndoState();
+
+		group.icon = icon;
 		this._onDidModelChange.fire({ kind: GroupModelChangeKind.TAB_GROUP_CHANGED, tabGroup: group });
 	}
 

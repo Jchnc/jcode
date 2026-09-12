@@ -343,6 +343,7 @@ export interface IEditorGroupView extends IDisposable, ISerializableView, IEdito
 	setTabGroupCollapsed(groupId: string, collapsed: boolean): void;
 	renameTabGroup(groupId: string, name: string): void;
 	recolorTabGroup(groupId: string, color: string): void;
+	setTabGroupIcon(groupId: string, icon: string | undefined): void;
 	moveTabGroup(groupId: string, toIndex: number): void;
 	setTabGroupSaved(groupId: string, saved: boolean): void;
 	setTabGroupLocked(groupId: string, locked: boolean): void;

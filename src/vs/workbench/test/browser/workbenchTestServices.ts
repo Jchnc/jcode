@@ -1019,6 +1019,7 @@ export class TestEditorGroupView implements IEditorGroupView {
 	setTabGroupCollapsed(_groupId: string, _collapsed: boolean): void { }
 	renameTabGroup(_groupId: string, _name: string): void { }
 	recolorTabGroup(_groupId: string, _color: string): void { }
+	setTabGroupIcon(_groupId: string, _icon: string | undefined): void { }
 	moveTabGroup(_groupId: string, _toIndex: number): void { }
 	setTabGroupSaved(_groupId: string, _saved: boolean): void { }
 	setTabGroupLocked(_groupId: string, _locked: boolean): void { }

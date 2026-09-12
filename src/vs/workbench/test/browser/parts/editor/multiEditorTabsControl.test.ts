@@ -69,6 +69,7 @@ suite('MultiEditorTabsControl', () => {
 			override addToTabGroup(groupId: string, editors: EditorInput[]) { model.addToTabGroup(groupId, editors); }
 			override renameTabGroup(groupId: string, name: string) { model.renameTabGroup(groupId, name); }
 			override recolorTabGroup(groupId: string, color: string) { model.recolorTabGroup(groupId, color); }
+			override setTabGroupIcon(groupId: string, icon: string | undefined) { model.setTabGroupIcon(groupId, icon); }
 			override setTabGroupSaved(groupId: string, saved: boolean) { model.setTabGroupSaved(groupId, saved); }
 			override setTabGroupLocked(groupId: string, locked: boolean) { model.setTabGroupLocked(groupId, locked); }
 			override get canUndoTabGroupAction() { return model.canUndoTabGroupAction; }
@@ -154,7 +155,7 @@ suite('MultiEditorTabsControl', () => {
 			actions: actionLabels
 		}, {
 			name: 'Work',
-			colors: 8,
+			colors: 11,
 			selectedColor: 'Blue',
 			actions: ['New Tab in Group', 'Move Group into New Window', 'Close Group', 'Ungroup Tabs']
 		});

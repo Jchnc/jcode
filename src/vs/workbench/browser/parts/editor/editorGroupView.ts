@@ -1223,6 +1223,10 @@ export class EditorGroupView extends Themable implements IEditorGroupView {
 		this.model.recolorTabGroup(groupId, color);
 	}
 
+	setTabGroupIcon(groupId: string, icon: string | undefined): void {
+		this.model.setTabGroupIcon(groupId, icon);
+	}
+
 	moveTabGroup(groupId: string, toIndex: number): void {
 		this.model.moveTabGroup(groupId, toIndex);
 	}

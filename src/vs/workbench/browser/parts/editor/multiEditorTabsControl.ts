@@ -38,7 +38,7 @@ import { addDisposableListener, EventType, EventHelper, Dimension, scheduleAtNex
 import { localize } from '../../../../nls.js';
 import { IEditorGroupMenuIds, IEditorGroupsView, EditorServiceImpl, IEditorGroupView, IInternalEditorOpenOptions, IEditorPartsView, isEditorGroupView, prepareMoveCopyEditors } from './editor.js';
 import { CloseEditorTabAction, CloseOtherEditorTabsInGroupAction, UnpinEditorAction } from './editorActions.js';
-import { CLOSE_TAB_GROUP_COMMAND_ID, DISSOLVE_TAB_GROUP_COMMAND_ID, LOCK_TAB_GROUP_COMMAND_ID, SAVE_TAB_GROUP_COMMAND_ID, UNDO_TAB_GROUP_ACTION_COMMAND_ID, UNLOCK_GROUP_COMMAND_ID, UNLOCK_TAB_GROUP_COMMAND_ID, UNSAVE_TAB_GROUP_COMMAND_ID, getTabGroupMembers } from './editorCommands.js';
+import { UNLOCK_GROUP_COMMAND_ID, getTabGroupMembers } from './editorCommands.js';
 import { assertReturnsAllDefined, assertReturnsDefined } from '../../../../base/common/types.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { basenameOrAuthority } from '../../../../base/common/resources.js';
@@ -160,7 +160,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		@IContextMenuService contextMenuService: IContextMenuService,
 		@IInstantiationService instantiationService: IInstantiationService,
 		@IContextKeyService contextKeyService: IContextKeyService,
-		@IKeybindingService private readonly tabGroupKeybindingService: IKeybindingService,
+		@IKeybindingService tabGroupKeybindingService: IKeybindingService,
 		@INotificationService notificationService: INotificationService,
 		@IQuickInputService quickInputService: IQuickInputService,
 		@IThemeService themeService: IThemeService,
@@ -2681,20 +2681,12 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		const dot = $('span.tab-group-color-dot');
 		header.appendChild(dot);
 
-		const name = $('span.tab-group-name');
-		name.textContent = group.name || localize('tabGroup.unnamed', 'Tab Group');
-		header.appendChild(name);
-
 		if (group.saved) {
 			const savedIndicator = $('span.tab-group-saved');
 			savedIndicator.classList.add(...ThemeIcon.asClassNameArray(Codicon.bookmark));
 			savedIndicator.setAttribute('aria-hidden', 'true');
 			header.appendChild(savedIndicator);
 		}
-
-		const countBadge = $('span.tab-group-count');
-		countBadge.textContent = String(count);
-		header.appendChild(countBadge);
 
 		if (dirtyCount > 0) {
 			const dirtyIndicator = $('span.tab-group-dirty-indicator');
@@ -2711,9 +2703,13 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 			header.appendChild(lockIndicator);
 		}
 
-		const chevron = $('span.tab-group-chevron');
-		chevron.classList.add('codicon', group.collapsed ? 'codicon-chevron-right' : 'codicon-chevron-down');
-		header.appendChild(chevron);
+		const name = $('span.tab-group-name');
+		name.textContent = group.name || localize('tabGroup.unnamed', 'Tab Group');
+		header.appendChild(name);
+
+		const countBadge = $('span.tab-group-count');
+		countBadge.textContent = String(count);
+		header.appendChild(countBadge);
 
 		const label = group.name || localize('tabGroup.unnamed', 'Tab Group');
 		const status = dirtyCount > 0 ? localize('tabGroup.headerStatusDirty', '{0} tabs, {1} unsaved', count, dirtyCount) : localize('tabGroup.headerStatus', '{0} tabs', count);
@@ -2873,14 +2869,17 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 				}));
 
 				const colorLabels = new Map([
-					['grey', localize('tabGroup.colorGrey', 'Grey')],
+					['grey', localize('tabGroup.colorGrey', 'Slate')],
 					['blue', localize('tabGroup.colorBlue', 'Blue')],
-					['red', localize('tabGroup.colorRed', 'Red')],
-					['yellow', localize('tabGroup.colorYellow', 'Yellow')],
-					['green', localize('tabGroup.colorGreen', 'Green')],
+					['cyan', localize('tabGroup.colorCyan', 'Cyan')],
+					['teal', localize('tabGroup.colorTeal', 'Teal')],
+					['red', localize('tabGroup.colorRed', 'Rose')],
+					['yellow', localize('tabGroup.colorYellow', 'Amber')],
+					['orange', localize('tabGroup.colorOrange', 'Orange')],
+					['green', localize('tabGroup.colorGreen', 'Emerald')],
 					['pink', localize('tabGroup.colorPink', 'Pink')],
-					['purple', localize('tabGroup.colorPurple', 'Purple')],
-					['cyan', localize('tabGroup.colorCyan', 'Cyan')]
+					['purple', localize('tabGroup.colorPurple', 'Violet')],
+					['indigo', localize('tabGroup.colorIndigo', 'Indigo')]
 				]);
 				const colorPicker = identitySection.appendChild($('.tab-group-menu-colors'));
 				colorPicker.setAttribute('role', 'radiogroup');
@@ -2921,10 +2920,67 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 					}));
 				}
 
+				const iconOptions: readonly { readonly icon: ThemeIcon | undefined; readonly label: string }[] = [
+					{ icon: undefined, label: localize('tabGroup.iconNone', 'No Icon') },
+					{ icon: Codicon.folder, label: localize('tabGroup.iconFolder', 'Folder') },
+					{ icon: Codicon.code, label: localize('tabGroup.iconCode', 'Code') },
+					{ icon: Codicon.terminal, label: localize('tabGroup.iconTerminal', 'Terminal') },
+					{ icon: Codicon.repo, label: localize('tabGroup.iconRepository', 'Repository') },
+					{ icon: Codicon.database, label: localize('tabGroup.iconDatabase', 'Database') },
+					{ icon: Codicon.globe, label: localize('tabGroup.iconGlobe', 'Globe') },
+					{ icon: Codicon.beaker, label: localize('tabGroup.iconTest', 'Test') },
+					{ icon: Codicon.rocket, label: localize('tabGroup.iconRocket', 'Rocket') },
+					{ icon: Codicon.lightbulb, label: localize('tabGroup.iconIdea', 'Idea') },
+					{ icon: Codicon.starFull, label: localize('tabGroup.iconStar', 'Star') },
+					{ icon: Codicon.heart, label: localize('tabGroup.iconHeart', 'Heart') },
+					{ icon: Codicon.briefcase, label: localize('tabGroup.iconWork', 'Work') },
+					{ icon: Codicon.tools, label: localize('tabGroup.iconTools', 'Tools') },
+					{ icon: Codicon.paintcan, label: localize('tabGroup.iconDesign', 'Design') },
+					{ icon: Codicon.zap, label: localize('tabGroup.iconZap', 'Zap') }
+				];
+				const iconPicker = identitySection.appendChild($('.tab-group-menu-icons'));
+				iconPicker.setAttribute('role', 'radiogroup');
+				iconPicker.setAttribute('aria-label', localize('tabGroup.iconAriaLabel', 'Tab Group Icon'));
+				const iconButtons: HTMLButtonElement[] = [];
+				for (const option of iconOptions) {
+					const button = iconPicker.appendChild($('button.tab-group-menu-icon')) as HTMLButtonElement;
+					button.type = 'button';
+					button.setAttribute('role', 'radio');
+					button.setAttribute('aria-label', option.label);
+					button.title = option.label;
+					button.classList.add(...ThemeIcon.asClassNameArray(option.icon ?? Codicon.circleSlash));
+					const selected = group.icon === option.icon?.id;
+					button.classList.toggle('selected', selected);
+					button.setAttribute('aria-checked', String(selected));
+					button.tabIndex = selected ? 0 : -1;
+					iconButtons.push(button);
+
+					disposables.add(addDisposableListener(button, EventType.CLICK, event => {
+						EventHelper.stop(event);
+						this.groupView.setTabGroupIcon(group.id, option.icon?.id);
+						for (const candidate of iconButtons) {
+							const isSelected = candidate === button;
+							candidate.classList.toggle('selected', isSelected);
+							candidate.setAttribute('aria-checked', String(isSelected));
+							candidate.tabIndex = isSelected ? 0 : -1;
+						}
+					}));
+					disposables.add(addDisposableListener(button, EventType.KEY_DOWN, event => {
+						const keyboardEvent = event as KeyboardEvent;
+						const columns = 8;
+						const direction = keyboardEvent.key === 'ArrowRight' ? 1 : keyboardEvent.key === 'ArrowLeft' ? -1 : keyboardEvent.key === 'ArrowDown' ? columns : keyboardEvent.key === 'ArrowUp' ? -columns : 0;
+						if (direction !== 0) {
+							EventHelper.stop(keyboardEvent);
+							const nextIndex = (iconButtons.indexOf(button) + direction + iconButtons.length) % iconButtons.length;
+							iconButtons[nextIndex].focus();
+						}
+					}));
+				}
+
 				const actionList = menu.appendChild($('.tab-group-menu-actions'));
 				actionList.setAttribute('role', 'menu');
 				const actionButtons: HTMLButtonElement[] = [];
-				const appendAction = (commandId: string | undefined, label: string, icon: ThemeIcon, run: () => void | Promise<void>, disabled = false) => {
+				const appendAction = (label: string, icon: ThemeIcon, run: () => void | Promise<void>, disabled = false) => {
 					const button = actionList.appendChild($('button.tab-group-menu-action')) as HTMLButtonElement;
 					button.type = 'button';
 					button.setAttribute('role', 'menuitem');
@@ -2938,14 +2994,6 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 					iconElement.classList.add(...ThemeIcon.asClassNameArray(icon));
 					const labelElement = button.appendChild($('span.tab-group-menu-action-label'));
 					labelElement.textContent = label;
-					if (commandId) {
-						const keybinding = this.tabGroupKeybindingService.lookupKeybinding(commandId)?.getLabel();
-						if (keybinding) {
-							const keybindingElement = button.appendChild($('span.tab-group-menu-keybinding'));
-							keybindingElement.textContent = keybinding;
-						}
-					}
-
 					disposables.add(addDisposableListener(button, EventType.CLICK, event => {
 						EventHelper.stop(event);
 						this.contextViewService.hideContextView();
@@ -2969,17 +3017,17 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 					}));
 				};
 
-				appendAction('workbench.action.files.newUntitledFile', localize('newTabInGroup', 'New Tab in Group'), Codicon.newFile, () => this.openNewTabInGroup(group), group.locked);
-				appendAction(undefined, localize('moveTabGroupToNewWindow', 'Move Group into New Window'), Codicon.emptyWindow, () => this.moveTabGroupToNewWindow(group), group.locked);
-				appendAction(group.saved ? UNSAVE_TAB_GROUP_COMMAND_ID : SAVE_TAB_GROUP_COMMAND_ID, group.saved ? localize('unsaveTabGroup', 'Stop Saving Group') : localize('saveTabGroup', 'Save Group'), Codicon.bookmark, () => this.groupView.setTabGroupSaved(group.id, !group.saved));
-				appendAction(group.locked ? UNLOCK_TAB_GROUP_COMMAND_ID : LOCK_TAB_GROUP_COMMAND_ID, group.locked ? localize('unlockTabGroup', 'Unlock Group') : localize('lockTabGroup', 'Lock Group'), group.locked ? Codicon.unlock : Codicon.lock, () => this.groupView.setTabGroupLocked(group.id, !group.locked));
-				appendAction(CLOSE_TAB_GROUP_COMMAND_ID, localize('closeTabGroup', 'Close Group'), Codicon.closeAll, () => this.closeTabGroup(group), group.locked);
+				appendAction(localize('newTabInGroup', 'New Tab in Group'), Codicon.newFile, () => this.openNewTabInGroup(group), group.locked);
+				appendAction(localize('moveTabGroupToNewWindow', 'Move Group into New Window'), Codicon.emptyWindow, () => this.moveTabGroupToNewWindow(group), group.locked);
+				appendAction(group.saved ? localize('unsaveTabGroup', 'Stop Saving Group') : localize('saveTabGroup', 'Save Group'), Codicon.bookmark, () => this.groupView.setTabGroupSaved(group.id, !group.saved));
+				appendAction(group.locked ? localize('unlockTabGroup', 'Unlock Group') : localize('lockTabGroup', 'Lock Group'), group.locked ? Codicon.unlock : Codicon.lock, () => this.groupView.setTabGroupLocked(group.id, !group.locked));
+				appendAction(localize('closeTabGroup', 'Close Group'), Codicon.closeAll, () => this.closeTabGroup(group), group.locked);
 
 				const separator = actionList.appendChild($('.tab-group-menu-separator'));
 				separator.setAttribute('role', 'separator');
 
-				appendAction(UNDO_TAB_GROUP_ACTION_COMMAND_ID, localize('undoTabGroupAction', 'Undo Last Group Change'), Codicon.history, () => { this.groupView.undoLastTabGroupAction(); }, !this.groupView.canUndoTabGroupAction);
-				appendAction(DISSOLVE_TAB_GROUP_COMMAND_ID, localize('dissolveTabGroup', 'Ungroup Tabs'), Codicon.ungroupByRefType, () => this.groupView.dissolveTabGroup(group.id), group.locked);
+				appendAction(localize('undoTabGroupAction', 'Undo Last Group Change'), Codicon.history, () => { this.groupView.undoLastTabGroupAction(); }, !this.groupView.canUndoTabGroupAction);
+				appendAction(localize('dissolveTabGroup', 'Ungroup Tabs'), Codicon.ungroupByRefType, () => this.groupView.dissolveTabGroup(group.id), group.locked);
 
 				disposables.add(addDisposableListener(getWindow(menu).document, EventType.POINTER_DOWN, event => {
 					if (!menu.contains(event.target as Node)) {
