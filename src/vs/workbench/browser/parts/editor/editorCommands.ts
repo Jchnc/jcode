@@ -1512,7 +1512,7 @@ type MoveTabGroupTarget =
 	| { kind: 'removeFromGroup' }
 	| { kind: 'group'; groupId: string };
 
-export async function pickMoveTabGroupTarget(quickInputService: IQuickInputService, groups: readonly IEditorTabGroup[], activeGroup: IEditorTabGroup | undefined): Promise<MoveTabGroupTarget | undefined> {
+export async function pickMoveTabGroupTarget(quickInputService: IQuickInputService, groups: readonly IEditorTabGroup[], activeGroup: IEditorTabGroup | undefined, hasGroupedEditors = !!activeGroup): Promise<MoveTabGroupTarget | undefined> {
 	type Pick = IQuickPickItem & { target?: MoveTabGroupTarget };
 
 	const picks: Pick[] = [
@@ -1522,7 +1522,7 @@ export async function pickMoveTabGroupTarget(quickInputService: IQuickInputServi
 			.map(group => ({ label: group.name || group.color, target: { kind: 'group' as const, groupId: group.id } }))
 	];
 
-	if (activeGroup) {
+	if (hasGroupedEditors) {
 		picks.push({ label: localize('tabGroup.moveRemoveFromGroup', 'Remove from Group'), target: { kind: 'removeFromGroup' } });
 	}
 
@@ -1814,8 +1814,10 @@ function registerTabGroupCommands(): void {
 			if (editors.length === 0) {
 				return;
 			}
-			const activeGroup = group.getTabGroupForEditor(editors[0]);
-			const target = await pickMoveTabGroupTarget(quickInputService, group.tabGroups, activeGroup);
+			const editorGroups = editors.map(editor => group.getTabGroupForEditor(editor));
+			const firstGroup = editorGroups[0];
+			const commonGroup = firstGroup && editorGroups.every(editorGroup => editorGroup?.id === firstGroup.id) ? firstGroup : undefined;
+			const target = await pickMoveTabGroupTarget(quickInputService, group.tabGroups, commonGroup, editorGroups.some(Boolean));
 			if (!target) {
 				return;
 			}

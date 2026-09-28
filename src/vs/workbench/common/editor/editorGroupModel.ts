@@ -393,6 +393,20 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 				}
 			}
 
+			// A newly opened editor does not belong to a tab group. Keep it after the
+			// whole group when its requested position would split group members.
+			if (!makeSticky && targetIndex > 0 && targetIndex < this.editors.length) {
+				const precedingGroupId = this.editorTabGroups.get(this.editors[targetIndex - 1]);
+				if (precedingGroupId) {
+					for (let index = this.editors.length - 1; index >= targetIndex; index--) {
+						if (this.editorTabGroups.get(this.editors[index]) === precedingGroupId) {
+							targetIndex = index + 1;
+							break;
+						}
+					}
+				}
+			}
+
 			// If the editor becomes sticky, increment the sticky index and adjust
 			// the targetIndex to be at the end of sticky editors unless already.
 			if (makeSticky) {
@@ -1216,11 +1230,8 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 	}
 
 	createTabGroup(editors: EditorInput[], name?: string, color?: string, options?: IEditorTabGroupCreateOptions): IEditorTabGroup | undefined {
-		// Editors must be present, non-sticky and not already part of a group
-		const candidates = editors.filter(editor => {
-			const index = this.indexOf(editor);
-			return index >= 0 && !this.isSticky(index) && !this.editorTabGroups.has(editor);
-		});
+		const selectedIndexes = new Set(editors.map(editor => this.indexOf(editor)));
+		const candidates = this.editors.filter((editor, index) => selectedIndexes.has(index) && !this.isSticky(index) && !this.getTabGroupForEditor(editor)?.locked);
 		if (candidates.length === 0) {
 			return undefined;
 		}
@@ -1233,6 +1244,21 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 		while (this.getTabGroup(id)) {
 			id = generateTabGroupId();
 		}
+		const affectedGroups = new Set<IEditorTabGroup>();
+		for (const editor of candidates) {
+			const existingGroup = this.getTabGroupForEditor(editor);
+			if (existingGroup) {
+				affectedGroups.add(existingGroup);
+			}
+		}
+
+		// Keep every group's editors together when the selection spans tabs or groups.
+		const firstIndex = this.indexOf(candidates[0]);
+		if (affectedGroups.size > 0 || candidates.some((editor, index) => this.indexOf(editor) !== firstIndex + index)) {
+			const selected = new Set(candidates);
+			this.editors.splice(0, this.editors.length, ...this.editors.filter(editor => !selected.has(editor)), ...candidates);
+		}
+
 		const group: IEditorTabGroup = {
 			id,
 			name: name?.trim() || localize('defaultTabGroupName', "Tab Group"),
@@ -1247,6 +1273,12 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 		this._tabGroups.push(group);
 		for (const editor of candidates) {
 			this.editorTabGroups.set(editor, group.id);
+		}
+		for (const affectedGroup of affectedGroups) {
+			this.pruneTabGroup(affectedGroup.id);
+			if (this.getTabGroup(affectedGroup.id)) {
+				this._onDidModelChange.fire({ kind: GroupModelChangeKind.TAB_GROUP_CHANGED, tabGroup: affectedGroup });
+			}
 		}
 
 		this._onDidModelChange.fire({ kind: GroupModelChangeKind.TAB_GROUP_CREATED, tabGroup: group });
@@ -1287,6 +1319,8 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 		}
 
 		this.pushTabGroupUndoState();
+		const selected = new Set(removableEditors);
+		this.editors.splice(0, this.editors.length, ...this.editors.filter(editor => !selected.has(editor)), ...this.editors.filter(editor => selected.has(editor)));
 
 		for (const editor of removableEditors) {
 			const group = this.getTabGroupForEditor(editor);
@@ -1300,7 +1334,9 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 
 		for (const group of affectedGroups) {
 			this.pruneTabGroup(group.id);
-			this._onDidModelChange.fire({ kind: GroupModelChangeKind.TAB_GROUP_CHANGED, tabGroup: group });
+			if (this.getTabGroup(group.id)) {
+				this._onDidModelChange.fire({ kind: GroupModelChangeKind.TAB_GROUP_CHANGED, tabGroup: group });
+			}
 		}
 	}
 
@@ -1310,9 +1346,9 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 			return;
 		}
 
-		const candidates = editors.filter(editor => {
-			const index = this.indexOf(editor);
-			if (index < 0 || this.isSticky(index)) {
+		const selectedIndexes = new Set(editors.map(editor => this.indexOf(editor)));
+		const candidates = this.editors.filter((editor, index) => {
+			if (!selectedIndexes.has(index) || this.isSticky(index)) {
 				return false;
 			}
 
@@ -1327,6 +1363,12 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 		}
 
 		this.pushTabGroupUndoState();
+		const selected = new Set(candidates);
+		const remainingEditors = this.editors.filter(editor => !selected.has(editor));
+		const lastGroupIndex = remainingEditors.findLastIndex(editor => this.editorTabGroups.get(editor) === groupId);
+		remainingEditors.splice(lastGroupIndex + 1, 0, ...candidates);
+		this.editors.splice(0, this.editors.length, ...remainingEditors);
+
 		const affectedGroups = new Set<IEditorTabGroup>();
 		for (const editor of candidates) {
 			const existingGroupId = this.editorTabGroups.get(editor);

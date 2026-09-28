@@ -18,6 +18,7 @@ import { MultiRowEditorControl } from './multiRowEditorTabsControl.js';
 import { IReadonlyEditorGroupModel } from '../../../common/editor/editorGroupModel.js';
 import { NoEditorTabsControl } from './noEditorTabsControl.js';
 import { EditorHeaderControl } from './editorHeaderControl.js';
+import { VerticalEditorTabsControl } from './verticalEditorTabsControl.js';
 
 export interface IEditorTitleControlDimensions {
 
@@ -43,6 +44,7 @@ export class EditorTitleControl extends Themable {
 
 	constructor(
 		private readonly parent: HTMLElement,
+		private readonly verticalTabsParent: HTMLElement,
 		private readonly editorPartsView: IEditorPartsView,
 		private readonly groupsView: IEditorGroupsView,
 		private readonly groupView: IEditorGroupView,
@@ -71,11 +73,16 @@ export class EditorTitleControl extends Themable {
 				break;
 			case 'multiple':
 			default:
-				tabsControlType = this.groupsView.partOptions.pinnedTabsOnSeparateRow ? MultiRowEditorControl : MultiEditorTabsControl;
+				if (this.groupsView.partOptions.tabPosition !== 'top') {
+					tabsControlType = VerticalEditorTabsControl;
+				} else {
+					tabsControlType = this.groupsView.partOptions.pinnedTabsOnSeparateRow ? MultiRowEditorControl : MultiEditorTabsControl;
+				}
 				break;
 		}
 
-		const control = this.instantiationService.createInstance(tabsControlType, this.parent, this.editorPartsView, this.groupsView, this.groupView, this.model, this.menuIds, this.showHeader, this.useModernUITabs);
+		const tabsParent = this.groupsView.partOptions.showTabs === 'multiple' && this.groupsView.partOptions.tabPosition !== 'top' ? this.verticalTabsParent : this.parent;
+		const control = this.instantiationService.createInstance(tabsControlType, tabsParent, this.editorPartsView, this.groupsView, this.groupView, this.model, this.menuIds, this.showHeader, this.useModernUITabs);
 		return this.editorTabsControlDisposable.add(control);
 	}
 
@@ -168,12 +175,14 @@ export class EditorTitleControl extends Themable {
 		// Update editor tabs control if options changed
 		if (
 			oldOptions.showTabs !== newOptions.showTabs ||
+			oldOptions.tabPosition !== newOptions.tabPosition ||
 			(newOptions.showTabs !== 'single' && oldOptions.pinnedTabsOnSeparateRow !== newOptions.pinnedTabsOnSeparateRow)
 		) {
 			// Clear old
 			this.editorTabsControlDisposable.clear();
 			this.headerControlDisposable.clear();
 			clearNode(this.parent);
+			clearNode(this.verticalTabsParent);
 
 			// Create new
 			this.editorTabsControl = this.createEditorTabsControl();
@@ -186,12 +195,15 @@ export class EditorTitleControl extends Themable {
 		}
 	}
 
-	layout(dimensions: IEditorTitleControlDimensions, headerWidth = dimensions.container.width): Dimension {
-
-		// Layout tabs control
-		this.editorTabsControl.layout(dimensions);
-
-		this.headerControl.layout(headerWidth);
+	layout(dimensions: IEditorTitleControlDimensions, headerWidth = dimensions.container.width, verticalTabsWidth = this.groupsView.partOptions.verticalTabsWidth): Dimension {
+		if (this.groupsView.partOptions.showTabs === 'multiple' && this.groupsView.partOptions.tabPosition !== 'top') {
+			this.headerControl.layout(headerWidth);
+			const verticalTabsDimension = new Dimension(verticalTabsWidth, Math.max(0, dimensions.container.height - this.headerControl.height));
+			this.editorTabsControl.layout({ container: verticalTabsDimension, available: verticalTabsDimension });
+		} else {
+			this.editorTabsControl.layout(dimensions);
+			this.headerControl.layout(headerWidth);
+		}
 
 		return new Dimension(dimensions.container.width, this.getHeight().total);
 	}

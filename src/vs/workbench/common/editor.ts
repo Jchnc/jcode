@@ -1290,6 +1290,8 @@ export interface IEditorPartTabGroupsOptions extends Required<IEditorPartTabGrou
 
 interface IEditorPartConfiguration {
 	showTabs?: 'multiple' | 'single' | 'none';
+	tabPosition?: 'top' | 'left' | 'right';
+	verticalTabsWidth?: number;
 	wrapTabs?: boolean;
 	scrollToSwitchTabs?: boolean;
 	highlightModifiedTabs?: boolean;

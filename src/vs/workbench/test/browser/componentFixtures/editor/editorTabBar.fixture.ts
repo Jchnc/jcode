@@ -518,6 +518,7 @@ export function renderEditorTabBarFixture(ctx: ComponentFixtureContext, options:
 	}
 
 	const editorContainer = $('.editor-container');
+	const verticalTabsContainer = $('.vertical-tabs-container');
 	editorContainer.style.height = '96px';
 	editorContainer.style.opacity = '0.6';
 
@@ -533,6 +534,7 @@ export function renderEditorTabBarFixture(ctx: ComponentFixtureContext, options:
 	const titleControl = disposableStore.add(instantiationService.createInstance(
 		EditorTitleControl,
 		titleContainer,
+		verticalTabsContainer,
 		editorPartsView,
 		groupsView,
 		groupView,

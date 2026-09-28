@@ -15,7 +15,7 @@ import { NotificationsPosition, NotificationsSettings } from '../common/notifica
 import { ACCOUNTS_AVATAR_SETTING } from '../services/authentication/common/authentication.js';
 import { CustomEditorLabelService } from '../services/editor/common/customEditorLabelService.js';
 import { MOUSE_BACK_FORWARD_NAVIGATION_SETTING } from '../services/history/common/history.js';
-import { ActivityBarPosition, EditorActionsLocation, EditorTabsMode, LayoutSettings, ModernUIDensity } from '../services/layout/browser/layoutService.js';
+import { ActivityBarPosition, EditorActionsLocation, EditorTabPosition, EditorTabsMode, LayoutSettings, ModernUIDensity } from '../services/layout/browser/layoutService.js';
 import { defaultWindowTitle, defaultWindowTitleSeparator } from './parts/titlebar/windowTitle.js';
 
 const registry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration);
@@ -70,6 +70,24 @@ const registry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Con
 				],
 				'description': localize('showEditorTabs', "Controls whether opened editors should show as individual tabs, one single large tab or if the title area should not be shown."),
 				'default': 'multiple'
+			},
+			[LayoutSettings.EDITOR_TAB_POSITION]: {
+				'type': 'string',
+				'enum': [EditorTabPosition.TOP, EditorTabPosition.LEFT, EditorTabPosition.RIGHT],
+				'enumDescriptions': [
+					localize('workbench.editor.tabPosition.top', "Show editor tabs above the editor."),
+					localize('workbench.editor.tabPosition.left', "Show editor tabs to the left of the editor."),
+					localize('workbench.editor.tabPosition.right', "Show editor tabs to the right of the editor."),
+				],
+				'description': localize('workbench.editor.tabPosition', "Controls where multiple editor tabs are shown."),
+				'default': EditorTabPosition.TOP
+			},
+			'workbench.editor.verticalTabsWidth': {
+				'type': 'number',
+				'default': 240,
+				'minimum': 140,
+				'maximum': 500,
+				'markdownDescription': localize({ comment: ['{0} is a setting name rendered as a link'], key: 'workbench.editor.verticalTabsWidth' }, "Controls the width of editor tabs when {0} is set to `left` or `right`.", '`#workbench.editor.tabPosition#`')
 			},
 			[LayoutSettings.EDITOR_ACTIONS_LOCATION]: {
 				'type': 'string',

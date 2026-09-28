@@ -250,11 +250,41 @@
 
 /* Editor */
 
-.monaco-workbench .part.editor > .content .editor-group-container.empty > .editor-container {
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-body {
+	display: flex;
+	position: relative;
+	min-width: 0;
+	min-height: 0;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-body.vertical-tabs-right {
+	flex-direction: row-reverse;
+}
+
+.monaco-workbench.modern-ui.floating-panels:not(.modern-ui-compact) .part.editor > .content .editor-group-container > .editor-group-body:is(.vertical-tabs-left, .vertical-tabs-right) {
+	gap: var(--modern-ui-floating-card-margin);
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-body > .vertical-tabs-container {
+	position: relative;
+	flex: 0 0 auto;
+	overflow: hidden;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-body > .vertical-tabs-container.hidden {
 	display: none;
 }
 
-.monaco-workbench .part.editor > .content .editor-group-container > .editor-container > .editor-instance {
+.monaco-workbench .part.editor > .content .editor-group-container.empty > .editor-group-body {
+	display: none;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-body > .editor-container {
+	position: relative;
+	min-width: 0;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-body > .editor-container > .editor-instance {
 	height: 100%;
 }
 

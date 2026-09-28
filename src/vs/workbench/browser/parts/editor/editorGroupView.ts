@@ -29,7 +29,7 @@ import { DisposableStore, MutableDisposable, toDisposable } from '../../../../ba
 import { ITelemetryData, ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
 import { DeferredPromise, Promises, RunOnceWorker } from '../../../../base/common/async.js';
 import { EventType as TouchEventType, GestureEvent } from '../../../../base/browser/touch.js';
-import { IEditorGroupsView, IEditorGroupView, fillActiveEditorViewState, EditorServiceImpl, IEditorGroupTitleHeight, IInternalEditorOpenOptions, IInternalMoveCopyOptions, IInternalEditorCloseOptions, IInternalEditorTitleControlOptions, IEditorPartsView, IEditorGroupViewOptions } from './editor.js';
+import { IEditorGroupsView, IEditorGroupView, fillActiveEditorViewState, EditorServiceImpl, IEditorGroupTitleHeight, IInternalEditorOpenOptions, IInternalMoveCopyOptions, IInternalEditorCloseOptions, IInternalEditorTitleControlOptions, IEditorPartsView, IEditorGroupViewOptions, DEFAULT_EDITOR_PART_OPTIONS } from './editor.js';
 import { ActionBar } from '../../../../base/browser/ui/actionbar/actionbar.js';
 import { IKeybindingService } from '../../../../platform/keybinding/common/keybinding.js';
 import { Separator, SubmenuAction } from '../../../../base/common/actions.js';
@@ -53,7 +53,9 @@ import { isLinux, isMacintosh, isNative, isWindows } from '../../../../base/comm
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { TelemetryTrustedValue } from '../../../../platform/telemetry/common/telemetryUtils.js';
 import { defaultProgressBarStyles } from '../../../../platform/theme/browser/defaultStyles.js';
-import { IBoundarySashes } from '../../../../base/browser/ui/sash/sash.js';
+import { IBoundarySashes, Orientation, Sash, SashState } from '../../../../base/browser/ui/sash/sash.js';
+import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
+import { FLOATING_PANEL_MARGIN } from '../../../services/layout/browser/layoutService.js';
 import { EditorGroupWatermark } from './editorGroupWatermark.js';
 import { EditorTitleControl } from './editorTitleControl.js';
 import { EditorPane } from './editorPane.js';
@@ -127,6 +129,11 @@ export class EditorGroupView extends Themable implements IEditorGroupView {
 
 	private readonly titleContainer: HTMLElement;
 	private readonly titleControl: EditorTitleControl;
+	private readonly bodyContainer: HTMLElement;
+	private readonly verticalTabsContainer: HTMLElement;
+	private readonly verticalTabsSash: Sash;
+	private resizedVerticalTabsWidth: number | undefined;
+	private sashStartWidth: number | undefined;
 
 	private readonly progressBar: ProgressBar;
 
@@ -176,7 +183,8 @@ export class EditorGroupView extends Themable implements IEditorGroupView {
 		@IHostService private readonly hostService: IHostService,
 		@IDialogService private readonly dialogService: IDialogService,
 		@IFileService private readonly fileService: IFileService,
-		@ICommandService private readonly commandService: ICommandService
+		@ICommandService private readonly commandService: ICommandService,
+		@IConfigurationService private readonly configurationService: IConfigurationService
 	) {
 		super(themeService);
 
@@ -226,12 +234,41 @@ export class EditorGroupView extends Themable implements IEditorGroupView {
 			this.titleContainer = $('.title');
 			this.element.appendChild(this.titleContainer);
 
-			// Title control
-			this.titleControl = this._register(this.scopedInstantiationService.createInstance(EditorTitleControl, this.titleContainer, this.editorPartsView, this.groupsView, this, this.model, options?.menuIds, options?.showHeader === true, options?.reserveHeaderSpace, options?.useModernUITabs === true));
-
-			// Editor container
+			// Editor body
+			this.bodyContainer = $('.editor-group-body');
+			this.verticalTabsContainer = $('.vertical-tabs-container');
 			this.editorContainer = $('.editor-container');
-			this.element.appendChild(this.editorContainer);
+			this.bodyContainer.append(this.verticalTabsContainer, this.editorContainer);
+			this.element.appendChild(this.bodyContainer);
+			this.verticalTabsSash = this._register(new Sash(this.bodyContainer, {
+				getVerticalSashLeft: () => this.groupsView.partOptions.tabPosition === 'right' ? this.bodyContainer.clientWidth - this.verticalTabsContainer.offsetWidth - this.verticalTabsGap / 2 : this.verticalTabsContainer.offsetWidth + this.verticalTabsGap / 2,
+				getVerticalSashHeight: () => this.bodyContainer.clientHeight
+			}, { orientation: Orientation.VERTICAL }));
+			this._register(this.verticalTabsSash.addClass('vertical-tabs-sash'));
+			this._register(this.verticalTabsSash.onDidStart(() => this.sashStartWidth = this.verticalTabsWidth));
+			this._register(this.verticalTabsSash.onDidChange(event => {
+				if (this.sashStartWidth === undefined) {
+					return;
+				}
+				const direction = this.groupsView.partOptions.tabPosition === 'right' ? -1 : 1;
+				const maxWidth = Math.min(500, Math.max(140, this.bodyContainer.clientWidth - this.editorPane.minimumWidth - this.verticalTabsGap));
+				this.resizedVerticalTabsWidth = Math.min(maxWidth, Math.max(140, this.sashStartWidth + direction * (event.currentX - event.startX)));
+				this.relayout();
+			}));
+			this._register(this.verticalTabsSash.onDidEnd(() => {
+				this.sashStartWidth = undefined;
+				if (this.resizedVerticalTabsWidth !== undefined) {
+					void this.configurationService.updateValue('workbench.editor.verticalTabsWidth', this.resizedVerticalTabsWidth);
+				}
+			}));
+			this._register(this.verticalTabsSash.onDidReset(() => {
+				this.resizedVerticalTabsWidth = undefined;
+				this.relayout();
+				void this.configurationService.updateValue('workbench.editor.verticalTabsWidth', DEFAULT_EDITOR_PART_OPTIONS.verticalTabsWidth);
+			}));
+
+			// Title control
+			this.titleControl = this._register(this.scopedInstantiationService.createInstance(EditorTitleControl, this.titleContainer, this.verticalTabsContainer, this.editorPartsView, this.groupsView, this, this.model, options?.menuIds, options?.showHeader === true, options?.reserveHeaderSpace, options?.useModernUITabs === true));
 
 			// Editor pane
 			this.editorPane = this._register(this.scopedInstantiationService.createInstance(EditorPanes, this.element, this.editorContainer, this));
@@ -557,8 +594,14 @@ export class EditorGroupView extends Themable implements IEditorGroupView {
 	}
 
 	private updateTitleContainer(): void {
-		this.titleContainer.classList.toggle('tabs', this.groupsView.partOptions.showTabs === 'multiple');
+		const { showTabs, tabPosition } = this.groupsView.partOptions;
+		const hasVerticalTabs = showTabs === 'multiple' && tabPosition !== 'top';
+		this.titleContainer.classList.toggle('tabs', showTabs === 'multiple' && !hasVerticalTabs);
 		this.titleContainer.classList.toggle('show-file-icons', this.groupsView.partOptions.showIcons);
+		this.bodyContainer.classList.toggle('vertical-tabs-left', hasVerticalTabs && tabPosition === 'left');
+		this.bodyContainer.classList.toggle('vertical-tabs-right', hasVerticalTabs && tabPosition === 'right');
+		this.verticalTabsContainer.classList.toggle('hidden', !hasVerticalTabs);
+		this.verticalTabsSash.state = hasVerticalTabs ? SashState.Enabled : SashState.Disabled;
 	}
 
 	private restoreEditors(from: IEditorGroupView | ISerializedEditorGroupModel | null, groupViewOptions?: IEditorGroupViewOptions): Promise<void> | undefined {
@@ -833,6 +876,9 @@ export class EditorGroupView extends Themable implements IEditorGroupView {
 	}
 
 	private onDidChangeEditorPartOptions(event: IEditorPartOptionsChangeEvent): void {
+		if (this.sashStartWidth === undefined) {
+			this.resizedVerticalTabsWidth = undefined;
+		}
 
 		// Title container
 		this.updateTitleContainer();
@@ -843,6 +889,8 @@ export class EditorGroupView extends Themable implements IEditorGroupView {
 		// Title control switch between singleEditorTabs, multiEditorTabs and multiRowEditorTabs
 		if (
 			event.oldPartOptions.showTabs !== event.newPartOptions.showTabs ||
+			event.oldPartOptions.tabPosition !== event.newPartOptions.tabPosition ||
+			event.oldPartOptions.verticalTabsWidth !== event.newPartOptions.verticalTabsWidth ||
 			event.oldPartOptions.tabHeight !== event.newPartOptions.tabHeight ||
 			(event.oldPartOptions.showTabs === 'multiple' && event.oldPartOptions.pinnedTabsOnSeparateRow !== event.newPartOptions.pinnedTabsOnSeparateRow)
 		) {
@@ -2277,6 +2325,7 @@ export class EditorGroupView extends Themable implements IEditorGroupView {
 
 		const { showTabs } = this.groupsView.partOptions;
 		this.titleContainer.style.backgroundColor = this.getColor(showTabs === 'multiple' ? EDITOR_GROUP_HEADER_TABS_BACKGROUND : EDITOR_GROUP_HEADER_NO_TABS_BACKGROUND) || '';
+		this.verticalTabsContainer.style.backgroundColor = this.getColor(EDITOR_GROUP_HEADER_TABS_BACKGROUND) || '';
 
 		// Editor container
 		this.editorContainer.style.backgroundColor = this.getColor(editorBackground) || '';
@@ -2288,9 +2337,9 @@ export class EditorGroupView extends Themable implements IEditorGroupView {
 
 	readonly element: HTMLElement = $('div');
 
-	get minimumWidth(): number { return this.editorPane.minimumWidth; }
+	get minimumWidth(): number { return this.editorPane.minimumWidth + this.verticalTabsWidth + this.verticalTabsGap; }
 	get minimumHeight(): number { return this.editorPane.minimumHeight; }
-	get maximumWidth(): number { return this.editorPane.maximumWidth; }
+	get maximumWidth(): number { return this.editorPane.maximumWidth + this.verticalTabsWidth + this.verticalTabsGap; }
 	get maximumHeight(): number { return this.editorPane.maximumHeight; }
 
 	get proportionalLayout(): boolean {
@@ -2309,12 +2358,15 @@ export class EditorGroupView extends Themable implements IEditorGroupView {
 		this.element.classList.toggle('max-height-478px', height <= 478);
 
 		const contentWidth = Math.max(0, width - this._contentRightInset);
+		const verticalTabsWidth = Math.min(this.verticalTabsWidth, contentWidth);
+		const verticalTabsGap = verticalTabsWidth > 0 ? this.verticalTabsGap : 0;
+		const editorWidth = Math.max(0, contentWidth - verticalTabsWidth - verticalTabsGap);
 
 		// Keep tabs full-width while the header and editor pane follow the content inset.
 		const titleControlSize = this.titleControl.layout({
 			container: new Dimension(width, height),
 			available: new Dimension(width, height - this.editorPane.minimumHeight)
-		}, contentWidth);
+		}, contentWidth, verticalTabsWidth);
 
 		// Update progress bar location
 		this.progressBar.getContainer().style.top = `${Math.max(this.titleHeight.offset - 2, 0)}px`;
@@ -2322,9 +2374,24 @@ export class EditorGroupView extends Themable implements IEditorGroupView {
 		// The editor pane is inset on the right by `_contentRightInset` so a docked
 		// panel can sit beside it under the full-width title (0 = fill the group).
 		const editorHeight = Math.max(0, height - titleControlSize.height);
-		this.editorContainer.style.width = `${contentWidth}px`;
+		this.bodyContainer.style.width = `${contentWidth}px`;
+		this.bodyContainer.style.height = `${editorHeight}px`;
+		this.verticalTabsContainer.style.width = `${verticalTabsWidth}px`;
+		this.verticalTabsContainer.style.height = `${editorHeight}px`;
+		this.verticalTabsSash.layout();
+		this.editorContainer.style.width = `${editorWidth}px`;
 		this.editorContainer.style.height = `${editorHeight}px`;
-		this.editorPane.layout({ width: contentWidth, height: editorHeight, top: top + titleControlSize.height, left });
+		const editorLeft = left + (this.groupsView.partOptions.tabPosition === 'left' ? verticalTabsWidth + verticalTabsGap : 0);
+		this.editorPane.layout({ width: editorWidth, height: editorHeight, top: top + titleControlSize.height, left: editorLeft });
+	}
+
+	private get verticalTabsGap(): number {
+		return this.verticalTabsWidth > 0 && this.element.closest('.monaco-workbench.modern-ui.floating-panels:not(.modern-ui-compact)') ? FLOATING_PANEL_MARGIN : 0;
+	}
+
+	private get verticalTabsWidth(): number {
+		const { showTabs, tabPosition, verticalTabsWidth } = this.groupsView.partOptions;
+		return showTabs === 'multiple' && tabPosition !== 'top' ? this.resizedVerticalTabsWidth ?? verticalTabsWidth : 0;
 	}
 
 	/**

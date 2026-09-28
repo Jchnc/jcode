@@ -32,6 +32,8 @@ export const DEFAULT_EDITOR_MAX_DIMENSIONS = new Dimension(Number.POSITIVE_INFIN
 
 export const DEFAULT_EDITOR_PART_OPTIONS: IEditorPartOptions = {
 	showTabs: 'multiple',
+	tabPosition: 'top',
+	verticalTabsWidth: 240,
 	highlightModifiedTabs: false,
 	tabActionLocation: 'right',
 	tabActionReserveSpace: true,
@@ -126,7 +128,7 @@ function validateEditorPartOptions(options: IEditorPartOptions): IEditorPartOpti
 		options.showTabs = options.showTabs ? 'multiple' : 'single';
 	}
 
-	return verifyObject<IEditorPartOptions>({
+	const verifiedOptions = verifyObject<IEditorPartOptions>({
 		'wrapTabs': new BooleanVerifier(DEFAULT_EDITOR_PART_OPTIONS['wrapTabs']),
 		'scrollToSwitchTabs': new BooleanVerifier(DEFAULT_EDITOR_PART_OPTIONS['scrollToSwitchTabs']),
 		'highlightModifiedTabs': new BooleanVerifier(DEFAULT_EDITOR_PART_OPTIONS['highlightModifiedTabs']),
@@ -155,8 +157,10 @@ function validateEditorPartOptions(options: IEditorPartOptions): IEditorPartOpti
 
 		'tabSizingFixedMinWidth': new NumberVerifier(DEFAULT_EDITOR_PART_OPTIONS['tabSizingFixedMinWidth']),
 		'tabSizingFixedMaxWidth': new NumberVerifier(DEFAULT_EDITOR_PART_OPTIONS['tabSizingFixedMaxWidth']),
+		'verticalTabsWidth': new NumberVerifier(DEFAULT_EDITOR_PART_OPTIONS['verticalTabsWidth']),
 
 		'showTabs': new EnumVerifier(DEFAULT_EDITOR_PART_OPTIONS['showTabs'], ['multiple', 'single', 'none']),
+		'tabPosition': new EnumVerifier(DEFAULT_EDITOR_PART_OPTIONS['tabPosition'], ['top', 'left', 'right']),
 		'tabActionLocation': new EnumVerifier(DEFAULT_EDITOR_PART_OPTIONS['tabActionLocation'], ['left', 'right']),
 		'tabSizing': new EnumVerifier(DEFAULT_EDITOR_PART_OPTIONS['tabSizing'], ['fit', 'shrink', 'fixed']),
 		'pinnedTabSizing': new EnumVerifier(DEFAULT_EDITOR_PART_OPTIONS['pinnedTabSizing'], ['normal', 'compact', 'shrink']),
@@ -187,6 +191,10 @@ function validateEditorPartOptions(options: IEditorPartOptions): IEditorPartOpti
 			'enabled': new BooleanVerifier(DEFAULT_EDITOR_PART_OPTIONS['tabGroups']['enabled'])
 		}),
 	}, options);
+
+	verifiedOptions.verticalTabsWidth = Math.min(500, Math.max(140, verifiedOptions.verticalTabsWidth));
+
+	return verifiedOptions;
 }
 
 /**

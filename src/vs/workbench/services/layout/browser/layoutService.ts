@@ -47,6 +47,7 @@ export const enum LayoutSettings {
 	ACTIVITY_BAR_AUTO_HIDE = 'workbench.activityBar.autoHide',
 	ACTIVITY_BAR_COMPACT = 'workbench.activityBar.compact',
 	EDITOR_TABS_MODE = 'workbench.editor.showTabs',
+	EDITOR_TAB_POSITION = 'workbench.editor.tabPosition',
 	EDITOR_ACTIONS_LOCATION = 'workbench.editor.editorActionsLocation',
 	COMMAND_CENTER = 'window.commandCenter',
 	LAYOUT_ACTIONS = 'workbench.layoutControl.enabled',
@@ -113,6 +114,12 @@ export const enum EditorTabsMode {
 	MULTIPLE = 'multiple',
 	SINGLE = 'single',
 	NONE = 'none'
+}
+
+export const enum EditorTabPosition {
+	TOP = 'top',
+	LEFT = 'left',
+	RIGHT = 'right'
 }
 
 export const enum EditorActionsLocation {

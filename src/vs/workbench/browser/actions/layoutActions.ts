@@ -8,7 +8,7 @@ import { MenuId, MenuRegistry, registerAction2, Action2 } from '../../../platfor
 import { Categories } from '../../../platform/action/common/actionCommonCategories.js';
 import { IConfigurationService } from '../../../platform/configuration/common/configuration.js';
 import { alert } from '../../../base/browser/ui/aria/aria.js';
-import { EditorActionsLocation, EditorTabsMode, IWorkbenchLayoutService, LayoutSettings, ModernUIDensity, Parts, Position, ZenModeSettings, positionToString } from '../../services/layout/browser/layoutService.js';
+import { EditorActionsLocation, EditorTabPosition, EditorTabsMode, IWorkbenchLayoutService, LayoutSettings, ModernUIDensity, Parts, Position, ZenModeSettings, positionToString } from '../../services/layout/browser/layoutService.js';
 import { ServicesAccessor, IInstantiationService } from '../../../platform/instantiation/common/instantiation.js';
 import { KeyMod, KeyCode } from '../../../base/common/keyCodes.js';
 import { isWindows, isLinux, isWeb, isMacintosh, isNative } from '../../../base/common/platform.js';
@@ -525,6 +525,57 @@ export class ShowSingleEditorTabAction extends AbstractSetShowTabsAction {
 registerAction2(HideEditorTabsAction);
 registerAction2(ShowMultipleEditorTabsAction);
 registerAction2(ShowSingleEditorTabAction);
+
+// --- Editor Tab Position
+
+abstract class AbstractSetEditorTabPositionAction extends Action2 {
+
+	constructor(private readonly position: EditorTabPosition, title: ICommandActionTitle, id: string, description: ILocalizedString) {
+		super({
+			id,
+			title,
+			category: Categories.View,
+			precondition: ContextKeyExpr.and(ContextKeyExpr.notEquals(`config.${LayoutSettings.EDITOR_TAB_POSITION}`, position), IsSessionsWindowContext.negate()),
+			metadata: { description },
+			f1: true
+		});
+	}
+
+	run(accessor: ServicesAccessor): Promise<void> {
+		return accessor.get(IConfigurationService).updateValue(LayoutSettings.EDITOR_TAB_POSITION, this.position);
+	}
+}
+
+export class SetEditorTabsPositionTopAction extends AbstractSetEditorTabPositionAction {
+
+	static readonly ID = 'workbench.action.setEditorTabsPositionTop';
+
+	constructor() {
+		super(EditorTabPosition.TOP, localize2('setEditorTabsPositionTop', "Move Editor Tabs to Top"), SetEditorTabsPositionTopAction.ID, localize2('setEditorTabsPositionTopDescription', "Show editor tabs above the editor"));
+	}
+}
+
+export class SetEditorTabsPositionLeftAction extends AbstractSetEditorTabPositionAction {
+
+	static readonly ID = 'workbench.action.setEditorTabsPositionLeft';
+
+	constructor() {
+		super(EditorTabPosition.LEFT, localize2('setEditorTabsPositionLeft', "Move Editor Tabs to Left"), SetEditorTabsPositionLeftAction.ID, localize2('setEditorTabsPositionLeftDescription', "Show editor tabs to the left of the editor"));
+	}
+}
+
+export class SetEditorTabsPositionRightAction extends AbstractSetEditorTabPositionAction {
+
+	static readonly ID = 'workbench.action.setEditorTabsPositionRight';
+
+	constructor() {
+		super(EditorTabPosition.RIGHT, localize2('setEditorTabsPositionRight', "Move Editor Tabs to Right"), SetEditorTabsPositionRightAction.ID, localize2('setEditorTabsPositionRightDescription', "Show editor tabs to the right of the editor"));
+	}
+}
+
+registerAction2(SetEditorTabsPositionTopAction);
+registerAction2(SetEditorTabsPositionLeftAction);
+registerAction2(SetEditorTabsPositionRightAction);
 
 // --- Show Single Editor Tab (Zen Mode)
 
