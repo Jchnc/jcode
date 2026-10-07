@@ -1,0 +1,18 @@
+{
+	"displayName": "JCode Remote SSH/SFTP",
+	"description": "Open remote workspaces over SSH and SFTP.",
+	"view.container": "Remote",
+	"view.connections": "Connections",
+	"view.welcome": "No saved connections.\n[New Connection](command:jcodeSftp.new)\n[Import from JSON](command:jcodeSftp.import)",
+	"command.category": "JCode Remote",
+	"command.connect": "Manage SSH/SFTP Connections...",
+	"command.reconnect": "Reconnect SSH/SFTP Workspace",
+	"command.new": "New Connection...",
+	"command.open": "Open Connection",
+	"command.edit": "Edit Connection...",
+	"command.delete": "Delete Connection",
+	"command.import": "Import Connections from JSON...",
+	"command.export": "Export Connections to JSON...",
+	"configuration.title": "JCode Remote SSH/SFTP",
+	"configuration.pollInterval": "Interval in milliseconds for checking remote files and folders for changes."
+}

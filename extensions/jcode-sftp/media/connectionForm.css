@@ -1,0 +1,39 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+* { box-sizing: border-box; }
+body.vscode-light, body.vscode-high-contrast-light { color-scheme: light; }
+body.vscode-dark, body.vscode-high-contrast { color-scheme: dark; }
+body { margin: 0; color: var(--vscode-foreground); background: var(--vscode-editor-background); font: var(--vscode-font-size) var(--vscode-font-family); }
+[hidden] { display: none !important; }
+main { max-width: 680px; margin: 0 auto; padding: 30px 28px 48px; }
+header { padding-bottom: 22px; }
+h1 { margin: 0 0 6px; color: var(--vscode-foreground); font-size: 21px; font-weight: 600; letter-spacing: -.02em; }
+header p { margin: 0; color: var(--vscode-descriptionForeground); line-height: 1.45; }
+section { padding: 18px 0 22px; border-top: 1px solid var(--vscode-panel-border, var(--vscode-widget-border)); }
+h2 { margin: 0 0 15px; color: var(--vscode-foreground); font-size: 13px; font-weight: 600; }
+.fields { display: grid; grid-template-columns: minmax(0, 2fr) minmax(100px, 1fr); gap: 15px 14px; }
+label { display: flex; flex-direction: column; gap: 5px; min-width: 0; color: var(--vscode-foreground); font-size: 12px; font-weight: 500; }
+label.full { grid-column: 1 / -1; }
+label > span:not(#credential-label) { color: var(--vscode-descriptionForeground); font-size: 11px; font-weight: 400; }
+input, select { width: 100%; height: 29px; padding: 0 9px; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--vscode-contrastBorder, transparent)); border-radius: 2px; font: 13px var(--vscode-font-family); }
+input::placeholder { color: var(--vscode-input-placeholderForeground); }
+input:focus-visible, select:focus-visible, button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+small { color: var(--vscode-descriptionForeground); font-size: 11px; font-weight: 400; line-height: 1.4; }
+#error { padding: 8px 10px; color: var(--vscode-errorForeground); background: var(--vscode-inputValidation-errorBackground, var(--vscode-editor-background)); border: 1px solid var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground)); }
+footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 20px; border-top: 1px solid var(--vscode-panel-border, var(--vscode-widget-border)); }
+.save-actions { display: flex; gap: 8px; }
+button { min-height: 29px; padding: 0 13px; border: 1px solid var(--vscode-contrastBorder, transparent); border-radius: 2px; font: 12px var(--vscode-font-family); cursor: pointer; }
+button.primary { color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
+button.primary:hover { background: var(--vscode-button-hoverBackground); }
+button.secondary { color: var(--vscode-button-secondaryForeground, var(--vscode-foreground)); background: var(--vscode-button-secondaryBackground, var(--vscode-editor-background)); }
+button.secondary:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground)); }
+@media (max-width: 520px) {
+	main { padding: 22px 16px 36px; }
+	.fields { grid-template-columns: 1fr; }
+	label.full { grid-column: auto; }
+	footer { align-items: stretch; flex-direction: column-reverse; }
+	.save-actions { display: grid; grid-template-columns: 1fr 1fr; }
+}

@@ -1,0 +1,64 @@
+{
+	"name": "jcode-sftp",
+	"displayName": "%displayName%",
+	"description": "%description%",
+	"version": "0.1.0",
+	"publisher": "jcode",
+	"license": "MIT",
+	"engines": { "vscode": "^1.100.0" },
+	"categories": ["Other"],
+	"main": "./out/extension",
+	"activationEvents": ["onFileSystem:jcode-sftp", "onView:jcodeSftp.connections", "onCommand:jcodeSftp.connect", "onCommand:jcodeSftp.reconnect", "onCommand:jcodeSftp.new", "onCommand:jcodeSftp.open", "onCommand:jcodeSftp.edit", "onCommand:jcodeSftp.delete", "onCommand:jcodeSftp.import", "onCommand:jcodeSftp.export"],
+	"capabilities": {
+		"virtualWorkspaces": true,
+		"untrustedWorkspaces": { "supported": true }
+	},
+	"dependencies": { "picomatch": "2.3.2", "ssh2": "^1.16.0" },
+	"devDependencies": { "@types/picomatch": "2.3.0", "@types/ssh2": "^1.15.4", "@types/node": "24.x" },
+	"contributes": {
+		"viewsContainers": {
+			"activitybar": [
+				{ "id": "jcodeSftp", "title": "%view.container%", "icon": "$(remote)" }
+			]
+		},
+		"views": {
+			"jcodeSftp": [
+				{ "id": "jcodeSftp.connections", "name": "%view.connections%" }
+			]
+		},
+		"viewsWelcome": [
+			{ "view": "jcodeSftp.connections", "contents": "%view.welcome%" }
+		],
+		"commands": [
+			{ "command": "jcodeSftp.connect", "title": "%command.connect%", "category": "%command.category%" },
+			{ "command": "jcodeSftp.reconnect", "title": "%command.reconnect%", "category": "%command.category%" },
+			{ "command": "jcodeSftp.new", "title": "%command.new%", "category": "%command.category%", "icon": "$(add)" },
+			{ "command": "jcodeSftp.open", "title": "%command.open%", "category": "%command.category%", "icon": "$(folder-opened)" },
+			{ "command": "jcodeSftp.edit", "title": "%command.edit%", "category": "%command.category%", "icon": "$(edit)" },
+			{ "command": "jcodeSftp.delete", "title": "%command.delete%", "category": "%command.category%", "icon": "$(trash)" },
+			{ "command": "jcodeSftp.import", "title": "%command.import%", "category": "%command.category%", "icon": "$(cloud-download)" },
+			{ "command": "jcodeSftp.export", "title": "%command.export%", "category": "%command.category%", "icon": "$(cloud-upload)" }
+		],
+		"menus": {
+			"view/title": [
+				{ "command": "jcodeSftp.new", "when": "view == jcodeSftp.connections", "group": "navigation@1" },
+				{ "command": "jcodeSftp.import", "when": "view == jcodeSftp.connections", "group": "2_transfer@1" },
+				{ "command": "jcodeSftp.export", "when": "view == jcodeSftp.connections", "group": "2_transfer@2" }
+			],
+			"view/item/context": [
+				{ "command": "jcodeSftp.open", "when": "view == jcodeSftp.connections && (viewItem == connection || viewItem == activeConnection)", "group": "inline@1" },
+				{ "command": "jcodeSftp.edit", "when": "view == jcodeSftp.connections && (viewItem == connection || viewItem == activeConnection)", "group": "inline@2" },
+				{ "command": "jcodeSftp.delete", "when": "view == jcodeSftp.connections && viewItem == connection", "group": "2_manage" }
+			]
+		},
+		"configuration": {
+			"title": "%configuration.title%",
+			"properties": {
+				"jcodeSftp.pollInterval": {
+					"type": "number", "default": 10000, "minimum": 1000,
+					"description": "%configuration.pollInterval%"
+				}
+			}
+		}
+	}
+}

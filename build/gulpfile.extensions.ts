@@ -68,6 +68,7 @@ const compilations = [
 	'extensions/html-language-features/server/tsconfig.json',
 	'extensions/ipynb/tsconfig.json',
 	'extensions/jake/tsconfig.json',
+	'extensions/jcode-sftp/tsconfig.json',
 	'extensions/json-language-features/client/tsconfig.json',
 	'extensions/json-language-features/server/tsconfig.json',
 	'extensions/markdown-language-features/tsconfig.json',
