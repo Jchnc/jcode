@@ -248,6 +248,11 @@ export class TabGroupContextMenu {
 					}
 				}));
 				disposables.add(addDisposableListener(getWindow(menu), EventType.BLUR, () => this.contextViewService.hideContextView()));
+				disposables.add(addDisposableListener(menu, EventType.FOCUS_OUT, event => {
+					if (event.relatedTarget && !menu.contains(event.relatedTarget as Node)) {
+						this.contextViewService.hideContextView();
+					}
+				}));
 				disposables.add(scheduleAtNextAnimationFrame(getWindow(nameInput), () => {
 					nameInput?.focus();
 					nameInput?.select();

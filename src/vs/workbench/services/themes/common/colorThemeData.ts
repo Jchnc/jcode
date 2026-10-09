@@ -73,6 +73,7 @@ export class ColorThemeData implements IWorkbenchColorTheme {
 	private colorMap: IColorMap = {};
 	private customColorMap: IColorOrDefaultMap = {};
 	private workspaceColorMap: IColorMap = {};
+	private transientColorMap: IColorMap | undefined;
 
 	private semanticTokenRules: SemanticTokenRule[] = [];
 	private customSemanticTokenRules: SemanticTokenRule[] = [];
@@ -150,6 +151,10 @@ export class ColorThemeData implements IWorkbenchColorTheme {
 	}
 
 	public getColor(colorId: ColorIdentifier, useDefault?: boolean): Color | undefined {
+		const transientColor = this.transientColorMap?.[colorId];
+		if (transientColor) {
+			return transientColor;
+		}
 		const customColor = this.customColorMap[colorId];
 		if (customColor instanceof Color) {
 			return customColor;
@@ -386,6 +391,9 @@ export class ColorThemeData implements IWorkbenchColorTheme {
 	}
 
 	public defines(colorId: ColorIdentifier): boolean {
+		if (this.transientColorMap?.[colorId]) {
+			return true;
+		}
 		const customColor = this.customColorMap[colorId];
 		if (customColor instanceof Color) {
 			return true;
@@ -396,14 +404,7 @@ export class ColorThemeData implements IWorkbenchColorTheme {
 	/** Runtime workspace colors are separate from settings and the profile theme cache. */
 	public setWorkspaceColors(colors: IColorMap): void {
 		this.workspaceColorMap = colors;
-	}
-
-	/** Resolve a color for shared caches without leaking one workspace's accent into another. */
-	public getColorWithoutWorkspaceColors(colorId: ColorIdentifier): Color | undefined {
-		const theme = new ColorThemeData(this.id, this.label, this.settingsId);
-		theme.colorMap = this.colorMap;
-		theme.customColorMap = this.customColorMap;
-		return theme.getColor(colorId);
+		this.clearCaches();
 	}
 
 	public getColorCustomization(colorId: ColorIdentifier): Color | undefined {
@@ -420,6 +421,26 @@ export class ColorThemeData implements IWorkbenchColorTheme {
 		this.setCustomColors(settings.colorCustomizations);
 		this.setCustomTokenColors(settings.tokenColorCustomizations);
 		this.setCustomSemanticTokenColors(settings.semanticTokenColorCustomizations);
+	}
+
+	/** Replaces runtime-only colors; these are deliberately excluded from theme storage. */
+	public setTransientColors(colors: IColorMap | undefined): void {
+		if (this.transientColorMap || colors) {
+			this.transientColorMap = colors;
+			this.clearCaches();
+		}
+	}
+
+	public getBaseTheme(includeWorkspaceColors = false): ColorThemeData {
+		if (!this.transientColorMap && (includeWorkspaceColors || Object.keys(this.workspaceColorMap).length === 0)) {
+			return this;
+		}
+		const theme = Object.assign(new ColorThemeData(this.id, this.label, this.settingsId), this);
+		theme.setTransientColors(undefined);
+		if (!includeWorkspaceColors) {
+			theme.setWorkspaceColors({});
+		}
+		return theme;
 	}
 
 	public setCustomColors(colors: IColorCustomizations) {
@@ -736,7 +757,7 @@ export class ColorThemeData implements IWorkbenchColorTheme {
 	}
 
 	static fromExtensionTheme(theme: IThemeExtensionPoint, colorThemeLocation: URI, extensionData: ExtensionData): ColorThemeData {
-		const baseTheme: string = theme['uiTheme'] || 'vs-dark';
+		const baseTheme: string = theme.uiTheme || 'vs-dark';
 		const themeSelector = toCSSSelector(extensionData.extensionId, theme.path);
 		const id = `${baseTheme} ${themeSelector}`;
 		const label = theme.label || basename(theme.path);
