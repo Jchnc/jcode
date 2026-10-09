@@ -36,7 +36,7 @@ import { IHistoryService } from '../../../services/history/common/history.js';
 import { IMergeGroupOptions, MergeGroupMode } from '../../../services/editor/common/editorGroupsService.js';
 import { IHostService } from '../../../services/host/browser/host.js';
 import { EditorInput } from '../../../common/editor/editorInput.js';
-import { DEFAULT_EDITOR_ASSOCIATION, EditorInputCapabilities, EditorResourceAccessor, EditorsOrder, IEditorPartOptions, IToolbarActions, preventEditorClose, EditorCloseMethod, SideBySideEditor, Verbosity, GroupModelChangeKind } from '../../../common/editor.js';
+import { DEFAULT_EDITOR_ASSOCIATION, EditorInputCapabilities, EditorResourceAccessor, EditorsOrder, IEditorPartOptions, IToolbarActions, preventEditorClose, EditorCloseMethod, SideBySideEditor, GroupModelChangeKind } from '../../../common/editor.js';
 import { getEditorTabGroupColor, IEditorTabGroup } from '../../../common/editor/editorTabGroup.js';
 import { IReadonlyEditorGroupModel } from '../../../common/editor/editorGroupModel.js';
 import { computeEditorAriaLabel } from '../../editor.js';
@@ -520,8 +520,7 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		const label = this.tabResourceLabels.create(row, { hoverTargetOverride: row });
 		label.setResource({
 			resource: EditorResourceAccessor.getOriginalUri(editor, { supportSideBySide: SideBySideEditor.BOTH }),
-			name: editor.getName(),
-			description: editor.getDescription(Verbosity.MEDIUM) ?? ''
+			name: editor.getName()
 		}, {
 			title: this.getHoverTitle(editor),
 			italic: !this.tabsModel.isPinned(editor),
