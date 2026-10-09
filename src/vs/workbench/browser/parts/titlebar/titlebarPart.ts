@@ -58,6 +58,7 @@ import { safeIntl } from '../../../../base/common/date.js';
 import { IsCompactTitleBarContext, TitleBarVisibleContext } from '../../../common/contextkeys.js';
 import { ServiceCollection } from '../../../../platform/instantiation/common/serviceCollection.js';
 import { WORKBENCH_MENU_MOTION_CLASS, workbenchMenuCloseAnimation } from '../../actions/menuMotion.js';
+import { WorkspaceColorIndicator } from './workspaceColorIndicator.js';
 
 export interface ITitleVariable {
 	readonly name: string;
@@ -493,6 +494,11 @@ export class BrowserTitlebarPart extends Part implements ITitlebarPart {
 		// Title
 		this.title = append(this.centerContent, $('div.window-title'));
 		this.createTitle();
+
+		if (hasCustomTitlebar(this.configurationService, this.titleBarStyle)) {
+			const indicator = this._register(this.instantiationService.createInstance(WorkspaceColorIndicator, this.element, this.hoverDelegate));
+			prepend(this.centerContent, indicator.element);
+		}
 
 		// Center-Adjacent Toolbar
 		if (hasCustomTitlebar(this.configurationService, this.titleBarStyle)) {

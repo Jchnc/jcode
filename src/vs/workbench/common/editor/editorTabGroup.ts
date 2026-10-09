@@ -3,6 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { WORKBENCH_COLOR_PALETTE } from '../workbenchColorPalette.js';
+
 /**
  * Data model and helpers for Chrome-like tab groups.
  *
@@ -65,19 +67,7 @@ export interface IEditorTabGroupColor {
 	readonly value: string;
 }
 
-export const EDITOR_TAB_GROUP_COLORS: readonly IEditorTabGroupColor[] = [
-	{ id: 'grey', value: '#94a3b8' },
-	{ id: 'blue', value: '#60a5fa' },
-	{ id: 'cyan', value: '#22d3ee' },
-	{ id: 'teal', value: '#2dd4bf' },
-	{ id: 'red', value: '#fb7185' },
-	{ id: 'yellow', value: '#fbbf24' },
-	{ id: 'orange', value: '#fb923c' },
-	{ id: 'green', value: '#34d399' },
-	{ id: 'pink', value: '#f472b6' },
-	{ id: 'purple', value: '#a78bfa' },
-	{ id: 'indigo', value: '#818cf8' },
-];
+export const EDITOR_TAB_GROUP_COLORS: readonly IEditorTabGroupColor[] = WORKBENCH_COLOR_PALETTE;
 
 export const DEFAULT_EDITOR_TAB_GROUP_COLOR = EDITOR_TAB_GROUP_COLORS[1].id; // 'blue'
 

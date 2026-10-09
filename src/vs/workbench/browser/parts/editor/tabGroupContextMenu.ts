@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { WORKBENCH_COLOR_PALETTE } from '../../../common/workbenchColorPalette.js';
 import './media/tabgroups.css';
 import { $, addDisposableListener, EventHelper, EventType, getWindow, isMouseEvent, scheduleAtNextAnimationFrame } from '../../../../base/browser/dom.js';
 import { StandardMouseEvent } from '../../../../base/browser/mouseEvent.js';
@@ -86,19 +87,7 @@ export class TabGroupContextMenu {
 					}
 				}));
 
-				const colorLabels = new Map([
-					['grey', localize('tabGroup.colorGrey', 'Slate')],
-					['blue', localize('tabGroup.colorBlue', 'Blue')],
-					['cyan', localize('tabGroup.colorCyan', 'Cyan')],
-					['teal', localize('tabGroup.colorTeal', 'Teal')],
-					['red', localize('tabGroup.colorRed', 'Rose')],
-					['yellow', localize('tabGroup.colorYellow', 'Amber')],
-					['orange', localize('tabGroup.colorOrange', 'Orange')],
-					['green', localize('tabGroup.colorGreen', 'Emerald')],
-					['pink', localize('tabGroup.colorPink', 'Pink')],
-					['purple', localize('tabGroup.colorPurple', 'Violet')],
-					['indigo', localize('tabGroup.colorIndigo', 'Indigo')]
-				]);
+				const colorLabels = new Map<string, string>(WORKBENCH_COLOR_PALETTE.map(color => [color.id, color.label]));
 				const colorPicker = identitySection.appendChild($('.tab-group-menu-colors'));
 				colorPicker.setAttribute('role', 'radiogroup');
 				colorPicker.setAttribute('aria-label', localize('tabGroup.colorAriaLabel', 'Tab Group Color'));

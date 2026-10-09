@@ -1061,6 +1061,9 @@ export class EditorPart extends Part<IEditorPartMemento> implements IEditorPart,
 
 		// Container
 		this.element = parent;
+		const updateVerticalTabsClass = () => parent.classList.toggle('vertical-tabs', this.partOptions.showTabs === 'multiple' && this.partOptions.tabPosition !== 'top');
+		updateVerticalTabsClass();
+		this._register(this.onDidChangeEditorPartOptions(updateVerticalTabsClass));
 		if (this.windowId !== mainWindow.vscodeWindowId) {
 			this.container.classList.add('auxiliary');
 		}

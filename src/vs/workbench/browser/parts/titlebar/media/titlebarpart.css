@@ -151,6 +151,11 @@
 	opacity: 0.6;
 }
 
+/* Workspace colors provide opaque inactive ink; fading the container would dim it twice. */
+.monaco-workbench .part.titlebar.workspace-colored.inactive > .titlebar-container {
+	opacity: 1;
+}
+
 .monaco-workbench .part.titlebar > .titlebar-container > .titlebar-center > .window-title > .command-center > .monaco-toolbar > .monaco-action-bar > .actions-container > .action-item > .action-label,
 .monaco-workbench .part.titlebar > .titlebar-container > .titlebar-center > .window-title > .command-center > .monaco-toolbar > .monaco-action-bar > .actions-container > .action-item.monaco-dropdown-with-primary .action-label {
 	color: var(--vscode-titleBar-activeForeground);
@@ -198,6 +203,11 @@
 	color: var(--vscode-titleBar-inactiveForeground);
 }
 
+.monaco-workbench .part.titlebar.workspace-colored > .titlebar-container > .titlebar-center > .window-title > .command-center .action-item.command-center-center .action-item.command-center-quick-pick .search-icon {
+	opacity: 1;
+	color: inherit;
+}
+
 .monaco-workbench .part.titlebar > .titlebar-container > .titlebar-center > .window-title > .command-center .action-item.command-center-center .action-item.command-center-quick-pick .search-label {
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -238,6 +248,10 @@
 .monaco-workbench .part.titlebar.inactive > .titlebar-container > .titlebar-center > .window-title > .command-center .action-item.command-center-center {
 	color: var(--vscode-titleBar-inactiveForeground);
 	border-color: var(--vscode-commandCenter-inactiveBorder) !important;
+}
+
+.monaco-workbench .part.titlebar.workspace-colored.inactive > .titlebar-container > .titlebar-center > .window-title > .command-center .action-item.command-center-center {
+	color: var(--vscode-commandCenter-inactiveForeground);
 }
 
 .monaco-workbench .part.titlebar > .titlebar-container > .titlebar-center > .window-title > .command-center .action-item.command-center-center:HOVER {
@@ -538,4 +552,39 @@
 .monaco-workbench .part.titlebar > .titlebar-container > .titlebar-right > .action-toolbar-container .monaco-action-bar .action-item.icon .badge.compact.progress-badge .badge-content::before {
 	width: 12px;
 	height: 12px;
+}
+
+/* A quiet, independent workspace identity target beside the window title. */
+.monaco-workbench .part.titlebar .workspace-color-marker {
+	position: relative;
+	flex: 0 0 24px;
+	width: 24px;
+	height: 24px;
+	margin-right: 4px;
+	padding: 0;
+	border: 0;
+	border-radius: var(--vscode-cornerRadius-small);
+	background: transparent;
+	cursor: pointer;
+	-webkit-app-region: no-drag;
+}
+
+.monaco-workbench .part.titlebar .workspace-color-marker::before {
+	content: '';
+	display: block;
+	width: 8px;
+	height: 8px;
+	margin: auto;
+	border-radius: var(--vscode-cornerRadius-circle);
+	background: currentColor;
+	box-shadow: 0 0 0 1px var(--vscode-contrastBorder, transparent);
+}
+
+.monaco-workbench .part.titlebar .workspace-color-marker:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
+.monaco-workbench .part.titlebar .workspace-color-marker:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
 }

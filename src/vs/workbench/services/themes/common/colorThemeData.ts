@@ -72,6 +72,7 @@ export class ColorThemeData implements IWorkbenchColorTheme {
 	private customTokenColors: ITextMateThemingRule[] = [];
 	private colorMap: IColorMap = {};
 	private customColorMap: IColorOrDefaultMap = {};
+	private workspaceColorMap: IColorMap = {};
 
 	private semanticTokenRules: SemanticTokenRule[] = [];
 	private customSemanticTokenRules: SemanticTokenRule[] = [];
@@ -154,7 +155,7 @@ export class ColorThemeData implements IWorkbenchColorTheme {
 			return customColor;
 		}
 		if (customColor === undefined) { /* !== DEFAULT_COLOR_CONFIG_VALUE */
-			const color = this.colorMap[colorId];
+			const color = this.workspaceColorMap[colorId] ?? this.colorMap[colorId];
 			if (color !== undefined) {
 				return color;
 			}
@@ -389,12 +390,30 @@ export class ColorThemeData implements IWorkbenchColorTheme {
 		if (customColor instanceof Color) {
 			return true;
 		}
-		return customColor === undefined /* !== DEFAULT_COLOR_CONFIG_VALUE */ && this.colorMap.hasOwnProperty(colorId);
+		return customColor === undefined /* !== DEFAULT_COLOR_CONFIG_VALUE */ && (this.workspaceColorMap.hasOwnProperty(colorId) || this.colorMap.hasOwnProperty(colorId));
+	}
+
+	/** Runtime workspace colors are separate from settings and the profile theme cache. */
+	public setWorkspaceColors(colors: IColorMap): void {
+		this.workspaceColorMap = colors;
+	}
+
+	/** Resolve a color for shared caches without leaking one workspace's accent into another. */
+	public getColorWithoutWorkspaceColors(colorId: ColorIdentifier): Color | undefined {
+		const theme = new ColorThemeData(this.id, this.label, this.settingsId);
+		theme.colorMap = this.colorMap;
+		theme.customColorMap = this.customColorMap;
+		return theme.getColor(colorId);
 	}
 
 	public getColorCustomization(colorId: ColorIdentifier): Color | undefined {
 		const customColor = this.customColorMap[colorId];
 		return customColor instanceof Color ? customColor : undefined;
+	}
+
+	/** Includes explicit requests for the registry default, which also take precedence over workspace colors. */
+	public hasColorCustomization(colorId: ColorIdentifier): boolean {
+		return this.customColorMap[colorId] !== undefined;
 	}
 
 	public setCustomizations(settings: ThemeConfiguration) {

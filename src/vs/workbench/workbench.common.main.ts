@@ -92,6 +92,7 @@ import './services/language/common/languageService.js';
 import './services/model/common/modelService.js';
 import './services/notebook/common/notebookDocumentService.js';
 import './services/commands/common/commandService.js';
+import './services/themes/browser/workspaceAppearanceService.js';
 import './services/themes/browser/workbenchThemeService.js';
 import './services/label/common/labelService.js';
 import './services/extensions/common/extensionManifestPropertiesService.js';
@@ -381,6 +382,7 @@ import './contrib/inlayHints/browser/inlayHintsAccessibilty.js';
 
 // Themes
 import './contrib/themes/browser/themes.contribution.js';
+import './contrib/themes/browser/workspaceColor.contribution.js';
 
 // Update
 import './contrib/update/browser/update.contribution.js';

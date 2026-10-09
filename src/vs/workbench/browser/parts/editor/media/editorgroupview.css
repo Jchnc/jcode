@@ -263,11 +263,21 @@
 
 .monaco-workbench.modern-ui.floating-panels:not(.modern-ui-compact) .part.editor > .content .editor-group-container > .editor-group-body:is(.vertical-tabs-left, .vertical-tabs-right) {
 	gap: var(--modern-ui-floating-card-margin);
+	background-color: var(--modern-ui-shell-background, var(--vscode-modernUI-shellBackground, var(--vscode-titleBar-activeBackground)));
 }
 
 .monaco-workbench .part.editor > .content .editor-group-container > .editor-group-body > .vertical-tabs-container {
 	position: relative;
 	flex: 0 0 auto;
+	overflow: hidden;
+}
+
+.monaco-workbench.modern-ui.floating-panels:not(.modern-ui-compact) .part.editor > .content .editor-group-container > .editor-group-body > .vertical-tabs-container {
+	border-radius: var(--vscode-cornerRadius-large);
+}
+
+.monaco-workbench.modern-ui.floating-panels:not(.modern-ui-compact) .part.editor > .content .editor-group-container > .editor-group-body:is(.vertical-tabs-left, .vertical-tabs-right) > .editor-container {
+	border-radius: var(--vscode-cornerRadius-large);
 	overflow: hidden;
 }
 

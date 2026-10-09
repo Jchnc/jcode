@@ -1,0 +1,243 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.monaco-workbench .workspace-color-picker {
+	box-sizing: border-box;
+	width: 312px;
+	padding: 16px;
+	font-size: var(--vscode-fontSize-body1);
+	font-weight: var(--vscode-fontWeight-regular);
+	line-height: 1.5;
+	color: var(--vscode-menu-foreground);
+	background: var(--vscode-menu-background);
+	border: var(--vscode-strokeThickness) solid var(--vscode-menu-border, transparent);
+	border-radius: var(--vscode-cornerRadius-large, 8px);
+	box-shadow: var(--vscode-shadow-lg);
+}
+
+.workspace-color-picker .workspace-color-heading {
+	font-size: var(--vscode-fontSize-heading3);
+	font-weight: var(--vscode-fontWeight-semiBold);
+	margin-bottom: 4px;
+}
+
+.workspace-color-picker .workspace-color-name {
+	color: var(--vscode-descriptionForeground);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	margin-bottom: 16px;
+}
+
+.workspace-color-picker .workspace-color-swatches {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 8px;
+	margin-bottom: 16px;
+}
+
+.workspace-color-picker .workspace-color-swatch {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+	height: 40px;
+	padding: 8px 10px;
+	border: var(--vscode-strokeThickness) solid var(--vscode-contrastBorder, transparent);
+	border-radius: var(--vscode-cornerRadius-small);
+	background: var(--vscode-menu-background);
+	color: var(--vscode-menu-foreground);
+	font: inherit;
+	cursor: pointer;
+}
+
+.workspace-color-picker .workspace-color-chip {
+	flex: 0 0 8px;
+	width: 8px;
+	height: 8px;
+	border-radius: var(--vscode-cornerRadius-circle);
+}
+
+.workspace-color-picker .workspace-color-swatch:hover {
+	border-color: currentColor;
+}
+
+.workspace-color-picker .workspace-color-swatch[aria-checked="true"] {
+	border-color: currentColor;
+}
+
+.workspace-color-picker .workspace-color-swatch-name {
+	flex: 1;
+	text-align: left;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.monaco-workbench .workspace-color-picker .workspace-color-check {
+	visibility: hidden;
+	color: inherit;
+}
+
+.workspace-color-picker [aria-checked="true"] .workspace-color-check {
+	visibility: visible;
+}
+
+.workspace-color-picker .workspace-color-swatch:focus-visible,
+.workspace-color-picker .workspace-color-style:focus-visible {
+	outline: var(--vscode-strokeThickness) solid var(--vscode-focusBorder);
+	outline-offset: 2px;
+}
+
+.workspace-color-picker .workspace-color-swatch:focus:not(:focus-visible),
+.workspace-color-picker .workspace-color-style:focus:not(:focus-visible) {
+	outline: none;
+}
+
+.workspace-color-picker .workspace-color-label-row {
+	display: flex;
+	justify-content: space-between;
+	margin-bottom: 8px;
+}
+
+.workspace-color-picker .workspace-color-value {
+	color: var(--vscode-descriptionForeground);
+}
+
+.workspace-color-picker .workspace-color-custom {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+}
+
+.workspace-color-picker .workspace-color-custom label {
+	flex: 1;
+}
+
+.workspace-color-picker .workspace-color-custom .monaco-inputbox {
+	width: 112px;
+}
+
+.workspace-color-picker .workspace-color-custom input {
+	font-family: var(--monaco-monospace-font);
+}
+
+.workspace-color-picker .workspace-color-error {
+	color: var(--vscode-errorForeground);
+	font-size: var(--vscode-fontSize-label1);
+}
+
+.workspace-color-picker .workspace-color-error:not(:empty) {
+	margin-top: 8px;
+}
+
+.workspace-color-picker .workspace-color-styles {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 8px;
+}
+
+.workspace-color-picker .workspace-color-style {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	min-width: 0;
+	padding: 8px;
+	border: var(--vscode-strokeThickness) solid var(--vscode-widget-border, var(--vscode-contrastBorder, transparent));
+	border-radius: var(--vscode-cornerRadius-small, 4px);
+	background: transparent;
+	color: var(--vscode-menu-foreground);
+	font: inherit;
+	cursor: pointer;
+}
+
+.workspace-color-picker .workspace-color-style[aria-checked="true"] {
+	border-color: var(--vscode-menu-foreground);
+}
+
+.workspace-color-picker .workspace-color-style:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
+.workspace-color-picker .workspace-color-style-preview {
+	box-sizing: border-box;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+	width: 100%;
+	border: var(--vscode-strokeThickness) solid var(--vscode-widget-border, transparent);
+	border-radius: var(--vscode-cornerRadius-xSmall);
+}
+
+.workspace-color-picker .workspace-color-style-titlebar {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	height: 24px;
+	padding: 0 8px;
+	background: var(--vscode-titleBar-activeBackground);
+}
+
+.workspace-color-picker .workspace-color-style-marker {
+	flex: 0 0 4px;
+	width: 4px;
+	height: 4px;
+	border-radius: var(--vscode-cornerRadius-circle);
+	background: var(--vscode-titleBar-activeForeground);
+}
+
+.workspace-color-picker .workspace-color-style-search {
+	flex: 1;
+	height: 8px;
+	border: var(--vscode-strokeThickness) solid var(--vscode-commandCenter-border);
+	border-radius: var(--vscode-cornerRadius-xSmall);
+}
+
+.workspace-color-picker .workspace-color-style-editor {
+	height: 8px;
+	background: var(--vscode-editor-background);
+}
+
+.workspace-color-picker .workspace-color-style-caption {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.workspace-color-picker .workspace-color-appearance-label {
+	margin-top: 16px;
+}
+
+.workspace-color-picker .workspace-color-note {
+	margin: 12px 0;
+	font-size: var(--vscode-fontSize-label1);
+	line-height: 1.5;
+	color: var(--vscode-descriptionForeground);
+}
+
+.workspace-color-picker .workspace-color-actions .workspace-color-reset {
+	display: inline-flex;
+	box-sizing: border-box;
+	width: auto;
+	min-width: 0;
+	margin-right: auto;
+	justify-content: flex-start;
+	padding-left: 0;
+	padding-right: 0;
+}
+
+.workspace-color-picker .workspace-color-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	margin-top: 16px;
+}
+
+.workspace-color-picker .workspace-color-actions .monaco-button {
+	box-sizing: border-box;
+	width: auto;
+	min-width: 72px;
+}
