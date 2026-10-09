@@ -2,7 +2,7 @@
 
 JCode is a customized fork of [Code - OSS](https://github.com/microsoft/vscode), the open-source codebase behind Visual Studio Code. It adds tab groups, vertical tabs, workspace colors, and built-in SSH/SFTP file access while retaining the upstream editor and extension architecture.
 
-**`custom/main` is the default and sole development branch.** Upstream updates are merged into it, preserving JCode's custom features and history.
+**An independent editor, built on Code - OSS.** JCode is maintained in this repository and is not affiliated with or endorsed by Microsoft.
 
 ## Custom Features
 
@@ -10,15 +10,14 @@ JCode is a customized fork of [Code - OSS](https://github.com/microsoft/vscode),
 | --- | --- |
 | Tab groups | Organize tabs into named, colored groups with optional icons. Collapse, save, lock, move, and ungroup them, or undo the last group change. |
 | Vertical tabs | Place tabs to the left or right of the editor and resize the strip. The traditional top layout is also available. |
-| Workspace colors | Coordinate the title bar, status bar, and panel resize gaps with a workspace color. Menu and status hover treatments follow the same scheme. |
-| Rounded workbench panels | Give the vertical tab strip and editor their own rounded surfaces within the Modern UI layout. |
+| Workspace colors | Give each workspace a recognizable identity using preset or custom colors, with live previews and Subtle or Rich appearance. |
 | SSH/SFTP workspaces | Browse and edit remote files in the Explorer, with saved connections, password/key/agent authentication, reconnection, and profile import/export. |
 
 ### Tabs and Groups
 
 Right-click an editor tab and choose **Add to New Tab Group**. Right-click the group header to edit its name, color, icon, or group actions.
 
-For vertical tabs and the rounded panel layout, use:
+For vertical tabs, use:
 
 ```json
 {
@@ -73,6 +72,8 @@ Development builds currently use the inherited **Code - OSS Dev** application na
 
 ## Keeping JCode Updated
 
+**`custom/main` is the default and sole development branch.**
+
 `origin` points to this JCode fork; `upstream` points to Microsoft's Code - OSS repository. The remote-tracking reference `upstream/main` does not require a second local development branch.
 
 Set up the upstream remote once and keep pulls from rebasing the customized branch:
@@ -100,16 +101,16 @@ git push origin custom/main
 
 Merge upstream updates rather than rebasing the combined upstream and custom history. Recovery points are kept as `archive/*` tags, leaving one development branch.
 
-## Development and Contributions
+## Contributing and Support
 
-Report JCode bugs and feature requests in [this repository's issue tracker](https://github.com/Jchnc/jcode/issues). Submit changes against `custom/main` and describe how they were verified.
+Use the [JCode issue tracker](https://github.com/Jchnc/jcode/issues) for bugs, questions, and feature requests. Submit pull requests against `custom/main`; see [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow, validation, and contribution terms.
 
-Follow the [coding and validation instructions](.github/copilot-instructions.md). Useful checks include `npm run typecheck-client`, targeted `npm run eslint -- <files>`, and the unit-test runners under [scripts](scripts). Choose checks that cover the change; documentation-only changes do not require a full product rebuild.
-
-Upstream built-in extensions remain under [extensions](extensions), alongside JCode's custom SFTP extension. The project follows the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/).
+Report vulnerabilities privately through [GitHub security advisories](https://github.com/Jchnc/jcode/security/advisories/new). See [SECURITY.md](SECURITY.md) for reporting details and the maintained branch.
 
 ## License and Attribution
 
-JCode builds on Microsoft's Code - OSS and its community contributions. The source is licensed under the [MIT License](LICENSE.txt); upstream copyright notices and [third-party notices](ThirdPartyNotices.txt) are retained.
+JCode's source is available under the [MIT License](LICENSE.txt), retaining Microsoft's Code - OSS copyright and license notices. Original JCode contributions are made under MIT; upstream and third-party work remains attributed to its authors.
 
-Copyright (c) Microsoft Corporation. All rights reserved.
+The [upstream notices](ThirdPartyNotices.txt), [SFTP dependency notices](extensions/jcode-sftp/ThirdPartyNotices.txt), and component licenses are retained. Runtime dependencies and hosted services can have different terms, including the bundled Copilot CLI. See [licensing and distribution](docs/LICENSING.md) before publishing a binary package.
+
+Visual Studio Code and Microsoft's logos are their respective owners' trademarks. JCode is independently maintained; the upstream relationship does not imply Microsoft endorsement.

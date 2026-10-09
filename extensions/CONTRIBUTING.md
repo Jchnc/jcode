@@ -1,6 +1,6 @@
 # Contributing to Built-In Extensions
 
-This directory contains built-in extensions that ship with VS Code.
+This directory contains JCode's built-in extensions, including components inherited from Code - OSS. Follow the [JCode contribution guide](../CONTRIBUTING.md) for issues, pull requests, licensing, and validation; the technical guidance below describes the inherited extension architecture.
 
 ## Basic Structure
 

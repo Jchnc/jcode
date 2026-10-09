@@ -1,14 +1,15 @@
 ---
-name: Feature request
-about: Suggest an idea for this project
+name: JCode feature request
+about: Suggest an improvement to JCode
 title: ''
 labels: ''
 assignees: ''
-
 ---
 
-<!-- ⚠️⚠️ Do Not Delete This! feature_request_template ⚠️⚠️ -->
-<!-- Please read our Rules of Conduct: https://opensource.microsoft.com/codeofconduct/ -->
-<!-- Please search existing issues to avoid creating duplicates. -->
+## Problem or use case
 
-<!-- Describe the feature you'd like. -->
+## Proposed behavior
+
+## Alternatives considered
+
+<!-- Search existing JCode issues first. Keep the proposal focused on a concrete user need. -->

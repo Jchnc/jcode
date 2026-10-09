@@ -1,22 +1,25 @@
 ---
-name: Copilot Bug report
-about: Create a report to help us improve Copilot's chat interface in VS Code
+name: Copilot integration in JCode
+about: Report a problem with the inherited Copilot integration in this fork
 title: ''
 assignees: ''
-
 ---
 
-<!-- Please search existing issues to avoid creating duplicates -->
-<!-- Please attach logs to help us diagnose your issue -->
+<!-- Report service or account issues to GitHub. This tracker covers integration problems in JCode. -->
+<!-- Report vulnerabilities privately. Remove tokens, personal data, and private prompt content from logs. -->
 
-- Copilot Chat Extension Version:
-- VS Code Version:
-- OS Version:
-- Feature (e.g. agent/edit/ask mode):
-- Selected model (e.g. GPT 4.1, Claude 3.7 Sonnet):
-- Logs:
+- JCode commit or build:
+- Copilot extension version:
+- Operating system:
+- Affected feature:
+- Does the issue also reproduce in upstream Visual Studio Code?:
+- Related upstream issue, if any:
 
-Steps to Reproduce:
+## Steps to reproduce
 
 1.
 2.
+
+## Expected and actual behavior
+
+## Sanitized logs
