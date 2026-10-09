@@ -1,76 +1,115 @@
-# Visual Studio Code - Open Source ("Code - OSS")
-[![Feature Requests](https://img.shields.io/github/issues/microsoft/vscode/feature-request.svg)](https://github.com/microsoft/vscode/issues?q=is%3Aopen+is%3Aissue+label%3Afeature-request+sort%3Areactions-%2B1-desc)
-[![Bugs](https://img.shields.io/github/issues/microsoft/vscode/bug.svg)](https://github.com/microsoft/vscode/issues?utf8=✓&q=is%3Aissue+is%3Aopen+label%3Abug)
+# JCode
 
-## The Repository
+JCode is a customized fork of [Code - OSS](https://github.com/microsoft/vscode), the open-source codebase behind Visual Studio Code. It adds tab groups, vertical tabs, workspace colors, and built-in SSH/SFTP file access while retaining the upstream editor and extension architecture.
 
-This repository ("`Code - OSS`") is where we (Microsoft) develop the [Visual Studio Code](https://code.visualstudio.com) product together with the community. Not only do we work on code and issues here, but we also publish our [roadmap](https://github.com/microsoft/vscode/wiki/Roadmap), [monthly iteration plans](https://github.com/microsoft/vscode/wiki/Iteration-Plans), and our [endgame plans](https://github.com/microsoft/vscode/wiki/Running-the-Endgame). This source code is available to everyone under the standard [MIT license](https://github.com/microsoft/vscode/blob/main/LICENSE.txt).
+**`custom/main` is the default and sole development branch.** Upstream updates are merged into it, preserving JCode's custom features and history.
 
-## Visual Studio Code
+## Custom Features
 
-<p align="center">
-  <img alt="VS Code in action" src="https://github.com/user-attachments/assets/56af271c-949d-454c-a3ea-16188c063414">
-</p>
+| Feature | What it does |
+| --- | --- |
+| Tab groups | Organize tabs into named, colored groups with optional icons. Collapse, save, lock, move, and ungroup them, or undo the last group change. |
+| Vertical tabs | Place tabs to the left or right of the editor and resize the strip. The traditional top layout is also available. |
+| Workspace colors | Coordinate the title bar, status bar, and panel resize gaps with a workspace color. Menu and status hover treatments follow the same scheme. |
+| Rounded workbench panels | Give the vertical tab strip and editor their own rounded surfaces within the Modern UI layout. |
+| SSH/SFTP workspaces | Browse and edit remote files in the Explorer, with saved connections, password/key/agent authentication, reconnection, and profile import/export. |
 
-[Visual Studio Code](https://code.visualstudio.com) is a distribution of the `Code - OSS` repository with Microsoft-specific customizations released under a traditional [Microsoft product license](https://code.visualstudio.com/License/).
+### Tabs and Groups
 
-[Visual Studio Code](https://code.visualstudio.com) combines the simplicity of a code editor with what developers need for their core edit-build-debug cycle. It provides comprehensive code editing, navigation, and understanding support along with lightweight debugging, a rich extensibility model, and lightweight integration with existing tools.
+Right-click an editor tab and choose **Add to New Tab Group**. Right-click the group header to edit its name, color, icon, or group actions.
 
-Visual Studio Code is updated monthly with new features and bug fixes. You can download it for Windows, macOS, and Linux on the [Visual Studio Code website](https://code.visualstudio.com/Download). To get the latest releases every day, install the [Insiders build](https://code.visualstudio.com/insiders).
+For vertical tabs and the rounded panel layout, use:
 
-## Contributing
+```json
+{
+	"workbench.editor.showTabs": "multiple",
+	"workbench.editor.tabPosition": "left",
+	"workbench.editor.verticalTabsWidth": 240,
+	"workbench.editor.tabGroups.enabled": true,
+	"workbench.experimental.modernUI": true
+}
+```
 
-There are many ways in which you can participate in this project, for example:
+Use `"right"` or `"top"` for a different tab position. Resize the vertical strip by dragging its handle.
 
-* [Submit bugs and feature requests](https://github.com/microsoft/vscode/issues), and help us verify them as they are checked in
-* Review [source code changes](https://github.com/microsoft/vscode/pulls)
-* Review the [documentation](https://github.com/microsoft/vscode-docs) and make pull requests for anything from typos to new content.
+### Workspace Colors
 
-If you are interested in fixing issues and contributing directly to the codebase, please see the document [How to Contribute](https://github.com/microsoft/vscode/wiki/How-to-Contribute), which covers the following:
+Open a folder or workspace and run **Preferences: Workspace Color...** from the Command Palette. Choose a preset or hex color, preview **Subtle** or **Rich**, then select **Apply**. **Cancel** restores the previous appearance; **Use Theme Color** clears the workspace color.
 
-* [How to build and run from source](https://github.com/microsoft/vscode/wiki/How-to-Contribute)
-* [The development workflow, including debugging and running tests](https://github.com/microsoft/vscode/wiki/How-to-Contribute#debugging)
-* [Coding guidelines](https://github.com/microsoft/vscode/wiki/Coding-Guidelines)
-* [Submitting pull requests](https://github.com/microsoft/vscode/wiki/How-to-Contribute#pull-requests)
-* [Finding an issue to work on](https://github.com/microsoft/vscode/wiki/How-to-Contribute#where-to-contribute)
-* [Contributing to translations](https://aka.ms/vscodeloc)
+Colors are saved for that workspace on the current device. Explicit theme color customizations take precedence over workspace colors, and high-contrast themes retain their accessible surfaces.
 
-## Feedback
+### Remote Files over SSH/SFTP
 
-* Ask a question on [Stack Overflow](https://stackoverflow.com/questions/tagged/vscode)
-* [Request a new feature](CONTRIBUTING.md)
-* Upvote [popular feature requests](https://github.com/microsoft/vscode/issues?q=is%3Aopen+is%3Aissue+label%3Afeature-request+sort%3Areactions-%2B1-desc)
-* [File an issue](https://github.com/microsoft/vscode/issues)
-* Connect with the extension author community on [GitHub Discussions](https://github.com/microsoft/vscode-discussions/discussions) or [Slack](https://aka.ms/vscode-dev-community)
-* Follow [@code](https://x.com/code) and let us know what you think!
+Open the **Remote** view or run **JCode Remote: Manage SSH/SFTP Connections...**. Create a connection, choose the remote folder, and select **Save and Connect** to open it in the Explorer.
 
-See our [wiki](https://github.com/microsoft/vscode/wiki/Feedback-Channels) for a description of each of these channels and information on some other available community-driven channels.
+This feature provides an SFTP virtual workspace. Remote terminals and server-side language tooling require separate support. See the [SSH/SFTP guide](extensions/jcode-sftp/README.md) for authentication, host verification, save behavior, polling, and profile import/export, including how exported credentials are handled.
 
-## Related Projects
+## Build and Run
 
-Many of the core components and extensions to VS Code live in their own repositories on GitHub. For example, the [node debug adapter](https://github.com/microsoft/vscode-node-debug) and the [mono debug adapter](https://github.com/microsoft/vscode-mono-debug) repositories are separate from each other. For a complete list, please visit the [Related Projects](https://github.com/microsoft/vscode/wiki/Related-Projects) page on our [wiki](https://github.com/microsoft/vscode/wiki).
+Use the Node.js version in [.nvmrc](.nvmrc), npm below version 13, Git, and your operating system's native build toolchain. The [upstream contribution guide](https://github.com/microsoft/vscode/wiki/How-to-Contribute) documents platform-specific prerequisites. A [development container](.devcontainer/README.md) is also included.
 
-## Bundled Extensions
+```sh
+git clone --branch custom/main --single-branch https://github.com/Jchnc/jcode.git
+cd jcode
+npm run install-fast
+npm run build-fast
+```
 
-VS Code includes a set of built-in extensions located in the [extensions](extensions) folder, including grammars and snippets for many languages. Extensions that provide rich language support (inline suggestions, Go to Definition) for a language have the suffix `language-features`. For example, the `json` extension provides coloring for `JSON` and the `json-language-features` extension provides rich language support for `JSON`.
+`build-fast` builds the client, built-in extensions (including JCode SFTP), and Copilot outputs. Run it after source changes. Once the full product has been built, `npm run build-fast -- --client-only` supports client-only iteration.
 
-## Development Container
+Launch from the repository root:
 
-This repository includes a Visual Studio Code Dev Containers / GitHub Codespaces development container.
+```powershell
+# Windows
+.\scripts\code.bat
+```
 
-* For [Dev Containers](https://aka.ms/vscode-remote/download/containers), use the **Dev Containers: Clone Repository in Container Volume...** command, which creates a Docker volume for better disk I/O on macOS and Windows.
-  * If you already have VS Code and Docker installed, you can also click [here](https://vscode.dev/redirect?url=vscode://ms-vscode-remote.remote-containers/cloneInVolume?url=https://github.com/microsoft/vscode) to get started. This will cause VS Code to automatically install the Dev Containers extension if needed, clone the source code into a container volume, and spin up a dev container for use.
+```sh
+# macOS / Linux
+./scripts/code.sh
+```
 
-* For Codespaces, install the [GitHub Codespaces](https://marketplace.visualstudio.com/items?itemName=GitHub.codespaces) extension in VS Code, and use the **Codespaces: Create New Codespace** command.
+Development builds currently use the inherited **Code - OSS Dev** application name.
 
-Docker / the Codespace should have at least **4 cores and 6 GB of RAM (8 GB recommended)** to run a full build. See the [development container README](.devcontainer/README.md) for more information.
+## Keeping JCode Updated
 
-## Code of Conduct
+`origin` points to this JCode fork; `upstream` points to Microsoft's Code - OSS repository. The remote-tracking reference `upstream/main` does not require a second local development branch.
 
-This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/). For more information, see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
+Set up the upstream remote once and keep pulls from rebasing the customized branch:
 
-## License
+```sh
+git remote add upstream https://github.com/microsoft/vscode.git
+git config branch.custom/main.rebase false
+git config pull.ff only
+```
+
+For an upstream update, start with a clean working tree:
+
+```sh
+git switch custom/main
+git pull --ff-only origin custom/main
+git fetch --no-tags upstream main
+git merge --no-ff upstream/main
+```
+
+Resolve conflicts while preserving the custom features. If dependency manifests changed, run `npm run install-fast`; then rebuild and run the relevant checks before pushing:
+
+```sh
+git push origin custom/main
+```
+
+Merge upstream updates rather than rebasing the combined upstream and custom history. Recovery points are kept as `archive/*` tags, leaving one development branch.
+
+## Development and Contributions
+
+Report JCode bugs and feature requests in [this repository's issue tracker](https://github.com/Jchnc/jcode/issues). Submit changes against `custom/main` and describe how they were verified.
+
+Follow the [coding and validation instructions](.github/copilot-instructions.md). Useful checks include `npm run typecheck-client`, targeted `npm run eslint -- <files>`, and the unit-test runners under [scripts](scripts). Choose checks that cover the change; documentation-only changes do not require a full product rebuild.
+
+Upstream built-in extensions remain under [extensions](extensions), alongside JCode's custom SFTP extension. The project follows the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/).
+
+## License and Attribution
+
+JCode builds on Microsoft's Code - OSS and its community contributions. The source is licensed under the [MIT License](LICENSE.txt); upstream copyright notices and [third-party notices](ThirdPartyNotices.txt) are retained.
 
 Copyright (c) Microsoft Corporation. All rights reserved.
-
-Licensed under the [MIT](LICENSE.txt) license.
