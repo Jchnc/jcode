@@ -233,7 +233,8 @@ suite('build-fast orchestration', () => {
 			runGit(repoRoot, ['init']);
 			runGit(repoRoot, ['config', 'user.email', 'build-fast@example.com']);
 			runGit(repoRoot, ['config', 'user.name', 'Build Fast Test']);
-			await write(repoRoot, '.gitignore', '.build/\nout/\n**/out/\n**/dist/\n');
+			await write(repoRoot, '.gitignore', '.build/\nout/\n**/out/\n**/dist/\nnode_modules/\nsrc/vs/base/browser/ui/codicons/codicon/codicon.ttf\n');
+			await write(repoRoot, 'node_modules/@vscode/codicons/dist/codicon.ttf', 'fixture font');
 			await write(repoRoot, 'package.json', JSON.stringify({ type: 'module', scripts: { gulp: 'node build-task.ts' } }));
 			await write(repoRoot, 'extensions/copilot/package.json', JSON.stringify({ scripts: { compile: 'node ../../build-task.ts copilot' } }));
 			await write(repoRoot, 'src/main.ts', 'export const value: number = 1;\n');
@@ -288,7 +289,11 @@ suite('build-fast orchestration', () => {
 
 			await runBuildFast(repoRoot, false, true);
 			await capture();
+			const fontPath = 'vs/base/browser/ui/codicons/codicon/codicon.ttf';
+			await fs.promises.rm(path.join(repoRoot, 'src', fontPath));
+			await fs.promises.rm(path.join(repoRoot, 'out', fontPath));
 			await runBuildFast(repoRoot, false, true);
+			assert.deepStrictEqual(await Promise.all(['src', 'out'].map(directory => fs.promises.readFile(path.join(repoRoot, directory, fontPath), 'utf8'))), ['fixture font', 'fixture font']);
 			await capture();
 			await write(repoRoot, 'src/main.ts', 'export const value: number = 2;\n');
 			await fs.promises.rm(path.join(repoRoot, 'src/data.json'));

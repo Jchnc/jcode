@@ -9,6 +9,7 @@ import * as esbuild from 'esbuild';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getGitCommitDate } from '../lib/date.ts';
+import { ensureCodiconFont } from '../lib/codicons.ts';
 import { applyIncrementalClientChanges, mapWithConcurrency, MAX_CONCURRENT_FILE_OPERATIONS } from './transpile.ts';
 
 const STATE_SCHEMA = 2;
@@ -75,6 +76,7 @@ export async function runBuildFast(repoRoot: string, force: boolean, clientOnly 
 	const lock = await acquireLock(path.join(stateDir, 'lock'));
 
 	try {
+		await ensureCodiconFont(repoRoot);
 		const environment = readEnvironment(repoRoot);
 		const statePath = path.join(stateDir, 'state.json');
 		const saved = await readState(statePath);
