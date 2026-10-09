@@ -198,7 +198,7 @@ export class EditorTitleControl extends Themable {
 	layout(dimensions: IEditorTitleControlDimensions, headerWidth = dimensions.container.width, verticalTabsWidth = this.groupsView.partOptions.verticalTabsWidth): Dimension {
 		if (this.groupsView.partOptions.showTabs === 'multiple' && this.groupsView.partOptions.tabPosition !== 'top') {
 			this.headerControl.layout(headerWidth);
-			const verticalTabsDimension = new Dimension(verticalTabsWidth, Math.max(0, dimensions.container.height - this.headerControl.height));
+			const verticalTabsDimension = new Dimension(verticalTabsWidth, dimensions.container.height);
 			this.editorTabsControl.layout({ container: verticalTabsDimension, available: verticalTabsDimension });
 		} else {
 			this.editorTabsControl.layout(dimensions);

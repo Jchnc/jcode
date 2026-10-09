@@ -5,6 +5,31 @@
 
 /* Breadcrumbs (below multiple editor tabs) */
 
+.monaco-workbench .part.editor > .content .editor-group-container.vertical-tabs > .title .breadcrumbs-below-tabs {
+	display: flex;
+	align-items: center;
+	min-width: 0;
+	box-sizing: border-box;
+	padding: 0 var(--vscode-spacing-size80);
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container.vertical-tabs > .title .breadcrumbs-below-tabs.hidden {
+	display: none;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container.vertical-tabs > .title .breadcrumbs-editor-type {
+	border-radius: var(--vscode-cornerRadius-small);
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container.vertical-tabs > .title .monaco-breadcrumbs,
+.monaco-workbench .part.editor > .content .editor-group-container.vertical-tabs > .title .breadcrumbs-editor-type {
+	background-color: transparent;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container.vertical-tabs > .title .breadcrumbs-editor-type:hover {
+	background-color: var(--vscode-toolbar-hoverBackground);
+}
+
 .monaco-workbench .part.editor > .content .editor-group-container > .title .breadcrumbs-below-tabs .breadcrumbs-control {
 	flex: 1 100%;
 	height: 22px;

@@ -191,6 +191,16 @@
 
 /* Title */
 
+.monaco-workbench .part.editor > .content .editor-group-container.vertical-tabs {
+	position: relative;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container.vertical-tabs > .title {
+	position: absolute;
+	top: 0;
+	z-index: 1;
+}
+
 .monaco-workbench .part.editor > .content .editor-group-container > .title {
 	position: relative;
 	box-sizing: border-box;
@@ -200,6 +210,11 @@
 .monaco-workbench .part.editor > .content .editor-group-container > .title:not(.tabs) {
 	display: flex; /* when tabs are not shown, use flex layout */
 	flex-wrap: nowrap;
+}
+
+.monaco-workbench.modern-ui.floating-panels:not(.modern-ui-compact) .part.editor > .content .editor-group-container.vertical-tabs > .title {
+	border-radius: var(--vscode-cornerRadius-large) var(--vscode-cornerRadius-large) 0 0;
+	box-shadow: inset 0 calc(-1 * var(--vscode-strokeThickness)) var(--modern-ui-floating-card-border-color, var(--vscode-surface-border, var(--vscode-widget-border, transparent)));
 }
 
 .monaco-workbench .part.editor > .content .editor-group-container > .title.title-border-bottom::after {
@@ -291,6 +306,11 @@
 .monaco-workbench.modern-ui.floating-panels:not(.modern-ui-compact) .part.editor > .content .editor-group-container > .editor-group-body:is(.vertical-tabs-left, .vertical-tabs-right) > .editor-container {
 	border-radius: var(--vscode-cornerRadius-large);
 	overflow: hidden;
+}
+
+.monaco-workbench.modern-ui.floating-panels:not(.modern-ui-compact) .part.editor > .content .editor-group-container > .editor-group-body.with-editor-header:is(.vertical-tabs-left, .vertical-tabs-right) > .editor-container {
+	border-top-left-radius: 0;
+	border-top-right-radius: 0;
 }
 
 .monaco-workbench .part.editor > .content .editor-group-container > .editor-group-body > .vertical-tabs-container.hidden {

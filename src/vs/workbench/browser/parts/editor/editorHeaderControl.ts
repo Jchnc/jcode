@@ -39,7 +39,14 @@ export class EditorHeaderControl extends Disposable {
 			}
 			return this.groupsView.partOptions.tabHeight === 'compact' ? EditorHeaderControl.COMPACT_HEIGHT : EditorHeaderControl.DEFAULT_HEIGHT;
 		}
-		return this.breadcrumbsControl?.isHidden() === false ? BreadcrumbsControl.HEIGHT : 0;
+		if (this.breadcrumbsControl?.isHidden() !== false) {
+			return 0;
+		}
+		return this.hasVerticalTabs ? EditorHeaderControl.DEFAULT_HEIGHT : BreadcrumbsControl.HEIGHT;
+	}
+
+	private get hasVerticalTabs(): boolean {
+		return this.groupsView.partOptions.showTabs === 'multiple' && this.groupsView.partOptions.tabPosition !== 'top';
 	}
 
 	constructor(
@@ -105,6 +112,10 @@ export class EditorHeaderControl extends Disposable {
 			} else {
 				breadcrumbsWidth = Math.max(0, width);
 				this.breadcrumbsContainer.style.width = `${breadcrumbsWidth}px`;
+				this.breadcrumbsContainer.style.height = `${this.height}px`;
+				if (this.hasVerticalTabs) {
+					breadcrumbsWidth = Math.max(0, this.breadcrumbsControl.domNode.clientWidth);
+				}
 			}
 			this.breadcrumbsControl.layout(new Dimension(breadcrumbsWidth, BreadcrumbsControl.HEIGHT));
 		}

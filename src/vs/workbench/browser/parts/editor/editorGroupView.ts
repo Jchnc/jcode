@@ -596,6 +596,7 @@ export class EditorGroupView extends Themable implements IEditorGroupView {
 	private updateTitleContainer(): void {
 		const { showTabs, tabPosition } = this.groupsView.partOptions;
 		const hasVerticalTabs = showTabs === 'multiple' && tabPosition !== 'top';
+		this.element.classList.toggle('vertical-tabs', hasVerticalTabs);
 		this.titleContainer.classList.toggle('tabs', showTabs === 'multiple' && !hasVerticalTabs);
 		this.titleContainer.classList.toggle('show-file-icons', this.groupsView.partOptions.showIcons);
 		this.bodyContainer.classList.toggle('vertical-tabs-left', hasVerticalTabs && tabPosition === 'left');
@@ -2362,25 +2363,29 @@ export class EditorGroupView extends Themable implements IEditorGroupView {
 		const verticalTabsGap = verticalTabsWidth > 0 ? this.verticalTabsGap : 0;
 		const editorWidth = Math.max(0, contentWidth - verticalTabsWidth - verticalTabsGap);
 
-		// Keep tabs full-width while the header and editor pane follow the content inset.
+		// Vertical tabs use the full group height; their header follows only the editor column.
 		const titleControlSize = this.titleControl.layout({
 			container: new Dimension(width, height),
 			available: new Dimension(width, height - this.editorPane.minimumHeight)
-		}, contentWidth, verticalTabsWidth);
+		}, verticalTabsWidth > 0 ? editorWidth : contentWidth, verticalTabsWidth);
+		this.titleContainer.style.width = verticalTabsWidth > 0 ? `${editorWidth}px` : '';
+		this.titleContainer.style.left = verticalTabsWidth > 0 ? `${this.groupsView.partOptions.tabPosition === 'left' ? verticalTabsWidth + verticalTabsGap : 0}px` : '';
 
 		// Update progress bar location
 		this.progressBar.getContainer().style.top = `${Math.max(this.titleHeight.offset - 2, 0)}px`;
 
 		// The editor pane is inset on the right by `_contentRightInset` so a docked
-		// panel can sit beside it under the full-width title (0 = fill the group).
+		// panel can sit beside it (0 = fill the group).
 		const editorHeight = Math.max(0, height - titleControlSize.height);
 		this.bodyContainer.style.width = `${contentWidth}px`;
-		this.bodyContainer.style.height = `${editorHeight}px`;
+		this.bodyContainer.style.height = `${verticalTabsWidth > 0 ? height : editorHeight}px`;
+		this.bodyContainer.classList.toggle('with-editor-header', titleControlSize.height > 0);
 		this.verticalTabsContainer.style.width = `${verticalTabsWidth}px`;
-		this.verticalTabsContainer.style.height = `${editorHeight}px`;
+		this.verticalTabsContainer.style.height = `${height}px`;
 		this.verticalTabsSash.layout();
 		this.editorContainer.style.width = `${editorWidth}px`;
 		this.editorContainer.style.height = `${editorHeight}px`;
+		this.editorContainer.style.marginTop = verticalTabsWidth > 0 ? `${titleControlSize.height}px` : '';
 		const editorLeft = left + (this.groupsView.partOptions.tabPosition === 'left' ? verticalTabsWidth + verticalTabsGap : 0);
 		this.editorPane.layout({ width: editorWidth, height: editorHeight, top: top + titleControlSize.height, left: editorLeft });
 	}
