@@ -276,6 +276,18 @@
 	border-radius: var(--vscode-cornerRadius-large);
 }
 
+/* Paint the card border above its contents without changing tab or scrollbar dimensions. */
+.monaco-workbench.modern-ui.floating-panels:not(.modern-ui-compact) .part.editor > .content .editor-group-container > .editor-group-body > .vertical-tabs-container::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	border: var(--vscode-strokeThickness) solid var(--modern-ui-floating-card-border-color, var(--vscode-surface-border, var(--vscode-widget-border, transparent)));
+	border-radius: inherit;
+	box-sizing: border-box;
+	pointer-events: none;
+	z-index: 1;
+}
+
 .monaco-workbench.modern-ui.floating-panels:not(.modern-ui-compact) .part.editor > .content .editor-group-container > .editor-group-body:is(.vertical-tabs-left, .vertical-tabs-right) > .editor-container {
 	border-radius: var(--vscode-cornerRadius-large);
 	overflow: hidden;
