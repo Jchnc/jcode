@@ -241,7 +241,7 @@ class WorkspaceColorPicker {
 					const color = normalizeWorkspaceColor(value.trim());
 					apply.enabled = !!color;
 					input.inputElement.setAttribute('aria-invalid', String(!color));
-					error.textContent = color ? '' : localize('workspaceColor.invalid', "Enter a hex color, such as #7298c8.");
+					error.textContent = color ? '' : localize('workspaceColor.invalid', "Enter a hex color, such as #3b82f6.");
 					if (color) {
 						selected = { color, style };
 						sync();

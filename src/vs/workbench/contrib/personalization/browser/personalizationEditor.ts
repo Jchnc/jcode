@@ -17,8 +17,9 @@ import { Registry } from '../../../../platform/registry/common/platform.js';
 import { IStorageService } from '../../../../platform/storage/common/storage.js';
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
 import { IWorkspaceContextService, WorkbenchState } from '../../../../platform/workspace/common/workspace.js';
+import { isDark } from '../../../../platform/theme/common/theme.js';
 import { EditorPane } from '../../../browser/parts/editor/editorPane.js';
-import { WORKSPACE_COLOR_PALETTE, getWorkspaceColorPreset } from '../../../common/workspaceColorPalette.js';
+import { WORKSPACE_COLOR_PALETTE, getWorkspaceColorPreset, getWorkspaceColorRamp } from '../../../common/workspaceColorPalette.js';
 import { IEditorGroup } from '../../../services/editor/common/editorGroupsService.js';
 import { IWorkbenchThemeService } from '../../../services/themes/common/workbenchThemeService.js';
 import { IWorkspaceAppearance, IWorkspaceAppearanceService } from '../../../services/themes/common/workspaceAppearance.js';
@@ -176,7 +177,7 @@ export class PersonalizationEditor extends EditorPane {
 
 	private createWorkspaceColors(parent: HTMLElement): void {
 		const palette = append(parent, $('.personalization-palette', { role: 'group', 'aria-label': localize('personalization.palette', "Workspace colors") }));
-		const buttons: { button: HTMLButtonElement; value: string | undefined }[] = [];
+		const buttons: { button: HTMLButtonElement; swatch: HTMLElement; value: string | undefined }[] = [];
 		for (const preset of [undefined, ...WORKSPACE_COLOR_PALETTE]) {
 			const button = this.button(palette, '', () => {
 				const preview = this.appearanceService.beginPreview();
@@ -188,7 +189,7 @@ export class PersonalizationEditor extends EditorPane {
 			if (preset) { swatch.style.backgroundColor = preset.value; }
 			else { swatch.classList.add('no-color'); }
 			append(button, $('span', undefined, preset?.label ?? localize('personalization.none', "None")));
-			buttons.push({ button, value: preset?.value });
+			buttons.push({ button, swatch, value: preset?.value });
 		}
 		const actions = append(parent, $('.personalization-color-actions'));
 		const hint = append(actions, $('span.personalization-muted'));
@@ -196,9 +197,13 @@ export class PersonalizationEditor extends EditorPane {
 			const available = this.workspaceService.getWorkbenchState() !== WorkbenchState.EMPTY;
 			const appearance = this.appearanceService.appearance;
 			const preset = getWorkspaceColorPreset(appearance?.color);
+			const dark = isDark(this.workbenchThemeService.getColorTheme().type);
 			for (const item of buttons) {
 				item.button.disabled = !available;
 				item.button.setAttribute('aria-pressed', String(item.value === (preset?.value ?? appearance?.color)));
+				if (item.value) {
+					item.swatch.style.backgroundColor = getWorkspaceColorRamp(item.value, dark).marker;
+				}
 			}
 			hint.textContent = available ? localize('personalization.localColor', "Only this workspace, on this device.") : localize('personalization.openWorkspace', "Open a folder or workspace to choose a color.");
 		});

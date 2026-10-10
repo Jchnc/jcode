@@ -24,44 +24,44 @@ interface IWorkspaceColorPreset {
 /** Handcrafted chrome surfaces; identity markers are intentionally stronger than the window frame. */
 export const WORKSPACE_COLOR_PALETTE: readonly IWorkspaceColorPreset[] = [
 	{
-		id: 'graphite', label: localize('workspaceColor.graphite', "Graphite"), value: '#8798ad', legacyColors: ['#94a3b8'],
-		dark: { subtle: '#242931', prominent: '#303944', marker: '#8798ad' },
-		light: { subtle: '#f0f2f5', prominent: '#e3e8ee', marker: '#596b7f' }
+		id: 'graphite', label: localize('workspaceColor.graphite', "Graphite"), value: '#64748b', legacyColors: ['#8798ad', '#94a3b8'],
+		dark: { subtle: '#232831', prominent: '#313946', marker: '#94a3b8' },
+		light: { subtle: '#eef1f4', prominent: '#dfe5eb', marker: '#475569' }
 	},
 	{
-		id: 'ocean', label: localize('workspaceColor.ocean', "Ocean"), value: '#7298c8', legacyColors: ['#60a5fa'],
-		dark: { subtle: '#202b39', prominent: '#283c55', marker: '#7298c8' },
-		light: { subtle: '#eef3f9', prominent: '#dfe9f5', marker: '#4a6e99' }
+		id: 'azure', label: localize('workspaceColor.azure', "Azure"), value: '#3b82f6', legacyColors: ['#7298c8', '#60a5fa'],
+		dark: { subtle: '#1d293d', prominent: '#243b5a', marker: '#60a5fa' },
+		light: { subtle: '#eef4fc', prominent: '#dce9fa', marker: '#2563eb' }
 	},
 	{
-		id: 'lagoon', label: localize('workspaceColor.lagoon', "Lagoon"), value: '#66a69f', legacyColors: ['#2dd4bf', '#22d3ee'],
-		dark: { subtle: '#202e2e', prominent: '#29433f', marker: '#66a69f' },
-		light: { subtle: '#edf5f3', prominent: '#dcece8', marker: '#417b74' }
+		id: 'lagoon', label: localize('workspaceColor.lagoon', "Lagoon"), value: '#0d9488', legacyColors: ['#66a69f', '#2dd4bf', '#22d3ee'],
+		dark: { subtle: '#162d2c', prominent: '#17443f', marker: '#2dd4bf' },
+		light: { subtle: '#eaf7f5', prominent: '#d5eee9', marker: '#0f766e' }
 	},
 	{
-		id: 'forest', label: localize('workspaceColor.forest', "Forest"), value: '#819f7b', legacyColors: ['#34d399'],
-		dark: { subtle: '#272e26', prominent: '#354331', marker: '#819f7b' },
-		light: { subtle: '#f0f4ee', prominent: '#e2ecdd', marker: '#5a7853' }
+		id: 'jade', label: localize('workspaceColor.jade', "Jade"), value: '#16a34a', legacyColors: ['#819f7b', '#34d399'],
+		dark: { subtle: '#1b2d25', prominent: '#244735', marker: '#4ade80' },
+		light: { subtle: '#edf7f1', prominent: '#d9efdf', marker: '#15803d' }
 	},
 	{
-		id: 'sand', label: localize('workspaceColor.sand', "Sand"), value: '#c1a06a', legacyColors: ['#fbbf24'],
-		dark: { subtle: '#302b23', prominent: '#493e2b', marker: '#c1a06a' },
-		light: { subtle: '#f8f4eb', prominent: '#f1e6cf', marker: '#876c3f' }
+		id: 'lime', label: localize('workspaceColor.lime', "Lime"), value: '#65a30d', legacyColors: [],
+		dark: { subtle: '#252d18', prominent: '#36451d', marker: '#a3e635' },
+		light: { subtle: '#f3f8e9', prominent: '#e5efcc', marker: '#4d7c0f' }
 	},
 	{
-		id: 'clay', label: localize('workspaceColor.clay', "Clay"), value: '#c59177', legacyColors: ['#fb923c'],
-		dark: { subtle: '#302723', prominent: '#49352d', marker: '#c59177' },
-		light: { subtle: '#f8f1ed', prominent: '#f1e0d6', marker: '#966348' }
+		id: 'amber', label: localize('workspaceColor.amber', "Amber"), value: '#d97706', legacyColors: ['#c1a06a', '#fbbf24'],
+		dark: { subtle: '#30291b', prominent: '#4a3920', marker: '#fbbf24' },
+		light: { subtle: '#fbf5e8', prominent: '#f5e6c6', marker: '#b45309' }
 	},
 	{
-		id: 'rose', label: localize('workspaceColor.rose', "Rose"), value: '#c18691', legacyColors: ['#fb7185', '#f472b6'],
-		dark: { subtle: '#30252b', prominent: '#49313b', marker: '#c18691' },
-		light: { subtle: '#f8eff2', prominent: '#f0dee5', marker: '#965864' }
+		id: 'coral', label: localize('workspaceColor.coral', "Coral"), value: '#e11d48', legacyColors: ['#c59177', '#fb923c', '#c18691', '#fb7185'],
+		dark: { subtle: '#322127', prominent: '#4c2934', marker: '#fb7185' },
+		light: { subtle: '#fbf0f2', prominent: '#f5dce2', marker: '#be123c' }
 	},
 	{
-		id: 'iris', label: localize('workspaceColor.iris', "Iris"), value: '#9d90bf', legacyColors: ['#a78bfa', '#818cf8'],
-		dark: { subtle: '#292632', prominent: '#3c354c', marker: '#9d90bf' },
-		light: { subtle: '#f3f0f8', prominent: '#e7e1f1', marker: '#71618f' }
+		id: 'orchid', label: localize('workspaceColor.orchid', "Orchid"), value: '#9333ea', legacyColors: ['#9d90bf', '#a78bfa', '#818cf8', '#f472b6'],
+		dark: { subtle: '#2a2238', prominent: '#402d57', marker: '#c084fc' },
+		light: { subtle: '#f6f0fb', prominent: '#eadcf6', marker: '#7e22ce' }
 	}
 ];
 
@@ -78,5 +78,5 @@ export function getWorkspaceColorRamp(color: string, dark: boolean): IWorkspaceC
 		prominent: new Color(new HSLA(h, Math.min(s, 0.3), dark ? 0.23 : 0.89, 1)).toString(),
 		marker: color
 	};
-	return { ...surface, foreground: dark ? '#e7e9ed' : '#28313f', inactiveForeground: dark ? '#b6bfca' : '#526071' };
+	return { ...surface, foreground: dark ? '#f4f6f8' : '#1f2937', inactiveForeground: dark ? '#bdc6d1' : '#526071' };
 }
