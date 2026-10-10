@@ -125,8 +125,12 @@
 	color: currentColor;
 }
 
+.jcode-personalization .personalization-scope-area {
+	margin-top: var(--vscode-spacing-size320);
+}
+
 .jcode-personalization .personalization-scope-label {
-	margin: var(--vscode-spacing-size320) var(--vscode-spacing-size100) var(--vscode-spacing-size80);
+	margin: 0 var(--vscode-spacing-size100) var(--vscode-spacing-size80);
 	font-size: var(--vscode-fontSize-label2);
 	font-weight: var(--vscode-fontWeight-semiBold);
 	color: var(--vscode-descriptionForeground);
@@ -470,6 +474,7 @@
 .jcode-personalization .personalization-footer {
 	display: flex;
 	align-items: center;
+	flex-wrap: wrap;
 	gap: var(--vscode-spacing-size80);
 	margin-top: var(--vscode-spacing-size320);
 	color: var(--vscode-descriptionForeground);
@@ -480,18 +485,20 @@
 }
 
 .jcode-personalization.narrow {
-	overflow: auto;
+	overflow: hidden;
 }
 
 .jcode-personalization.narrow .personalization-shell {
-	display: block;
-	height: auto;
-	min-height: 100%;
+	display: grid;
+	grid-template-rows: auto minmax(0, 1fr);
+	grid-template-columns: minmax(0, 1fr);
+	height: 100%;
 }
 
 .jcode-personalization.narrow .personalization-sidebar {
 	overflow: visible;
-	padding: var(--vscode-spacing-size160) var(--vscode-spacing-size240);
+	min-width: 0;
+	padding: var(--vscode-spacing-size120) var(--vscode-spacing-size240);
 	border-bottom: var(--vscode-strokeThickness) solid var(--vscode-widget-border, var(--vscode-contrastBorder, transparent));
 }
 
@@ -501,35 +508,47 @@
 
 .jcode-personalization.narrow .personalization-nav {
 	flex-direction: row;
-	flex-wrap: wrap;
+	overflow-x: auto;
+	overflow-y: hidden;
+	padding-bottom: var(--vscode-spacing-size20);
+	scrollbar-width: thin;
+	scrollbar-color: var(--vscode-scrollbarSlider-background) transparent;
 }
 
 .jcode-personalization.narrow .personalization-nav-item {
+	flex: 0 0 auto;
 	width: auto;
 }
 
-.jcode-personalization.narrow .personalization-scope-label {
-	display: inline-block;
-	margin: var(--vscode-spacing-size120) var(--vscode-spacing-size80) 0 0;
+.jcode-personalization.narrow .personalization-scope-area {
+	display: grid;
+	grid-template-columns: auto auto minmax(0, 1fr);
+	align-items: center;
+	gap: var(--vscode-spacing-size80) var(--vscode-spacing-size120);
+	margin-top: var(--vscode-spacing-size100);
 }
 
-.jcode-personalization.narrow .personalization-scope {
-	display: inline-grid;
-	margin-top: var(--vscode-spacing-size120);
+.jcode-personalization.narrow .personalization-scope-label {
+	margin: 0;
 }
 
 .jcode-personalization.narrow .personalization-scope-description {
-	display: block;
-	margin: var(--vscode-spacing-size80) 0 0;
+	min-width: 0;
+	margin: 0;
 }
 
 .jcode-personalization.narrow .personalization-content {
-	overflow: visible;
+	overflow: auto;
+	min-height: 0;
 	padding: var(--vscode-spacing-size280) var(--vscode-spacing-size240) var(--vscode-spacing-size400);
 }
 
 .jcode-personalization.narrow .personalization-page-header {
 	margin-bottom: var(--vscode-spacing-size240);
+}
+
+.jcode-personalization.narrow .personalization-section {
+	scroll-margin-top: var(--vscode-spacing-size80);
 }
 
 .jcode-personalization.narrow .personalization-palette {
@@ -555,6 +574,7 @@
 
 .jcode-personalization.narrow .personalization-field {
 	flex-wrap: wrap;
+	min-width: 0;
 }
 
 .jcode-personalization.narrow .personalization-theme-row {
@@ -570,4 +590,103 @@
 .jcode-personalization.narrow .personalization-theme-row .personalization-theme-action {
 	grid-column: 2;
 	grid-row: 1 / span 2;
+}
+
+.jcode-personalization.compact .personalization-sidebar {
+	padding: var(--vscode-spacing-size100) var(--vscode-spacing-size120);
+}
+
+.jcode-personalization.compact .personalization-nav {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	overflow: visible;
+	padding: 0;
+}
+
+.jcode-personalization.compact .personalization-nav-item {
+	width: 100%;
+	padding: var(--vscode-spacing-size60) var(--vscode-spacing-size80);
+}
+
+.jcode-personalization.compact .personalization-scope-area {
+	grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.jcode-personalization.compact .personalization-scope-label {
+	grid-column: 1;
+}
+
+.jcode-personalization.compact .personalization-scope {
+	grid-column: 2;
+	grid-row: 1;
+}
+
+.jcode-personalization.compact .personalization-scope-description {
+	grid-column: 1 / -1;
+}
+
+.jcode-personalization.compact .personalization-content {
+	padding: var(--vscode-spacing-size200) var(--vscode-spacing-size120) var(--vscode-spacing-size320);
+}
+
+.jcode-personalization.compact .personalization-page-header {
+	margin-bottom: var(--vscode-spacing-size160);
+}
+
+.jcode-personalization.compact .personalization-section {
+	margin-top: var(--vscode-spacing-size200);
+}
+
+.jcode-personalization.compact .personalization-section-header {
+	padding-bottom: var(--vscode-spacing-size80);
+}
+
+.jcode-personalization.compact .personalization-theme-row {
+	grid-template-columns: minmax(0, 1fr) auto;
+	padding: var(--vscode-spacing-size100) var(--vscode-spacing-size120);
+}
+
+.jcode-personalization.compact .personalization-palette {
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	padding: var(--vscode-spacing-size100);
+}
+
+.jcode-personalization.compact .personalization-palette button {
+	padding: var(--vscode-spacing-size60) var(--vscode-spacing-size80);
+}
+
+.jcode-personalization.compact .personalization-color-actions,
+.jcode-personalization.compact .personalization-color-intensity,
+.jcode-personalization.compact .personalization-setting {
+	padding-right: var(--vscode-spacing-size120);
+	padding-left: var(--vscode-spacing-size120);
+}
+
+.jcode-personalization.compact .personalization-setting {
+	grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.jcode-personalization.compact .personalization-setting .personalization-field {
+	grid-column: 1;
+	justify-self: stretch;
+}
+
+.jcode-personalization.compact .personalization-setting .personalization-reset {
+	grid-column: 2;
+}
+
+.jcode-personalization.compact .personalization-choices,
+.jcode-personalization.compact .personalization-placement {
+	width: 100%;
+}
+
+.jcode-personalization.compact .personalization-choices button,
+.jcode-personalization.compact .personalization-placement button {
+	flex: 1 1 auto;
+	justify-content: center;
+}
+
+.jcode-personalization.compact .personalization-field input[type='range'] {
+	min-width: 0;
+	width: min(100%, 180px);
 }

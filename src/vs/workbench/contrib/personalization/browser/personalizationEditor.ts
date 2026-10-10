@@ -76,14 +76,15 @@ export class PersonalizationEditor extends EditorPane {
 		const brand = append(sidebar, $('.personalization-brand', { 'aria-hidden': 'true' }));
 		append(brand, $('span.personalization-brand-icon')).classList.add(...ThemeIcon.asClassNameArray(Codicon.paintcan));
 		const nav = append(sidebar, $('nav.personalization-nav', { 'aria-label': localize('personalization.sections', "Personalization sections") }));
-		const scopeLabel = append(sidebar, $('.personalization-scope-label', { id: `personalization-scope-${this.group.id}` }, localize('personalization.scopeLabel', "Settings scope")));
-		const scope = append(sidebar, $('.personalization-scope', { role: 'group', 'aria-labelledby': scopeLabel.id }));
+		const scopeArea = append(sidebar, $('.personalization-scope-area'));
+		const scopeLabel = append(scopeArea, $('.personalization-scope-label', { id: `personalization-scope-${this.group.id}` }, localize('personalization.scopeLabel', "Settings scope")));
+		const scope = append(scopeArea, $('.personalization-scope', { role: 'group', 'aria-labelledby': scopeLabel.id }));
 		for (const [target, name] of [[ConfigurationTarget.USER, localize('personalization.user', "User")], [ConfigurationTarget.WORKSPACE, localize('personalization.workspace', "Workspace")]] as const) {
 			const button = this.button(scope, name, () => { this.target = target; this.refresh(); });
 			this.targetButtons.push(button);
 			if (target === ConfigurationTarget.WORKSPACE) { this.workspaceTarget = button; }
 		}
-		this.scopeDescription = append(sidebar, $('.personalization-scope-description'));
+		this.scopeDescription = append(scopeArea, $('.personalization-scope-description'));
 		this.content = append(shell, $('main.personalization-content'));
 		const pageHeader = append(this.content, $('header.personalization-page-header'));
 		append(pageHeader, $('h1', undefined, localize('personalization.heading', "Personalization")));
@@ -336,6 +337,7 @@ export class PersonalizationEditor extends EditorPane {
 	layout(dimension: Dimension): void {
 		this.root.style.width = `${dimension.width}px`; this.root.style.height = `${dimension.height}px`;
 		this.root.classList.toggle('narrow', dimension.width < 760);
+		this.root.classList.toggle('compact', dimension.width < 520);
 	}
 
 	override focus(): void { super.focus(); this.sections[0]?.nav.focus(); }
