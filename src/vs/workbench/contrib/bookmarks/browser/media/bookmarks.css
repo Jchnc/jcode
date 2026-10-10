@@ -1,0 +1,217 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.jcode-bookmark-glyph {
+	color: var(--vscode-editorBookmark-foreground);
+}
+
+.jcode-bookmarks-view {
+	box-sizing: border-box;
+	display: flex;
+	min-width: 0;
+	overflow: hidden;
+}
+
+.jcode-bookmarks-view .jcode-bookmarks-scrollable {
+	flex: 1;
+	min-width: 0;
+	height: 100%;
+}
+
+.jcode-bookmarks-view .jcode-bookmarks-list {
+	box-sizing: border-box;
+	width: 100%;
+	min-width: 0;
+	padding: var(--vscode-spacing-size40) 0 var(--vscode-spacing-size120);
+}
+
+.jcode-bookmarks-view .jcode-bookmarks-group + .jcode-bookmarks-group {
+	margin-top: var(--vscode-spacing-size80);
+}
+
+.jcode-bookmarks-view .jcode-bookmarks-file {
+	display: flex;
+	align-items: center;
+	gap: var(--vscode-spacing-size60);
+	min-width: 0;
+	padding: var(--vscode-spacing-size40) var(--vscode-spacing-size160);
+	color: var(--vscode-sideBarSectionHeader-foreground);
+}
+
+.jcode-bookmarks-view .jcode-bookmarks-file-icon {
+	flex: 0 0 auto;
+	color: var(--vscode-descriptionForeground);
+}
+
+.jcode-bookmarks-view .jcode-bookmarks-file-labels {
+	display: flex;
+	align-items: baseline;
+	min-width: 0;
+	gap: var(--vscode-spacing-size60);
+}
+
+.jcode-bookmarks-view .jcode-bookmarks-file-name {
+	flex: 0 0 auto;
+	font-weight: var(--vscode-fontWeight-semiBold);
+}
+
+.jcode-bookmarks-view .jcode-bookmarks-file-path {
+	min-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	font-size: var(--vscode-fontSize-label2);
+	color: var(--vscode-descriptionForeground);
+}
+
+.jcode-bookmarks-view .jcode-bookmark-row {
+	position: relative;
+	display: flex;
+	align-items: center;
+	min-width: 0;
+	margin: 0 var(--vscode-spacing-size80);
+	border-radius: var(--vscode-cornerRadius-medium);
+}
+
+.jcode-bookmarks-view .jcode-bookmark-row:hover,
+.jcode-bookmarks-view .jcode-bookmark-row:focus-within {
+	background: var(--vscode-list-hoverBackground);
+	color: var(--vscode-list-hoverForeground);
+}
+
+.jcode-bookmarks-view .jcode-bookmark-main,
+.jcode-bookmarks-view .jcode-bookmark-action,
+.jcode-bookmarks-view .jcode-bookmarks-empty-action {
+	box-sizing: border-box;
+	color: inherit;
+	background: transparent;
+	border: var(--vscode-strokeThickness) solid transparent;
+	cursor: pointer;
+}
+
+.jcode-bookmarks-view .jcode-bookmark-main,
+.jcode-bookmarks-view .jcode-bookmarks-empty-action {
+	font: inherit;
+}
+
+.jcode-bookmarks-view .jcode-bookmark-main:focus-visible,
+.jcode-bookmarks-view .jcode-bookmark-action:focus-visible,
+.jcode-bookmarks-view .jcode-bookmarks-empty-action:focus-visible {
+	outline: var(--vscode-strokeThickness) solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.jcode-bookmarks-view .jcode-bookmark-main {
+	display: flex;
+	align-items: flex-start;
+	flex: 1;
+	min-width: 0;
+	gap: var(--vscode-spacing-size80);
+	padding: var(--vscode-spacing-size60) var(--vscode-spacing-size160);
+	padding-right: 62px;
+	text-align: left;
+	border-radius: var(--vscode-cornerRadius-medium);
+}
+
+.jcode-bookmarks-view .jcode-bookmark-marker {
+	flex: 0 0 auto;
+	margin-top: var(--vscode-spacing-size20);
+	color: var(--vscode-editorBookmark-foreground);
+}
+
+.jcode-bookmarks-view .jcode-bookmark-row.stale .jcode-bookmark-marker,
+.jcode-bookmarks-view .jcode-bookmark-row.stale .jcode-bookmark-secondary {
+	color: var(--vscode-editorWarning-foreground);
+}
+
+.jcode-bookmarks-view .jcode-bookmark-content {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	gap: var(--vscode-spacing-size20);
+}
+
+.jcode-bookmarks-view .jcode-bookmark-primary,
+.jcode-bookmarks-view .jcode-bookmark-secondary {
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+.jcode-bookmarks-view .jcode-bookmark-primary {
+	color: var(--vscode-foreground);
+}
+
+.jcode-bookmarks-view .jcode-bookmark-secondary {
+	font-size: var(--vscode-fontSize-label2);
+	color: var(--vscode-descriptionForeground);
+}
+
+.jcode-bookmarks-view .jcode-bookmark-actions {
+	position: absolute;
+	right: var(--vscode-spacing-size100);
+	display: flex;
+	align-items: center;
+	opacity: 0;
+}
+
+.jcode-bookmarks-view .jcode-bookmark-row:hover .jcode-bookmark-actions,
+.jcode-bookmarks-view .jcode-bookmark-row:focus-within .jcode-bookmark-actions {
+	opacity: 1;
+}
+
+.jcode-bookmarks-view .jcode-bookmark-action {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: var(--vscode-spacing-size240);
+	height: var(--vscode-spacing-size240);
+	padding: 0;
+	border-radius: var(--vscode-cornerRadius-medium);
+}
+
+.jcode-bookmarks-view .jcode-bookmark-action:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
+.jcode-bookmarks-view .jcode-bookmarks-empty {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	padding: var(--vscode-spacing-size320) var(--vscode-spacing-size200);
+	text-align: center;
+	color: var(--vscode-descriptionForeground);
+}
+
+.jcode-bookmarks-view .jcode-bookmarks-empty-icon {
+	margin-bottom: var(--vscode-spacing-size120);
+	font-size: var(--vscode-fontSize-heading1);
+	color: var(--vscode-editorBookmark-foreground);
+}
+
+.jcode-bookmarks-view .jcode-bookmarks-empty h3 {
+	margin: 0 0 var(--vscode-spacing-size60);
+	font-size: var(--vscode-fontSize-heading3);
+	font-weight: var(--vscode-fontWeight-semiBold);
+	color: var(--vscode-foreground);
+}
+
+.jcode-bookmarks-view .jcode-bookmarks-empty p {
+	max-width: 260px;
+	margin: 0;
+	line-height: 1.4;
+}
+
+.jcode-bookmarks-view .jcode-bookmarks-empty-action {
+	margin-top: var(--vscode-spacing-size160);
+	padding: var(--vscode-spacing-size60) var(--vscode-spacing-size120);
+	border-radius: var(--vscode-cornerRadius-medium);
+	background: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+}
+
+.jcode-bookmarks-view .jcode-bookmarks-empty-action:hover {
+	background: var(--vscode-button-secondaryHoverBackground);
+}

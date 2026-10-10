@@ -226,6 +226,7 @@
 		"--vscode-editorActionList-focusForeground",
 		"--vscode-editorActionList-foreground",
 		"--vscode-editorActiveLineNumber-foreground",
+		"--vscode-editorBookmark-foreground",
 		"--vscode-editorBracketHighlight-foreground1",
 		"--vscode-editorBracketHighlight-foreground2",
 		"--vscode-editorBracketHighlight-foreground3",
