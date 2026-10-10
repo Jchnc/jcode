@@ -228,6 +228,7 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 
 		const editors = this.tabsModel.getEditors(EditorsOrder.SEQUENTIAL);
 		const renderedGroups = new Set<string>();
+		const tabGroupsEnabled = this.groupsView.partOptions.tabGroups.enabled;
 		const showPinnedSection = this.groupsView.partOptions.pinnedTabsOnSeparateRow && this.tabsModel.stickyCount > 0;
 		for (let index = 0; index < editors.length; index++) {
 			const editor = editors[index];
@@ -236,7 +237,7 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 			} else if (showPinnedSection && index === this.tabsModel.stickyCount) {
 				this.tabsContainer.appendChild(this.createSectionLabel(localize('verticalTabs.editors', "Editors"), this.tabsModel.stickyCount, false));
 			}
-			const tabGroup = this.tabsModel.getTabGroupForEditor(editor);
+			const tabGroup = tabGroupsEnabled ? this.tabsModel.getTabGroupForEditor(editor) : undefined;
 			if (tabGroup && !renderedGroups.has(tabGroup.id)) {
 				this.tabsContainer.appendChild(this.createTabGroupHeader(tabGroup, editors));
 				renderedGroups.add(tabGroup.id);
@@ -510,7 +511,7 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 
 	private createTab(editor: EditorInput): HTMLElement {
 		const row = $('.vertical-tab', { role: 'tab', draggable: true });
-		const tabGroup = this.tabsModel.getTabGroupForEditor(editor);
+		const tabGroup = this.groupsView.partOptions.tabGroups.enabled ? this.tabsModel.getTabGroupForEditor(editor) : undefined;
 		if (tabGroup) {
 			row.classList.add('in-tab-group');
 			row.style.setProperty('--tab-group-color', getEditorTabGroupColor(tabGroup.color));
@@ -769,6 +770,10 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 	}
 
 	private getTargetTabGroupId(editor: EditorInput): string | null {
+		if (!this.groupsView.partOptions.tabGroups.enabled) {
+			return null;
+		}
+
 		const tabGroup = this.tabsModel.getTabGroupForEditor(editor);
 		return tabGroup && !tabGroup.locked ? tabGroup.id : null;
 	}
@@ -1074,6 +1079,10 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 	}
 
 	private getVisibleEditors(): EditorInput[] {
+		if (!this.groupsView.partOptions.tabGroups.enabled) {
+			return [...this.tabsModel.getEditors(EditorsOrder.SEQUENTIAL)];
+		}
+
 		return this.tabsModel.getEditors(EditorsOrder.SEQUENTIAL).filter(editor => {
 			const group = this.tabsModel.getTabGroupForEditor(editor);
 			return !group?.collapsed || this.tabsModel.isActive(editor);

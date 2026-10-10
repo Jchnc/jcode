@@ -1535,6 +1535,9 @@ export async function pickMoveTabGroupTarget(quickInputService: IQuickInputServi
 }
 
 function registerTabGroupCommands(): void {
+	const tabGroupsEnabled = ContextKeyExpr.equals('config.workbench.editor.tabGroups.enabled', true);
+	const activeEditorInEnabledTabGroup = ContextKeyExpr.and(tabGroupsEnabled, ActiveEditorInTabGroupContext);
+
 	function getActiveTabGroup(accessor: ServicesAccessor, args: unknown[]): { group: IEditorGroupView; tabGroup: IEditorTabGroup } | undefined {
 		const resolvedContext = resolveCommandsContext(args, accessor.get(IEditorService), accessor.get(IEditorGroupsService), accessor.get(IListService));
 		const group = resolvedContext.groupedEditors[0]?.group;
@@ -1553,7 +1556,7 @@ function registerTabGroupCommands(): void {
 				title: localize2('addToNewTabGroup', 'Add to New Tab Group'),
 				category: Categories.View,
 				f1: true,
-				precondition: ActiveEditorStickyContext.toNegated()
+				precondition: ContextKeyExpr.and(tabGroupsEnabled, ActiveEditorStickyContext.toNegated())
 			});
 		}
 		async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
@@ -1572,7 +1575,7 @@ function registerTabGroupCommands(): void {
 	]) {
 		registerAction2(class extends Action2 {
 			constructor() {
-				super({ id: action.id, title: action.title, category: Categories.View, f1: true, precondition: ActiveEditorInTabGroupContext });
+				super({ id: action.id, title: action.title, category: Categories.View, f1: true, precondition: activeEditorInEnabledTabGroup });
 			}
 			run(accessor: ServicesAccessor, ...args: unknown[]): void {
 				const active = getActiveTabGroup(accessor, args);
@@ -1589,7 +1592,7 @@ function registerTabGroupCommands(): void {
 	]) {
 		registerAction2(class extends Action2 {
 			constructor() {
-				super({ id: action.id, title: action.title, category: Categories.View, f1: true, precondition: ActiveEditorInTabGroupContext });
+				super({ id: action.id, title: action.title, category: Categories.View, f1: true, precondition: activeEditorInEnabledTabGroup });
 			}
 			run(accessor: ServicesAccessor, ...args: unknown[]): void {
 				const active = getActiveTabGroup(accessor, args);
@@ -1602,7 +1605,7 @@ function registerTabGroupCommands(): void {
 
 	registerAction2(class extends Action2 {
 		constructor() {
-			super({ id: UNDO_TAB_GROUP_ACTION_COMMAND_ID, title: localize2('undoTabGroupAction', 'Undo Last Tab Group Change'), category: Categories.View, f1: true });
+			super({ id: UNDO_TAB_GROUP_ACTION_COMMAND_ID, title: localize2('undoTabGroupAction', 'Undo Last Tab Group Change'), category: Categories.View, f1: true, precondition: tabGroupsEnabled });
 		}
 		run(accessor: ServicesAccessor): void {
 			const group = accessor.get(IEditorGroupsService).activeGroup;
@@ -1614,7 +1617,7 @@ function registerTabGroupCommands(): void {
 
 	registerAction2(class extends Action2 {
 		constructor() {
-			super({ id: OPEN_SAVED_TAB_GROUP_COMMAND_ID, title: localize2('openSavedTabGroup', 'Open Saved Tab Group…'), category: Categories.View, f1: true });
+			super({ id: OPEN_SAVED_TAB_GROUP_COMMAND_ID, title: localize2('openSavedTabGroup', 'Open Saved Tab Group…'), category: Categories.View, f1: true, precondition: tabGroupsEnabled });
 		}
 		async run(accessor: ServicesAccessor): Promise<void> {
 			const historyService = accessor.get(IHistoryService);
@@ -1632,7 +1635,7 @@ function registerTabGroupCommands(): void {
 
 	registerAction2(class extends Action2 {
 		constructor() {
-			super({ id: DELETE_SAVED_TAB_GROUP_COMMAND_ID, title: localize2('deleteSavedTabGroup', 'Delete Saved Tab Group…'), category: Categories.View, f1: true });
+			super({ id: DELETE_SAVED_TAB_GROUP_COMMAND_ID, title: localize2('deleteSavedTabGroup', 'Delete Saved Tab Group…'), category: Categories.View, f1: true, precondition: tabGroupsEnabled });
 		}
 		async run(accessor: ServicesAccessor): Promise<void> {
 			const historyService = accessor.get(IHistoryService);
@@ -1653,7 +1656,7 @@ function registerTabGroupCommands(): void {
 				title: localize2('removeFromTabGroup', 'Remove from Tab Group'),
 				category: Categories.View,
 				f1: true,
-				precondition: ActiveEditorInTabGroupContext
+				precondition: activeEditorInEnabledTabGroup
 			});
 		}
 		async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
@@ -1673,7 +1676,7 @@ function registerTabGroupCommands(): void {
 				title: localize2('dissolveTabGroup', 'Ungroup Tabs'),
 				category: Categories.View,
 				f1: true,
-				precondition: ActiveEditorInTabGroupContext
+				precondition: activeEditorInEnabledTabGroup
 			});
 		}
 		async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
@@ -1713,7 +1716,7 @@ function registerTabGroupCommands(): void {
 				id: COLLAPSE_TAB_GROUP_COMMAND_ID,
 				title: localize2('collapseTabGroup', 'Collapse Tab Group'),
 				category: Categories.View,
-				precondition: ActiveEditorInTabGroupContext
+				precondition: activeEditorInEnabledTabGroup
 			});
 		}
 		async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
@@ -1727,7 +1730,7 @@ function registerTabGroupCommands(): void {
 				id: EXPAND_TAB_GROUP_COMMAND_ID,
 				title: localize2('expandTabGroup', 'Expand Tab Group'),
 				category: Categories.View,
-				precondition: ActiveEditorInTabGroupContext
+				precondition: activeEditorInEnabledTabGroup
 			});
 		}
 		async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
@@ -1742,7 +1745,7 @@ function registerTabGroupCommands(): void {
 				title: localize2('renameTabGroup', 'Rename Tab Group'),
 				category: Categories.View,
 				f1: true,
-				precondition: ActiveEditorInTabGroupContext
+				precondition: activeEditorInEnabledTabGroup
 			});
 		}
 		async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
@@ -1771,7 +1774,7 @@ function registerTabGroupCommands(): void {
 				title: localize2('recolorTabGroup', 'Change Group Color'),
 				category: Categories.View,
 				f1: true,
-				precondition: ActiveEditorInTabGroupContext
+				precondition: activeEditorInEnabledTabGroup
 			});
 		}
 		async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
@@ -1800,7 +1803,7 @@ function registerTabGroupCommands(): void {
 				title: localize2('moveToTabGroup', 'Move to Tab Group…'),
 				category: Categories.View,
 				f1: true,
-				precondition: ActiveEditorStickyContext.toNegated()
+				precondition: ContextKeyExpr.and(tabGroupsEnabled, ActiveEditorStickyContext.toNegated())
 			});
 		}
 		async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
@@ -1838,7 +1841,7 @@ function registerTabGroupCommands(): void {
 				title: localize2('closeTabGroup', 'Close Group'),
 				category: Categories.View,
 				f1: true,
-				precondition: ActiveEditorInTabGroupContext
+				precondition: activeEditorInEnabledTabGroup
 			});
 		}
 		async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {

@@ -1467,7 +1467,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 				}
 
 				const targetEditor = this.tabsModel.getEditorByIndex(tabIndex);
-				const targetGroup = targetEditor ? this.tabsModel.getTabGroupForEditor(targetEditor) : undefined;
+				const targetGroup = this.groupsView.partOptions.tabGroups.enabled && targetEditor ? this.tabsModel.getTabGroupForEditor(targetEditor) : undefined;
 				const location = this.getTabDragOverLocation(e, tab);
 				const joinsTargetGroup = !!targetGroup && !targetGroup.locked && !(
 					(location === 'left' && tab.classList.contains('tab-group-first')) ||
@@ -1886,7 +1886,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		}
 
 		// Tab group membership
-		const tabGroup = this.tabsModel.getTabGroupForEditor(editor);
+		const tabGroup = this.groupsView.partOptions.tabGroups.enabled ? this.tabsModel.getTabGroupForEditor(editor) : undefined;
 		tabContainer.classList.toggle('in-tab-group', !!tabGroup);
 		if (tabGroup) {
 			tabContainer.style.setProperty('--tab-group-color', getEditorTabGroupColor(tabGroup.color));
@@ -2058,7 +2058,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		const showLastStickyTabBorderColor = this.tabsModel.stickyCount !== this.tabsModel.count;
 
 		const editor = this.tabsModel.getEditorByIndex(tabIndex);
-		const isInTabGroup = editor ? this.tabsModel.getTabGroupForEditor(editor) !== undefined : false;
+		const isInTabGroup = this.groupsView.partOptions.tabGroups.enabled && editor ? this.tabsModel.getTabGroupForEditor(editor) !== undefined : false;
 
 		// Borders / Outline
 		// Grouped tabs render their own container edges (see tabgroups.css), so no separator border between members.
@@ -2769,6 +2769,10 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 			if (child.classList.contains('tab-group-header')) {
 				child.remove();
 			}
+		}
+
+		if (!this.groupsView.partOptions.tabGroups.enabled) {
+			return;
 		}
 
 		// Compute the first tab index for each group
