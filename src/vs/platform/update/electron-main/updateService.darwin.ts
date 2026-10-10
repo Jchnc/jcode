@@ -12,6 +12,7 @@ import { IConfigurationService } from '../../configuration/common/configuration.
 import { IEnvironmentMainService } from '../../environment/electron-main/environmentMainService.js';
 import { ILifecycleMainService, IRelaunchHandler, IRelaunchOptions } from '../../lifecycle/electron-main/lifecycleMainService.js';
 import { ILogService } from '../../log/common/log.js';
+import { INativeHostMainService } from '../../native/electron-main/nativeHostMainService.js';
 import { IProductService } from '../../product/common/productService.js';
 import { asJson, IRequestService } from '../../request/common/request.js';
 import { IApplicationStorageMainService } from '../../storage/electron-main/storageMainService.js';
@@ -44,6 +45,7 @@ export class DarwinUpdateService extends AbstractUpdateService implements IRelau
 		@IProductService productService: IProductService,
 		@IApplicationStorageMainService applicationStorageMainService: IApplicationStorageMainService,
 		@IMeteredConnectionService meteredConnectionService: IMeteredConnectionService,
+		@INativeHostMainService private readonly nativeHostMainService: INativeHostMainService,
 	) {
 		super(lifecycleMainService, configurationService, environmentMainService, requestService, logService, productService, telemetryService, applicationStorageMainService, meteredConnectionService, true);
 
@@ -96,6 +98,10 @@ export class DarwinUpdateService extends AbstractUpdateService implements IRelau
 	protected buildUpdateFeedUrl(quality: string, commit: string, options?: IUpdateURLOptions): string | undefined {
 		const assetID = this.productService.darwinUniversalAssetId ?? (process.arch === 'x64' ? 'darwin' : 'darwin-arm64');
 		const url = createUpdateURL(this.productService.updateUrl!, assetID, quality, commit, options);
+		if (this.productService.updateUrl!.includes('{commit}')) {
+			// Check JSON first: static hosting cannot return Squirrel's no-update HTTP 204.
+			return url;
+		}
 		const headers = getUpdateRequestHeaders(this.productService.version);
 		try {
 			this.logService.trace('update#buildUpdateFeedUrl - setting feed URL for Electron autoUpdater', { url, assetID, quality, commit, headers });
@@ -124,6 +130,11 @@ export class DarwinUpdateService extends AbstractUpdateService implements IRelau
 			return;
 		}
 
+		if (this.productService.updateUrl!.includes('{commit}')) {
+			void this.checkForUpdateNoDownload(url, undefined, true);
+			return;
+		}
+
 		// When connection is metered and this is not an explicit check, avoid electron call as to not to trigger auto-download.
 		if (!explicit && this.meteredConnectionService.isConnectionMetered) {
 			this.logService.info('update#doCheckForUpdates - checking for update without auto-download because connection is metered');
@@ -140,7 +151,7 @@ export class DarwinUpdateService extends AbstractUpdateService implements IRelau
 	 * Used when connection is metered or in the embedded app.
 	 * @param canInstall When false, signals that the update cannot be installed from this app.
 	 */
-	private async checkForUpdateNoDownload(url: string, canInstall?: boolean): Promise<void> {
+	private async checkForUpdateNoDownload(url: string, canInstall?: boolean, downloadAutomatically = false): Promise<void> {
 		const headers = getUpdateRequestHeaders(this.productService.version);
 		this.logService.trace('update#checkForUpdateNoDownload - checking update server', { url, headers });
 
@@ -150,17 +161,32 @@ export class DarwinUpdateService extends AbstractUpdateService implements IRelau
 			this.logService.trace('update#checkForUpdateNoDownload - response', { statusCode });
 
 			const update = await asJson<IUpdate>(context);
+			if (this.state.type !== StateType.CheckingForUpdates && this.state.type !== StateType.Overwriting) {
+				return;
+			}
 			if (!update || !update.url || !update.version || !update.productVersion) {
+				if (this.state.type === StateType.Overwriting) {
+					this.setState(State.Ready(this.state.update, this.state.explicit, false));
+					return;
+				}
 				this.logService.trace('update#checkForUpdateNoDownload - no update available');
 				const notAvailable = this.state.type === StateType.CheckingForUpdates && this.state.explicit;
 				this.setState(State.Idle(UpdateType.Archive, undefined, notAvailable || undefined));
 			} else {
 				this.logService.trace('update#checkForUpdateNoDownload - update available', { version: update.version, productVersion: update.productVersion });
+				if (downloadAutomatically && this.productService.darwinUpdateMode !== 'manual' &&
+					(this.state.explicit || !this.meteredConnectionService.isConnectionMetered)) {
+					electron.autoUpdater.setFeedURL({ url, headers });
+					electron.autoUpdater.checkForUpdates();
+					return;
+				}
 				this.setState(State.AvailableForDownload(update, canInstall));
 			}
 		} catch (err) {
 			this.logService.error('update#checkForUpdateNoDownload - failed to check for update', err);
-			this.setState(State.Idle(UpdateType.Archive));
+			if (this.state.type === StateType.CheckingForUpdates || this.state.type === StateType.Overwriting) {
+				this.setState(State.Idle(UpdateType.Archive));
+			}
 		}
 	}
 
@@ -197,6 +223,21 @@ export class DarwinUpdateService extends AbstractUpdateService implements IRelau
 	}
 
 	protected override async doDownloadUpdate(state: AvailableForDownload): Promise<void> {
+		if (this.productService.darwinUpdateMode === 'manual') {
+			if (state.update.url) {
+				await this.nativeHostMainService.openExternal(undefined, state.update.url);
+			}
+			this.setState(State.Idle(UpdateType.Archive));
+			return;
+		}
+		if (this.productService.updateUrl!.includes('{commit}')) {
+			const url = this.buildUpdateFeedUrl(this.quality!, this.productService.commit!);
+			if (url) {
+				this.setState(State.CheckingForUpdates(true));
+				await this.checkForUpdateNoDownload(url, undefined, true);
+			}
+			return;
+		}
 		// Rebuild feed URL and trigger download via Electron's auto-updater
 		this.buildUpdateFeedUrl(this.quality!, state.update.version, { internalOrg: this.getInternalOrg() });
 		this.setState(State.CheckingForUpdates(true));

@@ -34,6 +34,14 @@ test('metadata uses the installer target and rejects a mismatched build', async 
 		});
 		await writeFile(stagedProduct, JSON.stringify({ ...product, target: 'user', commit: 'b'.repeat(40) }));
 		assert.throws(() => execFileSync(process.execPath, args, { stdio: 'pipe' }));
+		for (const platform of ['linux-x64', 'linux-arm64', 'darwin', 'darwin-arm64']) {
+			const resources = platform.startsWith('darwin') ? join(app, 'Contents/Resources/app') : join(app, 'resources/app');
+			await mkdir(resources, { recursive: true });
+			await writeFile(join(resources, 'product.json'), JSON.stringify(product));
+			await writeFile(join(resources, 'package.json'), JSON.stringify({ version: '1.142.0-jcode' }));
+			execFileSync(process.execPath, [args[0], app, installer, output, '-', platform]);
+			assert.equal(JSON.parse(await readFile(output, 'utf8')).platform, platform);
+		}
 	} finally {
 		assert.ok(resolve(directory).startsWith(temporaryRoot + sep));
 		await rm(directory, { recursive: true, force: true });

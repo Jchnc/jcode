@@ -1,4 +1,4 @@
-name: Build JCode Windows Release
+name: Build JCode Release
 
 on:
   workflow_dispatch:
@@ -12,6 +12,8 @@ concurrency:
 
 jobs:
   windows:
+    permissions:
+      contents: read
     runs-on: windows-2022
     timeout-minutes: 120
     env:
@@ -56,16 +58,164 @@ jobs:
           New-Item -ItemType Directory -Force .build/jcode-release | Out-Null
           $installer = ".build/jcode-release/JCodeSetup-x64-$version.exe"
           Copy-Item .build/win32-x64/user-setup/VSCodeSetup.exe $installer
-          node build/jcode/release.ts ../VSCode-win32-x64 $installer .build/jcode-release/jcode-update.json .build/win32-x64/user-setup/product.json
+          node build/jcode/release.ts ../VSCode-win32-x64 $installer .build/jcode-release/jcode-update-win32-x64-user.json .build/win32-x64/user-setup/product.json
           if ($LASTEXITCODE -ne 0) { throw 'Update metadata generation failed' }
-          "JCODE_TAG=jcode-v$version" >> $env:GITHUB_ENV
-          "JCODE_INSTALLER=$installer" >> $env:GITHUB_ENV
       - name: Save installer and metadata
         uses: actions/upload-artifact@v4
         with:
           name: jcode-windows-x64
           path: .build/jcode-release/*
-      - name: Create draft release for review
-        shell: pwsh
+  unix:
+    name: ${{ matrix.platform }} ${{ matrix.arch }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: darwin
+            arch: x64
+            runner: macos-15-intel
+            feed: darwin
+          - platform: darwin
+            arch: arm64
+            runner: macos-15
+            feed: darwin-arm64
+          - platform: linux
+            arch: x64
+            runner: ubuntu-24.04
+            feed: linux-x64
+          - platform: linux
+            arch: arm64
+            runner: ubuntu-24.04-arm
+            feed: linux-arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      VSCODE_ARCH: ${{ matrix.arch }}
+      BUILD_SOURCEVERSION: ${{ github.sha }}
+      JCODE_PLATFORM: ${{ matrix.platform }}
+      JCODE_FEED: ${{ matrix.feed }}
+      JCODE_MAC_SIGNING: ${{ matrix.platform == 'darwin' && secrets.MACOS_CERTIFICATE != '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Check native runner architecture
+        shell: bash
+        run: node -e 'if (process.arch !== process.env.VSCODE_ARCH) throw new Error("Runner architecture does not match the build")'
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libx11-dev libx11-xcb-dev libxkbfile-dev libsecret-1-dev libkrb5-dev libnotify-dev libasound2-dev
+      - name: Configure macOS update mode
+        if: runner.os == 'macOS'
         run: |
-          gh release create $env:JCODE_TAG $env:JCODE_INSTALLER .build/jcode-release/jcode-update.json --draft --target $env:GITHUB_SHA --title "JCode $env:JCODE_TAG" --notes 'Windows x64 user installer. Install with Add to PATH selected to enable jcode. Future published releases update through GitHub Pages.'
+          node --input-type=module -e 'import fs from "node:fs"; const p = JSON.parse(fs.readFileSync("product.json", "utf8")); p.darwinUpdateMode = process.env.JCODE_MAC_SIGNING === "true" ? "automatic" : "manual"; fs.writeFileSync("product.json", JSON.stringify(p, null, "\t") + "\n");'
+      - name: Install dependencies
+        run: npm ci
+      - name: Download built-in extensions
+        run: node build/lib/builtInExtensions.ts
+      - name: Prepare Electron types
+        run: node build/npm/electronTypes.ts
+      - name: Build application
+        shell: bash
+        run: npm run gulp "vscode-$JCODE_PLATFORM-$VSCODE_ARCH-min"
+      - name: Sign and notarize macOS application
+        if: runner.os == 'macOS' && env.JCODE_MAC_SIGNING == 'true'
+        shell: bash
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          : "${MACOS_CERTIFICATE_PASSWORD:?Missing MACOS_CERTIFICATE_PASSWORD}"
+          : "${APPLE_ID:?Missing APPLE_ID}"
+          : "${APPLE_APP_PASSWORD:?Missing APPLE_APP_PASSWORD}"
+          : "${APPLE_TEAM_ID:?Missing APPLE_TEAM_ID}"
+          export JCODE_KEYCHAIN="$RUNNER_TEMP/jcode-signing.keychain-db"
+          certificate="$RUNNER_TEMP/jcode-certificate.p12"
+          keychain_password=$(openssl rand -hex 24)
+          echo "::add-mask::$keychain_password"
+          printf '%s' "$MACOS_CERTIFICATE" | base64 --decode > "$certificate"
+          security create-keychain -p "$keychain_password" "$JCODE_KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$JCODE_KEYCHAIN"
+          security unlock-keychain -p "$keychain_password" "$JCODE_KEYCHAIN"
+          security import "$certificate" -P "$MACOS_CERTIFICATE_PASSWORD" -k "$JCODE_KEYCHAIN" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$JCODE_KEYCHAIN"
+          export CODESIGN_IDENTITY=$(security find-identity -v -p codesigning "$JCODE_KEYCHAIN" | sed -n 's/.*\([A-F0-9]\{40\}\).*Developer ID Application.*/\1/p' | head -n 1)
+          test -n "$CODESIGN_IDENTITY" || { echo 'Developer ID Application identity not found'; exit 1; }
+          app="../VSCode-darwin-$VSCODE_ARCH/JCode.app"
+          node build/jcode/sign-macos.ts "$app"
+          codesign --verify --deep --strict "$app"
+          ditto -c -k --sequesterRsrc --keepParent "$app" "$RUNNER_TEMP/jcode-notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/jcode-notarize.zip" --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
+          xcrun stapler staple "$app"
+          spctl --assess --type execute "$app"
+      - name: Ad-hoc sign macOS development application
+        if: runner.os == 'macOS' && env.JCODE_MAC_SIGNING != 'true'
+        env:
+          CODESIGN_IDENTITY: '-'
+        run: node build/jcode/sign-macos.ts "../VSCode-darwin-$VSCODE_ARCH/JCode.app"
+      - name: Package platform archive and metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(node -p 'require("./package.json").version')
+          mkdir -p .build/jcode-release
+          if [ "$JCODE_PLATFORM" = darwin ]; then
+            app="../VSCode-darwin-$VSCODE_ARCH/JCode.app"
+            asset=".build/jcode-release/JCode-darwin-$VSCODE_ARCH-$version.zip"
+            ditto -c -k --sequesterRsrc --keepParent "$app" "$asset"
+          else
+            app="../VSCode-linux-$VSCODE_ARCH"
+            asset=".build/jcode-release/JCode-linux-$VSCODE_ARCH-$version.tar.gz"
+            tar -czf "$asset" -C "$app" .
+          fi
+          node build/jcode/release.ts "$app" "$asset" ".build/jcode-release/jcode-update-$JCODE_FEED.json" - "$JCODE_FEED"
+      - name: Save platform archive and metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: jcode-${{ matrix.platform }}-${{ matrix.arch }}
+          path: .build/jcode-release/*
+      - name: Clean macOS signing material
+        if: always() && runner.os == 'macOS' && env.JCODE_MAC_SIGNING == 'true'
+        shell: bash
+        run: |
+          if [ -f "$RUNNER_TEMP/jcode-signing.keychain-db" ]; then security delete-keychain "$RUNNER_TEMP/jcode-signing.keychain-db"; fi
+          rm -f "$RUNNER_TEMP/jcode-certificate.p12" "$RUNNER_TEMP/jcode-notarize.zip"
+
+  release:
+    name: Assemble Draft Release
+    needs: [windows, unix]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: jcode-*
+          merge-multiple: true
+          path: .build/jcode-release
+      - name: Verify and combine all platform metadata
+        run: node build/jcode/merge-release.ts .build/jcode-release
+      - name: Create draft release for review
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          JCODE_COMMIT: ${{ github.sha }}
+        run: |
+          version=$(node -p 'require("./package.json").version')
+          gh release create "jcode-v$version" .build/jcode-release/*.exe .build/jcode-release/*.zip .build/jcode-release/*.tar.gz .build/jcode-release/jcode-update.json --draft --target "$JCODE_COMMIT" --title "JCode $version" --notes 'JCode for Windows x64, macOS Intel/Apple Silicon, and Linux x64/ARM64. Keep jcode-update.json attached for the GitHub Pages update feed. Test the builds before publishing.'

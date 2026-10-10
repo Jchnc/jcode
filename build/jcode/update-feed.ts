@@ -7,7 +7,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const platforms = ['win32-x64-user', 'win32-x64', 'win32-x64-archive', 'win32-arm64-user', 'win32-arm64', 'win32-arm64-archive'];
+const releasePlatforms = ['win32-x64-user', 'darwin', 'darwin-arm64', 'linux-x64', 'linux-arm64'];
+const platforms = [...releasePlatforms, 'win32-x64', 'win32-x64-archive', 'win32-arm64-user', 'win32-arm64', 'win32-arm64-archive'];
 interface ReleaseMetadata {
 	commit: string;
 	version: string;
@@ -16,12 +17,14 @@ interface ReleaseMetadata {
 	sha256hash: string;
 	asset?: string;
 	url: string;
+	publishedAt?: string;
 }
 
 interface GitHubRelease {
 	draft: boolean;
 	prerelease: boolean;
 	tag_name: string;
+	published_at?: string;
 	assets: { name: string; browser_download_url: string; digest?: string }[];
 }
 
@@ -30,6 +33,9 @@ interface UpdateFeed {
 	productVersion?: string;
 	url?: string;
 	sha256hash?: string;
+	name?: string;
+	notes?: string;
+	pub_date?: string;
 }
 
 function compareVersions(a: string, b: string): number {
@@ -42,22 +48,35 @@ export function generateFeeds(releases: ReleaseMetadata[]): Map<string, UpdateFe
 	const feeds = new Map<string, UpdateFeed>();
 	for (const release of releases) {
 		if (!/^[a-f0-9]{40}$/.test(release.commit) || !/^\d+\.\d+\.\d+$/.test(release.version) ||
-			release.quality !== 'jcode' || release.platform !== 'win32-x64-user' || !/^[a-f0-9]{64}$/.test(release.sha256hash) ||
+			release.quality !== 'jcode' || !releasePlatforms.includes(release.platform) || !/^[a-f0-9]{64}$/.test(release.sha256hash) ||
 			!release.url.startsWith('https://github.com/')) {
 			throw new Error('Invalid JCode release metadata.');
 		}
-		if (releases.some(other => other !== release && (other.commit === release.commit || other.version === release.version))) {
-			throw new Error('Each release must have a unique commit and version. Increment package.json before releasing.');
+		if (releases.some(other => other !== release && (
+			(other.commit === release.commit && other.version !== release.version) ||
+			(other.version === release.version && other.commit !== release.commit) ||
+			(other.platform === release.platform && (other.commit === release.commit || other.version === release.version))
+		))) {
+			throw new Error('Each release must have a unique commit/version and one asset per platform. Increment package.json before releasing.');
 		}
-		const newer = releases.filter(other => other.platform === release.platform && compareVersions(other.version, release.version) > 0)
-			.sort((a, b) => compareVersions(b.version, a.version))[0];
 		for (const platform of platforms) {
-			feeds.set(`updates/${platform}/${release.quality}/${release.commit}.json`, platform === release.platform && newer ? {
+			const newer = releases.filter(other => other.platform === platform && compareVersions(other.version, release.version) > 0)
+				.sort((a, b) => compareVersions(b.version, a.version))[0];
+			const update: UpdateFeed = newer ? {
 				version: newer.commit,
 				productVersion: `${newer.version}-jcode`,
 				url: newer.url,
 				sha256hash: newer.sha256hash
-			} : {});
+			} : {};
+			if (newer && platform.startsWith('darwin')) {
+				// Squirrel.Mac uses notes as the build ID and name as the display version.
+				update.name = `${newer.version}-jcode`;
+				update.notes = newer.commit;
+				if (newer.publishedAt) {
+					update.pub_date = newer.publishedAt;
+				}
+			}
+			feeds.set(`updates/${platform}/${release.quality}/${release.commit}.json`, update);
 		}
 	}
 	return feeds;
@@ -91,15 +110,21 @@ export async function collectReleases(repository: string, fetcher: typeof fetch 
 			if (!metadataResponse.ok) {
 				throw new Error(`Cannot download metadata for ${release.tag_name}`);
 			}
-			const metadata = await metadataResponse.json() as ReleaseMetadata;
-			const installer = release.assets.find(asset => asset.name === metadata.asset);
-			if (!installer || release.tag_name !== `jcode-v${metadata.version}` || !installer.browser_download_url.startsWith(`https://github.com/${repository}/releases/download/`)) {
-				throw new Error(`Invalid installer or tag on ${release.tag_name}`);
+			const manifest = await metadataResponse.json() as ReleaseMetadata | ReleaseMetadata[];
+			const entries = Array.isArray(manifest) ? manifest : [manifest];
+			if (!entries.length) {
+				throw new Error(`Empty metadata on ${release.tag_name}`);
 			}
-			if (installer.digest && installer.digest !== `sha256:${metadata.sha256hash}`) {
-				throw new Error(`Installer checksum mismatch on ${release.tag_name}`);
+			for (const metadata of entries) {
+				const installer = release.assets.find(asset => asset.name === metadata.asset);
+				if (!installer || release.tag_name !== `jcode-v${metadata.version}` || !installer.browser_download_url.startsWith(`https://github.com/${repository}/releases/download/`)) {
+					throw new Error(`Invalid installer or tag on ${release.tag_name}`);
+				}
+				if (installer.digest && installer.digest !== `sha256:${metadata.sha256hash}`) {
+					throw new Error(`Installer checksum mismatch on ${release.tag_name}`);
+				}
+				result.push({ ...metadata, url: installer.browser_download_url, ...(release.published_at ? { publishedAt: release.published_at } : {}) });
 			}
-			result.push({ ...metadata, url: installer.browser_download_url });
 		}
 		if (releases.length < 100) {
 			return result;
@@ -110,7 +135,7 @@ export async function collectReleases(repository: string, fetcher: typeof fetch 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
 	const [repository, output] = process.argv.slice(2);
 	if (!repository || !output) {
-		throw new Error('Usage: node build/jcode/update-feed.mjs <owner/repository> <output-directory>');
+		throw new Error('Usage: node build/jcode/update-feed.ts <owner/repository> <output-directory>');
 	}
 	const feeds = generateFeeds(await collectReleases(repository));
 	if (!feeds.size) {

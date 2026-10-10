@@ -18,7 +18,7 @@ function getElectronVersion(): string {
 	return target;
 }
 
-function getEntitlementsForFile(filePath: string): string {
+export function getEntitlementsForFile(filePath: string): string {
 	if (filePath.includes(' Helper (GPU).app')) {
 		return path.join(baseDir, 'azure-pipelines', 'darwin', 'helper-gpu-entitlements.plist');
 	} else if (filePath.includes(' Helper (Renderer).app')) {

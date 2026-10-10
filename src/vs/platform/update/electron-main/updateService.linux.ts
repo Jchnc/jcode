@@ -75,6 +75,11 @@ export class LinuxUpdateService extends AbstractUpdateService {
 	}
 
 	protected override async doDownloadUpdate(state: AvailableForDownload): Promise<void> {
+		if (this.productService.updateUrl?.includes('{commit}') && state.update.url) {
+			await this.nativeHostMainService.openExternal(undefined, state.update.url);
+			this.setState(State.Idle(UpdateType.Archive));
+			return;
+		}
 		// Use the download URL if available as we don't currently detect the package type that was
 		// installed and the website download page is more useful than the tarball generally.
 		if (this.productService.downloadUrl && this.productService.downloadUrl.length > 0) {

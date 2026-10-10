@@ -25,16 +25,16 @@
 	"win32ShellNameShort": "J&Code",
 	"win32TunnelServiceMutex": "vscodeoss-tunnelservice",
 	"win32TunnelMutex": "vscodeoss-tunnel",
-	"darwinBundleIdentifier": "com.visualstudio.code.oss",
+	"darwinBundleIdentifier": "com.jchnc.jcode",
 	"darwinProfileUUID": "47827DD9-4734-49A0-AF80-7E19B11495CC",
 	"darwinProfilePayloadUUID": "CF808BE7-53F3-46C6-A7E2-7EDB98A5E959",
-	"linuxDesktopName": "com.visualstudio.CodeOSS",
-	"linuxIconName": "code-oss",
+	"linuxDesktopName": "com.jchnc.JCode",
+	"linuxIconName": "jcode",
 	"licenseFileName": "LICENSE.txt",
 	"reportIssueUrl": "https://github.com/Jchnc/jcode/issues/new",
 	"nodejsArtifactFeed": "",
 	"electronArtifactFeed": "",
-	"urlProtocol": "code-oss",
+	"urlProtocol": "jcode",
 	"agentsTelemetryAppName": "agents",
 	"webviewContentExternalBaseUrlTemplate": "https://{{uuid}}.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/",
 	"builtInExtensions": [
@@ -250,7 +250,10 @@
 	"quality": "jcode",
 	"updateUrl": "https://jchnc.github.io/jcode/updates/{platform}/{quality}/{commit}.json",
 	"updatePlatforms": [
-		"win32"
+		"win32",
+		"darwin",
+		"linux"
 	],
-	"downloadUrl": "https://github.com/Jchnc/jcode/releases/latest"
+	"downloadUrl": "https://github.com/Jchnc/jcode/releases/latest",
+	"darwinUpdateMode": "manual"
 }

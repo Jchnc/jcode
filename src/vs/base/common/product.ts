@@ -129,6 +129,8 @@ export interface IProductConfiguration {
 	readonly updateUrl?: string;
 	/** Platforms with a published update feed; omit to enable all platforms. */
 	readonly updatePlatforms?: readonly string[];
+	/** Unsigned macOS distributions can check for updates without invoking Squirrel. */
+	readonly darwinUpdateMode?: 'automatic' | 'manual';
 	readonly webUrl?: string;
 	readonly webEndpointUrlTemplate?: string;
 	readonly webviewContentExternalBaseUrlTemplate?: string;
