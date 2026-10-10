@@ -1,10 +1,10 @@
 {
-	"nameShort": "Code - OSS",
-	"nameLong": "Code - OSS",
-	"applicationName": "code-oss",
+	"nameShort": "JCode",
+	"nameLong": "JCode",
+	"applicationName": "jcode",
 	"dataFolderName": ".vscode-oss",
 	"sharedDataFolderName": ".vscode-oss-shared",
-	"win32MutexName": "vscodeoss",
+	"win32MutexName": "jcode",
 	"licenseName": "MIT",
 	"licenseUrl": "https://github.com/Jchnc/jcode/blob/custom/main/LICENSE.txt",
 	"serverLicenseUrl": "https://github.com/Jchnc/jcode/blob/custom/main/LICENSE.txt",
@@ -14,15 +14,15 @@
 	"serverApplicationName": "code-server-oss",
 	"serverDataFolderName": ".vscode-server-oss",
 	"tunnelApplicationName": "code-tunnel-oss",
-	"win32DirName": "Microsoft Code OSS",
-	"win32NameVersion": "Microsoft Code OSS",
-	"win32RegValueName": "CodeOSS",
-	"win32x64AppId": "{{D77B7E06-80BA-4137-BCF4-654B95CCEBC5}",
-	"win32arm64AppId": "{{D1ACE434-89C5-48D1-88D3-E2991DF85475}",
-	"win32x64UserAppId": "{{CC6B787D-37A0-49E8-AE24-8559A032BE0C}",
-	"win32arm64UserAppId": "{{3AEBF0C8-F733-4AD4-BADE-FDB816D53D7B}",
-	"win32AppUserModelId": "Microsoft.CodeOSS",
-	"win32ShellNameShort": "C&ode - OSS",
+	"win32DirName": "JCode",
+	"win32NameVersion": "JCode",
+	"win32RegValueName": "JCode",
+	"win32x64AppId": "{{A2EB7567-710B-4F12-8361-CB47F1BE9F22}",
+	"win32arm64AppId": "{{AB8D112D-6736-4470-A1BB-6AF45DA46F33}",
+	"win32x64UserAppId": "{{B8F69862-8595-4C53-988F-1617D5C78C84}",
+	"win32arm64UserAppId": "{{D812B766-036E-412A-BEC9-36DF807176B7}",
+	"win32AppUserModelId": "Jchnc.JCode",
+	"win32ShellNameShort": "J&Code",
 	"win32TunnelServiceMutex": "vscodeoss-tunnelservice",
 	"win32TunnelMutex": "vscodeoss-tunnel",
 	"darwinBundleIdentifier": "com.visualstudio.code.oss",
@@ -246,5 +246,11 @@
 		"GitHub.copilot-chat"
 	],
 	"sessionsWindowAllowedExtensions": [],
-	"voiceWsUrl": "wss://falcon-caas.mai.microsoft.com/voice-code/api/v1/realtime/voice"
+	"voiceWsUrl": "wss://falcon-caas.mai.microsoft.com/voice-code/api/v1/realtime/voice",
+	"quality": "jcode",
+	"updateUrl": "https://jchnc.github.io/jcode/updates/{platform}/{quality}/{commit}.json",
+	"updatePlatforms": [
+		"win32"
+	],
+	"downloadUrl": "https://github.com/Jchnc/jcode/releases/latest"
 }

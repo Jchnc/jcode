@@ -1,0 +1,42 @@
+name: Publish JCode Update Feed
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: jcode-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || (startsWith(github.event.release.tag_name, 'jcode-v') && !github.event.release.prerelease)
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: Generate feeds for all released build commits
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          JCODE_REPOSITORY: ${{ github.repository }}
+        run: node build/jcode/update-feed.ts "$JCODE_REPOSITORY" .build/jcode-pages
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .build/jcode-pages
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

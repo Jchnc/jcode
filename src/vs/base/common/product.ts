@@ -127,6 +127,8 @@ export interface IProductConfiguration {
 
 	readonly downloadUrl?: string;
 	readonly updateUrl?: string;
+	/** Platforms with a published update feed; omit to enable all platforms. */
+	readonly updatePlatforms?: readonly string[];
 	readonly webUrl?: string;
 	readonly webEndpointUrlTemplate?: string;
 	readonly webviewContentExternalBaseUrlTemplate?: string;

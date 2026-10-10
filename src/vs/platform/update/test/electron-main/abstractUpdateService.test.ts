@@ -6,6 +6,7 @@
 import assert from 'assert';
 import * as sinon from 'sinon';
 import { DeferredPromise, timeout } from '../../../../base/common/async.js';
+import { VSBuffer, bufferToStream } from '../../../../base/common/buffer.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
@@ -21,7 +22,7 @@ import { IRequestService } from '../../../request/common/request.js';
 import { IApplicationStorageMainService } from '../../../storage/electron-main/storageMainService.js';
 import { NullTelemetryService } from '../../../telemetry/common/telemetryUtils.js';
 import { DisablementReason, IUpdate, State, StateType } from '../../common/update.js';
-import { AbstractUpdateService, IUpdateURLOptions } from '../../electron-main/abstractUpdateService.js';
+import { AbstractUpdateService, createUpdateURL, IUpdateURLOptions } from '../../electron-main/abstractUpdateService.js';
 
 class TestMeteredConnectionService extends Disposable implements IMeteredConnectionService {
 	declare readonly _serviceBrand: undefined;
@@ -117,6 +118,15 @@ class TestUpdateService extends AbstractUpdateService {
 }
 
 suite('AbstractUpdateService', () => {
+	test('static update feeds retain the build commit in the path', () => {
+		assert.deepStrictEqual([
+			createUpdateURL('https://example.org/updates/{platform}/{quality}/{commit}.json', 'win32-x64-user', 'jcode', 'abc', { background: true }),
+			createUpdateURL('https://example.org', 'win32-x64-user', 'stable', 'abc')
+		], [
+			'https://example.org/updates/win32-x64-user/jcode/abc.json?bg=true&u=none',
+			'https://example.org/api/update/win32-x64-user/stable/abc?u=none'
+		]);
+	});
 
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
 
@@ -144,7 +154,7 @@ suite('AbstractUpdateService', () => {
 	let requestCount: number;
 	let meteredConnectionService: TestMeteredConnectionService;
 
-	function createService(mode: string, options?: { isBuilt?: boolean; disableUpdates?: boolean; updateUrl?: string; isConnectionMetered?: boolean; meteredConnectionInitialization?: Promise<void>; postInitializeGate?: Promise<void>; supportsUpdateOverwrite?: boolean }): TestUpdateService {
+	function createService(mode: string, options?: { isBuilt?: boolean; disableUpdates?: boolean; updateUrl?: string; updatePlatforms?: readonly string[]; updateResponse?: IUpdate | {}; isConnectionMetered?: boolean; meteredConnectionInitialization?: Promise<void>; postInitializeGate?: Promise<void>; supportsUpdateOverwrite?: boolean }): TestUpdateService {
 		configurationService = new PolicyTestConfigurationService();
 		configurationService.setUserConfiguration('update.mode', mode);
 		requestCount = 0;
@@ -164,12 +174,16 @@ suite('AbstractUpdateService', () => {
 		const requestService = {
 			request: () => {
 				requestCount++;
+				if (options?.updateResponse) {
+					return Promise.resolve({ res: { statusCode: 200 }, stream: bufferToStream(VSBuffer.fromString(JSON.stringify(options.updateResponse))) });
+				}
 				return Promise.reject(new Error('not expected'));
 			}
 		} as unknown as IRequestService;
 
 		const productService = {
 			updateUrl: options?.updateUrl ?? 'https://update.example',
+			updatePlatforms: options?.updatePlatforms,
 			commit: 'abc123',
 			quality: 'stable',
 			version: '1.0.0',
@@ -233,6 +247,22 @@ suite('AbstractUpdateService', () => {
 		await service.whenInitialized;
 
 		assert.strictEqual(service.state.type, StateType.Idle);
+	});
+
+	test('platforms without a published feed disable updates', async () => {
+		const service = createService('default', { updatePlatforms: [] });
+		await service.whenInitialized;
+		assert.deepStrictEqual(service.state, { type: StateType.Disabled, reason: DisablementReason.MissingConfiguration });
+	});
+
+	test('static feed latest-version checks understand empty and available updates', async () => {
+		const results: (boolean | undefined)[] = [];
+		for (const updateResponse of [{}, { version: 'new-commit', productVersion: '1.1.0' }]) {
+			const service = createService('manual', { updateUrl: 'https://example.org/{commit}.json', updateResponse });
+			await service.whenInitialized;
+			results.push(await service.checkLatestVersionExplicitly());
+		}
+		assert.deepStrictEqual(results, [true, false]);
 	});
 
 	test('policy forces updates off even when the user setting keeps them enabled', async () => {

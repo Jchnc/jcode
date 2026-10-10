@@ -1,0 +1,71 @@
+name: Build JCode Windows Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: jcode-release
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 120
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      VSCODE_ARCH: x64
+      BUILD_SOURCEVERSION: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Locate Windows SDK signing tools
+        shell: pwsh
+        run: |
+          $tool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe' | Sort-Object FullName -Descending | Select-Object -First 1
+          if (!$tool) { throw 'Windows SDK signtool.exe was not found' }
+          $tool.DirectoryName >> $env:GITHUB_PATH
+      - name: Install dependencies
+        run: npm ci
+      - name: Download built-in extensions
+        run: node build/lib/builtInExtensions.ts
+      - name: Prepare Electron types
+        run: node build/npm/electronTypes.ts
+      - name: Build application
+        run: npm run gulp vscode-win32-x64-min
+      - name: Include the Windows update helper
+        run: npm run gulp vscode-win32-x64-inno-updater
+      - name: Build user installer
+        run: npm run gulp vscode-win32-x64-user-setup
+      - name: Prepare update metadata
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Expected major.minor.patch in package.json' }
+          New-Item -ItemType Directory -Force .build/jcode-release | Out-Null
+          $installer = ".build/jcode-release/JCodeSetup-x64-$version.exe"
+          Copy-Item .build/win32-x64/user-setup/VSCodeSetup.exe $installer
+          node build/jcode/release.ts ../VSCode-win32-x64 $installer .build/jcode-release/jcode-update.json .build/win32-x64/user-setup/product.json
+          if ($LASTEXITCODE -ne 0) { throw 'Update metadata generation failed' }
+          "JCODE_TAG=jcode-v$version" >> $env:GITHUB_ENV
+          "JCODE_INSTALLER=$installer" >> $env:GITHUB_ENV
+      - name: Save installer and metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: jcode-windows-x64
+          path: .build/jcode-release/*
+      - name: Create draft release for review
+        shell: pwsh
+        run: |
+          gh release create $env:JCODE_TAG $env:JCODE_INSTALLER .build/jcode-release/jcode-update.json --draft --target $env:GITHUB_SHA --title "JCode $env:JCODE_TAG" --notes 'Windows x64 user installer. Install with Add to PATH selected to enable jcode. Future published releases update through GitHub Pages.'

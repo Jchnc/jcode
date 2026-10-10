@@ -17,7 +17,7 @@ import { IEnvironmentMainService } from '../../environment/electron-main/environ
 import { ILifecycleMainService, LifecycleMainPhase } from '../../lifecycle/electron-main/lifecycleMainService.js';
 import { ILogService } from '../../log/common/log.js';
 import { IProductService } from '../../product/common/productService.js';
-import { IRequestService } from '../../request/common/request.js';
+import { asJson, IRequestService } from '../../request/common/request.js';
 import { StorageScope, StorageTarget } from '../../storage/common/storage.js';
 import { IApplicationStorageMainService } from '../../storage/electron-main/storageMainService.js';
 import { ITelemetryService } from '../../telemetry/common/telemetry.js';
@@ -31,7 +31,10 @@ export interface IUpdateURLOptions {
 }
 
 export function createUpdateURL(baseUpdateUrl: string, platform: string, quality: string, commit: string, options?: IUpdateURLOptions): string {
-	const url = new URL(`${baseUpdateUrl}/api/update/${platform}/${quality}/${commit}`);
+	// Static feeds can be hosted on GitHub Pages without an update server.
+	const url = new URL(baseUpdateUrl.includes('{commit}')
+		? baseUpdateUrl.replace('{platform}', encodeURIComponent(platform)).replace('{quality}', encodeURIComponent(quality)).replace('{commit}', encodeURIComponent(commit))
+		: `${baseUpdateUrl}/api/update/${platform}/${quality}/${commit}`);
 
 	if (options?.background) {
 		url.searchParams.set('bg', 'true');
@@ -206,6 +209,11 @@ export abstract class AbstractUpdateService extends Disposable implements IUpdat
 		if (!this.productService.updateUrl || !this.productService.commit) {
 			this.setDisabledPermanently(DisablementReason.MissingConfiguration);
 			this.logService.info('update#ctor - updates are disabled as there is no update URL');
+			return;
+		}
+
+		if (this.productService.updatePlatforms && !this.productService.updatePlatforms.includes(os.platform())) {
+			this.setDisabledPermanently(DisablementReason.MissingConfiguration);
 			return;
 		}
 
@@ -669,6 +677,10 @@ export abstract class AbstractUpdateService extends Disposable implements IUpdat
 		try {
 			const context = await this.requestService.request({ url, headers, callSite: 'updateService.isLatestVersion' }, token);
 			const statusCode = context.res.statusCode;
+			if (statusCode === 200 && this.productService.updateUrl?.includes('{commit}')) {
+				const update = await asJson<IUpdate>(context);
+				return !update?.version;
+			}
 			this.logService.trace('update#isLatestVersion() - response', { statusCode });
 			// The update server replies with 204 (No Content) when no update is available.
 			return statusCode === 204;
