@@ -92,8 +92,10 @@ export function hygiene(some: NodeJS.ReadWriteStream | string[] | undefined, run
 	const productJson = es.through(function (file: VinylFile) {
 		const product = JSON.parse(file.contents!.toString('utf8'));
 
-		if (product.extensionsGallery) {
-			console.error(`product.json: Contains 'extensionsGallery'`);
+		// JCode uses Open VSX. The Visual Studio Marketplace terms only allow
+		// Microsoft builds, so its endpoints must never be configured here.
+		if (product.extensionsGallery && /\bvisualstudio\.com\b|\bvsassets\.io\b/i.test(JSON.stringify(product.extensionsGallery))) {
+			console.error(`product.json: 'extensionsGallery' must not use the Visual Studio Marketplace`);
 			errorCount++;
 		}
 
