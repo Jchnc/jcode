@@ -479,11 +479,19 @@ export function packageCopilotExtensionStream(): Stream {
 	const productionDependencies = getProductionDependencies('extensions/copilot');
 	const dependenciesSrc = productionDependencies.map(d => path.relative(root, d)).map(d => [`${d}/**`, `!${d}/**/{test,tests}/**`]).flat();
 
+	// The root .moduleignore strips `@github/copilot/**` because the agent host
+	// uses the runtime bundled with @github/copilot-sdk. The copilot extension
+	// still loads its own @github/copilot SDK, so restore the files its VSIX
+	// ships. Target-platform natives are pruned by prepareBuiltInCopilotRipgrepShim.
+	const copilotPackageDir = path.relative(root, path.join(extensionPath, 'node_modules', '@github', 'copilot')).replace(/\\/g, '/');
+	const copilotSdkSrc = [`${copilotPackageDir}/package.json`, `${copilotPackageDir}/sdk/**`];
+
 	return es.merge(
 		localExtensionsStream,
 		gulp.src(dependenciesSrc, { base: '.' })
 			.pipe(util2.cleanNodeModules(path.join(root, 'build', '.moduleignore')))
-			.pipe(util2.cleanNodeModules(path.join(root, 'build', `.moduleignore.${process.platform}`)))
+			.pipe(util2.cleanNodeModules(path.join(root, 'build', `.moduleignore.${process.platform}`))),
+		gulp.src(copilotSdkSrc, { base: '.', dot: true })
 	).pipe(util2.setExecutableBit(['**/*.sh']));
 }
 
