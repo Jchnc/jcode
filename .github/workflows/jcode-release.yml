@@ -140,7 +140,7 @@ jobs:
         run: node -e 'if (process.arch !== process.env.VSCODE_ARCH) throw new Error("Runner architecture does not match the build")'
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libx11-dev libx11-xcb-dev libxkbfile-dev libsecret-1-dev libkrb5-dev libnotify-dev libasound2-dev
+        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libx11-dev libx11-xcb-dev libxkbfile-dev libsecret-1-dev libkrb5-dev libnotify-dev libasound2-dev fakeroot
       - name: Configure macOS update mode
         if: runner.os == 'macOS'
         run: |
@@ -154,6 +154,15 @@ jobs:
       - name: Build application
         shell: bash
         run: npm run gulp "vscode-$JCODE_PLATFORM-$VSCODE_ARCH-min"
+      - name: Build Debian package
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          VSCODE_ALLOW_NEW_LINUX_DEPENDENCIES: '1'
+        run: |
+          set -euo pipefail
+          npm run gulp "vscode-linux-$VSCODE_ARCH-prepare-deb"
+          npm run gulp "vscode-linux-$VSCODE_ARCH-build-deb"
       - name: Sign and notarize macOS application
         if: runner.os == 'macOS' && env.JCODE_MAC_SIGNING == 'true'
         shell: bash
@@ -207,6 +216,11 @@ jobs:
             app="../VSCode-linux-$VSCODE_ARCH"
             asset=".build/jcode-release/JCode-linux-$VSCODE_ARCH-$version.tar.gz"
             tar -czf "$asset" -C "$app" .
+            deb_arch=$([ "$VSCODE_ARCH" = x64 ] && echo amd64 || echo "$VSCODE_ARCH")
+            debs=(.build/linux/deb/"$deb_arch"/deb/*.deb)
+            test "${#debs[@]}" -eq 1 && test -f "${debs[0]}" || { echo "Expected one Debian package, found: ${debs[*]}"; exit 1; }
+            dpkg-deb --info "${debs[0]}"
+            cp "${debs[0]}" ".build/jcode-release/JCode-linux-$VSCODE_ARCH-$version.deb"
           fi
           node build/jcode/release.ts "$app" "$asset" ".build/jcode-release/jcode-update-$JCODE_FEED.json" - "$JCODE_FEED"
       - name: Save platform archive and metadata
@@ -243,4 +257,4 @@ jobs:
           JCODE_COMMIT: ${{ github.sha }}
         run: |
           version=$(node -p 'require("./package.json").version')
-          gh release create "jcode-v$version" .build/jcode-release/*.exe .build/jcode-release/*.zip .build/jcode-release/*.tar.gz .build/jcode-release/jcode-update.json --draft --target "$JCODE_COMMIT" --title "JCode $version" --notes 'JCode for Windows x64, macOS Intel/Apple Silicon, and Linux x64/ARM64. Keep jcode-update.json attached for the GitHub Pages update feed. Test the builds before publishing.'
+          gh release create "jcode-v$version" .build/jcode-release/*.exe .build/jcode-release/*.zip .build/jcode-release/*.tar.gz .build/jcode-release/*.deb .build/jcode-release/jcode-update.json --draft --target "$JCODE_COMMIT" --title "JCode $version" --notes 'JCode for Windows x64, macOS Intel/Apple Silicon, and Linux x64/ARM64 (.tar.gz and .deb). Keep jcode-update.json attached for the GitHub Pages update feed. Test the builds before publishing.'

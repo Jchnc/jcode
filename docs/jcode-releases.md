@@ -9,10 +9,10 @@ JCode releases are hosted entirely on GitHub: Releases stores the downloadable a
 | Windows | x64 | Per-user `.exe` installer | Download, install, and restart through the inherited updater |
 | macOS | Intel x64 | `.zip` containing `JCode.app` | Automatic updates with signing credentials; notifications and a download link for unsigned builds |
 | macOS | Apple Silicon ARM64 | `.zip` containing `JCode.app` | Same as Intel macOS |
-| Linux | x64 | `.tar.gz` | Notifications and a link to the matching archive |
-| Linux | ARM64 | `.tar.gz` | Notifications and a link to the matching archive |
+| Linux | x64 | `.deb` package and `.tar.gz` | Notifications and a link to the matching archive |
+| Linux | ARM64 | `.deb` package and `.tar.gz` | Notifications and a link to the matching archive |
 
-Linux archives do not install themselves. Automatic Linux installation needs a package repository/package-manager integration or a separate archive updater. This setup provides neither an APT/RPM repository nor `.deb`/`.rpm`/AppImage packages. Windows ARM64 and system installers are not built by this workflow.
+Linux builds do not update themselves. The `.deb` packages install JCode system-wide, but no APT repository is published, so `apt upgrade` does not see new versions: install each new `.deb` manually. The JCode packages never register the Microsoft VS Code repository or signing key. `.rpm` and AppImage packages are not built. The `.deb` dependencies are computed from the binaries compiled on the Ubuntu 24.04 runners, so it requires an equally recent glibc. Windows ARM64 and system installers are not built by this workflow.
 
 ## One-time GitHub setup
 
@@ -67,7 +67,9 @@ Windows installers remain unsigned. Authenticode signing can be added with a Win
 
 **macOS:** extract the correct ZIP, move `JCode.app` to `/Applications`, open it, and run **Shell Command: Install 'jcode' command in PATH** from the Command Palette. Open a new terminal.
 
-**Linux:** extract the correct archive into a dedicated directory and add its `bin` directory to PATH, or create a symlink from `~/.local/bin/jcode` to the extracted `bin/jcode`. Ensure `~/.local/bin` is on PATH. The executable and bundled shared libraries require a compatible Linux desktop environment. Future archive updates require closing JCode and replacing the extracted application.
+**Linux (Debian/Ubuntu):** install the `.deb` with `sudo apt install ./JCode-linux-<arch>-<version>.deb`. It installs JCode into `/usr/share/jcode`, links `/usr/bin/jcode`, and adds the desktop entry, icon, and bash/zsh completions. Remove it with `sudo apt remove jcode`.
+
+**Linux (other distributions):** extract the correct archive into a dedicated directory and add its `bin` directory to PATH, or create a symlink from `~/.local/bin/jcode` to the extracted `bin/jcode`. Ensure `~/.local/bin` is on PATH. The executable and bundled shared libraries require a compatible Linux desktop environment. Future archive updates require closing JCode and replacing the extracted application.
 
 ```sh
 jcode .
@@ -86,6 +88,6 @@ Source checkouts use `scripts\code-cli.bat .` on Windows or `scripts/code-cli.sh
 node --test build/jcode/update-feed.test.ts build/jcode/release.test.ts build/jcode/merge-release.test.ts
 ```
 
-Use the Node version in `.nvmrc`, Python 3.11, and the platform's native build prerequisites. The workflow downloads built-in extensions, prepares Electron types, then runs `npm run gulp vscode-<platform>-<arch>-min`. Windows also runs the `inno-updater` and `user-setup` tasks. The application folders are written next to the checkout as `VSCode-<platform>-<arch>`.
+Use the Node version in `.nvmrc`, Python 3.11, and the platform's native build prerequisites. The workflow downloads built-in extensions, prepares Electron types, then runs `npm run gulp vscode-<platform>-<arch>-min`. Windows also runs the `inno-updater` and `user-setup` tasks. Linux also runs `vscode-linux-<arch>-prepare-deb` and `vscode-linux-<arch>-build-deb` with `VSCODE_ALLOW_NEW_LINUX_DEPENDENCIES=1` (requires `fakeroot`), which writes the package to `.build/linux/deb/<amd64|arm64>/deb`. The application folders are written next to the checkout as `VSCode-<platform>-<arch>`.
 
 `build/jcode/release.ts` reads packaged identity and hashes the final downloadable asset. For Windows, pass the staged `.build/win32-x64/user-setup/product.json` as its fourth argument. For Linux/macOS, pass `-` there and supply the platform feed ID as the fifth argument; macOS's first argument is the `JCode.app` path. `merge-release.ts` verifies that all five builds share the same version/commit and combines their metadata before creating the draft release.
