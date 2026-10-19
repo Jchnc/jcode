@@ -448,6 +448,31 @@ suite('EditorGroupModel', () => {
 		assert.strictEqual(group.activeEditor, editors[1]);
 	});
 
+	test('opening an editor does not replace a grouped preview editor', () => {
+		const group = createEditorGroupModel();
+		const [first, second, preview, newEditor] = [input(), input(), input(), input()];
+
+		group.openEditor(first, { pinned: true, active: true });
+		group.openEditor(second, { pinned: true, active: true });
+		group.openEditor(preview, { active: true });
+		const tabGroup = group.createTabGroup([first, second, preview], 'Group');
+		assert.ok(tabGroup);
+
+		group.openEditor(newEditor, { active: true });
+
+		assert.deepStrictEqual({
+			editors: group.getEditors(EditorsOrder.SEQUENTIAL),
+			members: group.getEditors(EditorsOrder.SEQUENTIAL).map(editor => group.getTabGroupForEditor(editor)?.id),
+			active: group.activeEditor,
+			preview: group.previewEditor
+		}, {
+			editors: [first, second, preview, newEditor],
+			members: [tabGroup.id, tabGroup.id, tabGroup.id, undefined],
+			active: newEditor,
+			preview: newEditor
+		});
+	});
+
 	test('isActive - untyped', () => {
 		const group = createEditorGroupModel();
 		const input = disposables.add(new TestFileEditorInput('testInput', URI.file('fake')));

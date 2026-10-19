@@ -1274,6 +1274,7 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 		for (const editor of candidates) {
 			this.editorTabGroups.set(editor, group.id);
 		}
+		this.pinTabGroupMembers(candidates);
 		for (const affectedGroup of affectedGroups) {
 			this.pruneTabGroup(affectedGroup.id);
 			if (this.getTabGroup(affectedGroup.id)) {
@@ -1383,6 +1384,7 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 
 			this.editorTabGroups.set(editor, groupId);
 		}
+		this.pinTabGroupMembers(candidates);
 
 		for (const affectedGroup of affectedGroups) {
 			this.pruneTabGroup(affectedGroup.id);
@@ -1558,6 +1560,16 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 		});
 		if (this.tabGroupUndoStack.length > 20) {
 			this.tabGroupUndoStack.shift();
+		}
+	}
+
+	/**
+	 * Grouped editors are always pinned: a preview editor would otherwise be
+	 * replaced by the next opened editor and silently drop out of its group.
+	 */
+	private pinTabGroupMembers(editors: EditorInput[]): void {
+		if (this.preview && editors.includes(this.preview)) {
+			this.doPin(this.preview, this.indexOf(this.preview));
 		}
 	}
 
@@ -1753,6 +1765,11 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 						this.editorTabGroups.set(editor, group.id);
 					}
 				}
+			}
+
+			// State saved before grouped editors were pinned may contain a grouped preview editor
+			if (this.preview && this.editorTabGroups.has(this.preview)) {
+				this.preview = null;
 			}
 		}
 
