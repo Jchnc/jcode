@@ -727,11 +727,9 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 
 		// Otherwise only layout for revealing
 		else {
+			this.redrawTabGroups();
 			this.layout(this.dimensions, { forceRevealActiveTab: true });
 		}
-
-		// Ensure tab group headers are in sync
-		this.redrawTabGroups();
 
 		return didChange;
 	}
@@ -812,9 +810,6 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 
 			// Redraw all tabs
 			this.redraw({ forceRevealActiveTab: true });
-
-			// Ensure tab group headers are in sync
-			this.redrawTabGroups();
 		}
 
 		// No tabs to show
@@ -851,6 +846,9 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 			Math.min(fromTabIndex, targetTabIndex), // from: smallest of fromTabIndex/targetTabIndex
 			Math.max(fromTabIndex, targetTabIndex)	//   to: largest of fromTabIndex/targetTabIndex
 		);
+
+		// Group headers precede the first tab of their group and must move with it
+		this.redrawTabGroups();
 
 		// Moving an editor requires a layout to keep the active editor visible
 		this.layout(this.dimensions, { forceRevealActiveTab: true });
@@ -1808,6 +1806,10 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 
 		// Update Editor Actions Toolbar
 		this.updateEditorActionsToolbar();
+
+		// Place tab group headers before layout measures tab positions,
+		// otherwise the active tab is positioned against stale headers
+		this.redrawTabGroups();
 
 		// Ensure the active tab is always revealed
 		this.layout(this.dimensions, options);
