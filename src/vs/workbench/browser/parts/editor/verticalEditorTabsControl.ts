@@ -47,7 +47,7 @@ import { IHostService } from '../../../services/host/browser/host.js';
 import { EditorInput } from '../../../common/editor/editorInput.js';
 import { DEFAULT_EDITOR_ASSOCIATION, EditorInputCapabilities, EditorResourceAccessor, EditorsOrder, IEditorPartOptions, IToolbarActions, preventEditorClose, EditorCloseMethod, SideBySideEditor, GroupModelChangeKind, Verbosity } from '../../../common/editor.js';
 import { VerticalEditorTabsFocusContext } from '../../../common/contextkeys.js';
-import { getEditorTabGroupColor, IEditorTabGroup } from '../../../common/editor/editorTabGroup.js';
+import { getEditorTabGroupColor, IEditorTabGroup, resolveEditorTabGroupIcon } from '../../../common/editor/editorTabGroup.js';
 import { IReadonlyEditorGroupModel } from '../../../common/editor/editorGroupModel.js';
 import { computeEditorAriaLabel } from '../../editor.js';
 import { DraggedEditorGroupIdentifier, DraggedEditorIdentifier, DraggedEditorTabGroupIdentifier, ResourcesDropHandler } from '../../dnd.js';
@@ -841,7 +841,7 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 
 		if (group.icon) {
 			const icon = $('span.vertical-tab-group-icon');
-			icon.classList.add('codicon', `codicon-${group.icon}`);
+			icon.classList.add(...ThemeIcon.asClassNameArray(resolveEditorTabGroupIcon(group.icon)));
 			icon.setAttribute('aria-hidden', 'true');
 			header.appendChild(icon);
 		}

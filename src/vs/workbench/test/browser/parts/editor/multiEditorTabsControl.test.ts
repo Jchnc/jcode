@@ -516,8 +516,8 @@ suite('MultiEditorTabsControl', () => {
 		const afterEnter = describeIcons();
 
 		assert.deepStrictEqual({ afterArrow, afterEnter }, {
-			afterArrow: { icon: undefined, focused: 'Rocket', checked: ['No Icon'], tabbable: ['Rocket'] },
-			afterEnter: { icon: 'rocket', focused: 'Rocket', checked: ['Rocket'], tabbable: ['Rocket'] }
+			afterArrow: { icon: undefined, focused: 'Terminal', checked: ['No Icon'], tabbable: ['Terminal'] },
+			afterEnter: { icon: 'terminal', focused: 'Terminal', checked: ['Terminal'], tabbable: ['Terminal'] }
 		});
 	});
 

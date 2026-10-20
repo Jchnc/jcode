@@ -11,7 +11,7 @@ import { isLinux, isMacintosh, isWindows } from '../../../../base/common/platfor
 import { shorten } from '../../../../base/common/labels.js';
 import { EditorResourceAccessor, Verbosity, IEditorPartOptions, SideBySideEditor, DEFAULT_EDITOR_ASSOCIATION, EditorInputCapabilities, IUntypedEditorInput, preventEditorClose, EditorCloseMethod, EditorsOrder, IToolbarActions, GroupModelChangeKind } from '../../../common/editor.js';
 import { EditorInput } from '../../../common/editor/editorInput.js';
-import { IEditorTabGroup, getEditorTabGroupColor } from '../../../common/editor/editorTabGroup.js';
+import { IEditorTabGroup, getEditorTabGroupColor, resolveEditorTabGroupIcon } from '../../../common/editor/editorTabGroup.js';
 import { computeEditorAriaLabel } from '../../editor.js';
 import { StandardKeyboardEvent } from '../../../../base/browser/keyboardEvent.js';
 import { EventType as TouchEventType, GestureEvent, Gesture } from '../../../../base/browser/touch.js';
@@ -3164,7 +3164,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 
 		if (group.icon) {
 			const icon = $('span.tab-group-icon');
-			icon.classList.add('codicon', `codicon-${group.icon}`);
+			icon.classList.add(...ThemeIcon.asClassNameArray(resolveEditorTabGroupIcon(group.icon)));
 			icon.setAttribute('aria-hidden', 'true');
 			header.appendChild(icon);
 		}

@@ -13,7 +13,7 @@ import { DisposableStore } from '../../../../base/common/lifecycle.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
 import { IContextViewService } from '../../../../platform/contextview/browser/contextView.js';
 import { localize } from '../../../../nls.js';
-import { EDITOR_TAB_GROUP_COLORS, IEditorTabGroup } from '../../../common/editor/editorTabGroup.js';
+import { EDITOR_TAB_GROUP_COLORS, EDITOR_TAB_GROUP_ICONS, IEditorTabGroup } from '../../../common/editor/editorTabGroup.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { IHistoryService } from '../../../services/history/common/history.js';
 import { closeTabGroup, getTabGroupMembers } from './editorCommands.js';
@@ -105,21 +105,7 @@ export class TabGroupContextMenu {
 
 				const iconOptions: readonly { readonly icon: ThemeIcon | undefined; readonly label: string }[] = [
 					{ icon: undefined, label: localize('tabGroup.iconNone', "No Icon") },
-					{ icon: Codicon.folder, label: localize('tabGroup.iconFolder', "Folder") },
-					{ icon: Codicon.code, label: localize('tabGroup.iconCode', "Code") },
-					{ icon: Codicon.terminal, label: localize('tabGroup.iconTerminal', "Terminal") },
-					{ icon: Codicon.repo, label: localize('tabGroup.iconRepository', "Repository") },
-					{ icon: Codicon.database, label: localize('tabGroup.iconDatabase', "Database") },
-					{ icon: Codicon.globe, label: localize('tabGroup.iconGlobe', "Globe") },
-					{ icon: Codicon.beaker, label: localize('tabGroup.iconTest', "Test") },
-					{ icon: Codicon.rocket, label: localize('tabGroup.iconRocket', "Rocket") },
-					{ icon: Codicon.lightbulb, label: localize('tabGroup.iconIdea', "Idea") },
-					{ icon: Codicon.starFull, label: localize('tabGroup.iconStar', "Star") },
-					{ icon: Codicon.heart, label: localize('tabGroup.iconHeart', "Heart") },
-					{ icon: Codicon.briefcase, label: localize('tabGroup.iconWork', "Work") },
-					{ icon: Codicon.tools, label: localize('tabGroup.iconTools', "Tools") },
-					{ icon: Codicon.paintcan, label: localize('tabGroup.iconDesign', "Design") },
-					{ icon: Codicon.zap, label: localize('tabGroup.iconZap', "Zap") }
+					...EDITOR_TAB_GROUP_ICONS
 				];
 				const iconPicker = identitySection.appendChild($('.tab-group-menu-icons'));
 				iconPicker.setAttribute('role', 'radiogroup');
@@ -264,7 +250,7 @@ export class TabGroupContextMenu {
 }
 
 /** The number of icon buttons per row, which is also how far the Up and Down arrow keys move. */
-const ICON_PICKER_COLUMNS = 8;
+const ICON_PICKER_COLUMNS = 7;
 
 /**
  * Makes a group of radio buttons keyboard friendly with a roving tab index. The arrow

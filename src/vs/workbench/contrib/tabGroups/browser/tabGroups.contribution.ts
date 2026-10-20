@@ -9,7 +9,7 @@ import { InstantiationType, registerSingleton } from '../../../../platform/insta
 import { Registry } from '../../../../platform/registry/common/platform.js';
 import { registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
 import { workbenchConfigurationNodeBase } from '../../../common/configuration.js';
-import { EDITOR_TAB_GROUP_COLORS } from '../../../common/editor/editorTabGroup.js';
+import { EDITOR_TAB_GROUP_COLORS, EDITOR_TAB_GROUP_ICONS } from '../../../common/editor/editorTabGroup.js';
 import { TAB_AUTO_GROUP_RULES_SETTING } from '../common/tabAutoGroupRules.js';
 import { ITabSessionsService } from '../common/tabSessionsService.js';
 import { TabAutoGroupContribution } from './tabAutoGroup.js';
@@ -57,7 +57,7 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 					icon: {
 						type: 'string',
 						markdownDescription: localize('tabGroups.autoGroupRules.icon', "The icon of the tab group when it is created, the identifier of a codicon such as `beaker`."),
-						examples: ['beaker', 'book', 'gear', 'rocket']
+						examples: EDITOR_TAB_GROUP_ICONS.map(option => option.icon.id)
 					}
 				},
 				defaultSnippets: [{ body: { name: '$1', pattern: '$2' } }]

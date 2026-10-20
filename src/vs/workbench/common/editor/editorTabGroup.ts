@@ -3,6 +3,9 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { Codicon, getAllCodicons } from '../../../base/common/codicons.js';
+import { ThemeIcon } from '../../../base/common/themables.js';
+import { localize } from '../../../nls.js';
 import { WORKBENCH_COLOR_PALETTE } from '../workbenchColorPalette.js';
 
 /**
@@ -85,4 +88,46 @@ export function getEditorTabGroupColor(color: string): string {
 export function getRandomEditorTabGroupColor(): string {
 	const preset = EDITOR_TAB_GROUP_COLORS[Math.floor(Math.random() * EDITOR_TAB_GROUP_COLORS.length)];
 	return preset.id;
+}
+
+/** A tab group icon offered in the icon pickers. */
+export interface IEditorTabGroupIconOption {
+	readonly icon: ThemeIcon;
+	readonly label: string;
+}
+
+/**
+ * The curated set of tab group icons. They all come from the outline codicon
+ * family so that they look consistent next to each other at 16px.
+ */
+export const EDITOR_TAB_GROUP_ICONS: readonly IEditorTabGroupIconOption[] = [
+	{ icon: Codicon.code, label: localize('tabGroup.iconCode', "Code") },
+	{ icon: Codicon.folder, label: localize('tabGroup.iconFolder', "Folder") },
+	{ icon: Codicon.repo, label: localize('tabGroup.iconRepository', "Repository") },
+	{ icon: Codicon.globe, label: localize('tabGroup.iconGlobe', "Web") },
+	{ icon: Codicon.server, label: localize('tabGroup.iconServer', "Server") },
+	{ icon: Codicon.database, label: localize('tabGroup.iconDatabase', "Database") },
+	{ icon: Codicon.terminal, label: localize('tabGroup.iconTerminal', "Terminal") },
+	{ icon: Codicon.beaker, label: localize('tabGroup.iconTest', "Test") },
+	{ icon: Codicon.tools, label: localize('tabGroup.iconTools', "Tools") },
+	{ icon: Codicon.book, label: localize('tabGroup.iconDocs', "Docs") },
+	{ icon: Codicon.paintcan, label: localize('tabGroup.iconDesign', "Design") },
+	{ icon: Codicon.lock, label: localize('tabGroup.iconSecurity', "Security") },
+	{ icon: Codicon.star, label: localize('tabGroup.iconStar', "Star") },
+	{ icon: Codicon.bookmark, label: localize('tabGroup.iconBookmark', "Bookmark") },
+	{ icon: Codicon.rocket, label: localize('tabGroup.iconRocket', "Release") },
+	{ icon: Codicon.bug, label: localize('tabGroup.iconBug', "Bug") },
+	{ icon: Codicon.settingsGear, label: localize('tabGroup.iconSettings', "Settings") },
+	{ icon: Codicon.cloud, label: localize('tabGroup.iconCloud', "Cloud") },
+	{ icon: Codicon.lightbulb, label: localize('tabGroup.iconIdea', "Idea") },
+	{ icon: Codicon.briefcase, label: localize('tabGroup.iconWork', "Work") }
+];
+
+/**
+ * Resolves a saved tab group icon identifier to a renderable icon. Identifiers
+ * that are no longer part of {@link EDITOR_TAB_GROUP_ICONS} keep rendering as
+ * long as they are valid codicons, and unknown identifiers fall back to a folder.
+ */
+export function resolveEditorTabGroupIcon(id: string): ThemeIcon {
+	return getAllCodicons().find(codicon => codicon.id === id) ?? Codicon.folder;
 }

@@ -330,7 +330,8 @@
 
 .context-view.tab-group-context-view .tab-group-menu-icons {
 	display: grid;
-	grid-template-columns: repeat(8, 1fr);
+	grid-template-columns: repeat(7, 28px);
+	justify-content: space-between;
 	gap: var(--vscode-spacing-size40);
 	padding-top: var(--vscode-spacing-size40);
 }
