@@ -47,7 +47,7 @@ import { basenameOrAuthority } from '../../../../base/common/resources.js';
 import { RunOnceScheduler } from '../../../../base/common/async.js';
 import { IPathService } from '../../../services/path/common/pathService.js';
 import { IPath, win32, posix } from '../../../../base/common/path.js';
-import { coalesce, insert } from '../../../../base/common/arrays.js';
+import { coalesce, equals as equalArrays, insert } from '../../../../base/common/arrays.js';
 import { isHighContrast } from '../../../../platform/theme/common/theme.js';
 import { isSafari } from '../../../../base/browser/browser.js';
 import { equals } from '../../../../base/common/objects.js';
@@ -92,6 +92,25 @@ interface ITabGroupStats {
 	 * Number of tabs in the group with unsaved changes.
 	 */
 	dirtyCount: number;
+}
+
+/**
+ * The parts of the model that tab groups are drawn from.
+ */
+interface ITabGroupRenderState {
+	readonly enabled: boolean;
+	readonly activeEditor: EditorInput | null;
+	readonly editors: readonly EditorInput[];
+	readonly tabGroupIds: readonly (string | undefined)[];
+	readonly tabGroups: string;
+}
+
+function isSameTabGroupRenderState(a: ITabGroupRenderState, b: ITabGroupRenderState): boolean {
+	return a.enabled === b.enabled &&
+		a.activeEditor === b.activeEditor &&
+		a.tabGroups === b.tabGroups &&
+		equalArrays(a.editors, b.editors) &&
+		equalArrays(a.tabGroupIds, b.tabGroupIds);
 }
 
 interface IMultiEditorTabsControlLayoutOptions {
@@ -209,7 +228,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		// React to tab group model changes (create, rename, recolor, collapse, move, remove)
 		this._register(this.tabsModel.onDidModelChange(e => {
 			if (e.kind === GroupModelChangeKind.TAB_GROUP_CREATED || e.kind === GroupModelChangeKind.TAB_GROUP_CHANGED || e.kind === GroupModelChangeKind.TAB_GROUP_REMOVED) {
-				this.rebuildTabs();
+				this.updateTabGroups();
 			}
 		}));
 
@@ -2763,25 +2782,45 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 
 	private readonly tabGroupHeaders = new Map<string, { readonly element: HTMLElement; readonly disposables: DisposableStore }>();
 
-	private rebuildTabs(): void {
-		const tabsContainer = this.tabsContainer;
-		if (!tabsContainer) {
+	private renderedTabGroupState: ITabGroupRenderState | undefined;
+
+	/**
+	 * Applies a change to the tab groups (create, rename, recolor, collapse, move,
+	 * remove) to the existing tab elements instead of rebuilding the tab strip.
+	 */
+	private updateTabGroups(): void {
+
+		// Tabs follow the model one-to-one. If an editor is being opened or closed, its
+		// handler brings the tabs in sync and redraws the tab groups as part of that.
+		if (this.tabsModel.count === 0 || this.tabCount !== this.tabsModel.count) {
 			return;
 		}
 
-		clearNode(tabsContainer);
-		if (this.addTabContainer) {
-			tabsContainer.appendChild(this.addTabContainer);
+		// Changing tab groups fires several events in a row (e.g. creating a group fires
+		// one for each group it takes editors from and one for the new group), but the
+		// model is already in its final state when the first event is handled. Skip the
+		// events that do not change what was last drawn.
+		if (this.renderedTabGroupState && isSameTabGroupRenderState(this.renderedTabGroupState, this.getTabGroupRenderState())) {
+			return;
 		}
 
-		this.tabDisposables = dispose(this.tabDisposables);
-		this.disposeTabGroupHeaders();
-		this.tabResourceLabels.clear();
-		this.tabLabels = [];
-		this.activeTabLabel = undefined;
-		this.tabActionBars = [];
+		// Tab groups keep their editors together, which can change the order of editors
+		// without an editor move event. Labels follow the order, so recompute them.
+		this.computeTabLabels();
 
-		this.handleOpenedEditors();
+		this.redraw({ forceRevealActiveTab: true });
+	}
+
+	private getTabGroupRenderState(): ITabGroupRenderState {
+		const editors = this.tabsModel.getEditors(EditorsOrder.SEQUENTIAL);
+
+		return {
+			enabled: this.groupsView.partOptions.tabGroups.enabled,
+			activeEditor: this.tabsModel.activeEditor,
+			editors,
+			tabGroupIds: editors.map(editor => this.tabsModel.getTabGroupForEditor(editor)?.id),
+			tabGroups: JSON.stringify(this.tabsModel.tabGroups.map(({ id, name, color, collapsed, saved, locked, icon }) => [id, name, color, collapsed, saved, locked, icon]))
+		};
 	}
 
 	/**
@@ -2826,6 +2865,10 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		if (isHTMLElement(focusedElement) && focusedElement !== tabsContainer.ownerDocument.activeElement && focusedElement.isConnected && tabsContainer.contains(focusedElement)) {
 			focusedElement.focus({ preventScroll: true });
 		}
+
+		// Remember what was drawn, also after moves that only redraw some tabs,
+		// so that tab group events which change nothing can be skipped
+		this.renderedTabGroupState = this.getTabGroupRenderState();
 	}
 
 	private getTabGroupStats(onlyGroupId?: string): Map<string, ITabGroupStats> {

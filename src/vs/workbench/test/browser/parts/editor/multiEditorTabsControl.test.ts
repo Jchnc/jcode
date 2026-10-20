@@ -88,6 +88,7 @@ suite('MultiEditorTabsControl', () => {
 			override addToTabGroup(groupId: string, editors: EditorInput[]) { model.addToTabGroup(groupId, editors); }
 			override renameTabGroup(groupId: string, name: string) { model.renameTabGroup(groupId, name); }
 			override recolorTabGroup(groupId: string, color: string) { model.recolorTabGroup(groupId, color); }
+			override setTabGroupCollapsed(groupId: string, collapsed: boolean) { model.setTabGroupCollapsed(groupId, collapsed); }
 			override setTabGroupIcon(groupId: string, icon: string | undefined) { model.setTabGroupIcon(groupId, icon); }
 			override setTabGroupSaved(groupId: string, saved: boolean) { model.setTabGroupSaved(groupId, saved); }
 			override setTabGroupLocked(groupId: string, locked: boolean) { model.setTabGroupLocked(groupId, locked); }
@@ -289,6 +290,68 @@ suite('MultiEditorTabsControl', () => {
 				{ name: 'Second', count: '2', unsaved: null, label: 'Second, 2 tabs' }
 			],
 			otherHeaderReused: true
+		});
+	});
+
+	function describeTabStrip(): string[] {
+		return Array.from(container.querySelectorAll<HTMLElement>('.tabs-container > .tab, .tabs-container > .tab-group-header')).map(element => {
+			if (element.classList.contains('tab-group-header')) {
+				return `[${element.querySelector('.tab-group-name')?.textContent}]`;
+			}
+
+			return `${element.querySelector('.label-name')?.textContent}${element.classList.contains('tab-group-collapsed') ? ' (hidden)' : ''}`;
+		});
+	}
+
+	test('tab group changes update the existing tabs once per burst of events', () => {
+		const [first, second, , fourth] = openNamedEditors(['a.ts', 'b.ts', 'c.ts', 'd.ts']);
+		model.createTabGroup([first, second], 'First', 'blue');
+		const tabs = Array.from(container.querySelectorAll('.tabs-container > .tab'));
+
+		const observer = new MutationObserver(() => { });
+		observer.observe(container, { attributes: true, subtree: true, attributeFilter: ['aria-label'] });
+
+		// Taking editors from an existing group fires an event for that group and one for the new group,
+		// and gathering the members of the new group reorders the editors without an editor move event
+		model.createTabGroup([second, fourth], 'Second', 'red');
+
+		const redrawnTabs = observer.takeRecords().filter(record => (record.target as HTMLElement).classList.contains('tab')).length;
+		observer.disconnect();
+
+		assert.deepStrictEqual({
+			tabsReused: Array.from(container.querySelectorAll('.tabs-container > .tab')).every((tab, index) => tab === tabs[index]),
+			tabsRedrawnPerBurst: redrawnTabs / tabs.length,
+			strip: describeTabStrip()
+		}, {
+			tabsReused: true,
+			tabsRedrawnPerBurst: 1,
+			strip: ['[First]', 'a.ts', '[Second]', 'b.ts', 'd.ts', 'c.ts']
+		});
+	});
+
+	test('keyboard focus stays on a tab group header when toggling collapse', () => {
+		const [active, other] = model.getEditors(EditorsOrder.SEQUENTIAL);
+		model.createTabGroup([active, other], 'Work', 'blue');
+
+		const header = tabGroupHeaders()[0];
+		header.focus();
+
+		const toggleWithKeyboard = () => header.dispatchEvent(new KeyboardEvent(EventType.KEY_UP, { key: 'Enter', keyCode: 13, bubbles: true, cancelable: true }));
+		const describeFocus = () => ({
+			focusOnSameHeader: mainWindow.document.activeElement === header && tabGroupHeaders()[0] === header,
+			expanded: header.getAttribute('aria-expanded'),
+			strip: describeTabStrip()
+		});
+
+		toggleWithKeyboard();
+		const collapsed = describeFocus();
+
+		toggleWithKeyboard();
+		const expanded = describeFocus();
+
+		assert.deepStrictEqual({ collapsed, expanded }, {
+			collapsed: { focusOnSameHeader: true, expanded: 'false', strip: ['[Work]', 'file0.txt', 'file1.txt (hidden)'] },
+			expanded: { focusOnSameHeader: true, expanded: 'true', strip: ['[Work]', 'file0.txt', 'file1.txt'] }
 		});
 	});
 
