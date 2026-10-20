@@ -105,6 +105,10 @@ interface ITabGroupRenderState {
 	readonly tabGroups: string;
 }
 
+function getTabGroupName(group: IEditorTabGroup): string {
+	return group.name || localize('tabGroup.unnamed', "Tab Group");
+}
+
 function isSameTabGroupRenderState(a: ITabGroupRenderState, b: ITabGroupRenderState): boolean {
 	return a.enabled === b.enabled &&
 		a.activeEditor === b.activeEditor &&
@@ -999,8 +1003,9 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 	override updateOptions(oldOptions: IEditorPartOptions, newOptions: IEditorPartOptions): void {
 		super.updateOptions(oldOptions, newOptions);
 
-		// A change to a label format options requires to recompute all labels
-		if (oldOptions.labelFormat !== newOptions.labelFormat) {
+		// A change to a label format options requires to recompute all labels,
+		// and so does a change to tab groups because labels mention the group
+		if (oldOptions.labelFormat !== newOptions.labelFormat || oldOptions.tabGroups.enabled !== newOptions.tabGroups.enabled) {
 			this.computeTabLabels();
 		}
 
@@ -1725,7 +1730,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 				description: editor.getDescription(verbosity),
 				forceDescription: editor.hasCapability(EditorInputCapabilities.ForceDescription),
 				title: editor.getTitle(Verbosity.LONG),
-				ariaLabel: computeEditorAriaLabel(editor, tabIndex, this.groupView, this.editorPartsView.count)
+				ariaLabel: this.computeTabAriaLabel(editor, tabIndex)
 			});
 
 			if (editor === this.tabsModel.activeEditor) {
@@ -1741,6 +1746,21 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		// Remember for fast lookup
 		this.tabLabels = labels;
 		this.activeTabLabel = labels[activeEditorTabIndex];
+	}
+
+	private computeTabAriaLabel(editor: EditorInput, tabIndex: number): string {
+		const ariaLabel = computeEditorAriaLabel(editor, tabIndex, this.groupView, this.editorPartsView.count);
+
+		// Tell screen readers which tab group a tab is in, and whether it is the
+		// one tab of a collapsed group that remains visible
+		const tabGroup = this.groupsView.partOptions.tabGroups.enabled ? this.tabsModel.getTabGroupForEditor(editor) : undefined;
+		if (!tabGroup) {
+			return ariaLabel;
+		}
+
+		return tabGroup.collapsed ?
+			localize('tabGroup.tabAriaCollapsed', "{0}, tab group {1}, collapsed", ariaLabel, getTabGroupName(tabGroup)) :
+			localize('tabGroup.tabAria', "{0}, tab group {1}", ariaLabel, getTabGroupName(tabGroup));
 	}
 
 	private shortenTabLabels(labels: IEditorInputLabel[]): void {
@@ -3046,7 +3066,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 			const dirtyIndicator = $('span.tab-group-dirty-indicator');
 			dirtyIndicator.classList.add(...ThemeIcon.asClassNameArray(Codicon.circleFilled));
 			dirtyIndicator.setAttribute('aria-hidden', 'true');
-			dirtyIndicator.title = localize('tabGroup.dirtyCount', '{0} unsaved tabs', dirtyCount);
+			dirtyIndicator.title = dirtyCount === 1 ? localize('tabGroup.dirtyOne', "1 unsaved tab") : localize('tabGroup.dirtyCount', "{0} unsaved tabs", dirtyCount);
 			header.appendChild(dirtyIndicator);
 		}
 
@@ -3058,19 +3078,26 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		}
 
 		const name = $('span.tab-group-name');
-		name.textContent = group.name || localize('tabGroup.unnamed', 'Tab Group');
+		name.textContent = getTabGroupName(group);
 		header.appendChild(name);
 
 		const countBadge = $('span.tab-group-count');
 		countBadge.textContent = String(count);
 		header.appendChild(countBadge);
 
-		const label = group.name || localize('tabGroup.unnamed', 'Tab Group');
-		const status = dirtyCount > 0 ? localize('tabGroup.headerStatusDirty', '{0} tabs, {1} unsaved', count, dirtyCount) : localize('tabGroup.headerStatus', '{0} tabs', count);
-		const accessibilityStatus = [status, group.saved ? localize('tabGroup.saved', 'saved') : undefined, group.locked ? localize('tabGroup.locked', 'locked') : undefined].filter(Boolean).join(', ');
-		header.setAttribute('aria-label', group.collapsed ? localize('tabGroup.collapsedAria', '{0}, collapsed, {1}', label, accessibilityStatus) : localize('tabGroup.expandedAria', '{0}, {1}', label, accessibilityStatus));
-		const savedStatus = group.saved ? localize('tabGroup.savedStatus', ', saved') : '';
-		header.title = group.locked ? localize('tabGroup.headerTitleLocked', '{0} ({1}, locked{2})', label, status, savedStatus) : localize('tabGroup.headerTitle', '{0} ({1}{2})', label, status, savedStatus);
+		const label = getTabGroupName(group);
+		const tabs = count === 1 ? localize('tabGroup.oneTab', "1 tab") : localize('tabGroup.tabCount', "{0} tabs", count);
+		const status = dirtyCount > 0 ? localize('tabGroup.headerStatusDirty', "{0}, {1} unsaved", tabs, dirtyCount) : tabs;
+		let accessibilityStatus = status;
+		if (group.saved && group.locked) {
+			accessibilityStatus = localize('tabGroup.statusSavedLocked', "{0}, saved, locked", status);
+		} else if (group.saved) {
+			accessibilityStatus = localize('tabGroup.statusSaved', "{0}, saved", status);
+		} else if (group.locked) {
+			accessibilityStatus = localize('tabGroup.statusLocked', "{0}, locked", status);
+		}
+		header.setAttribute('aria-label', group.collapsed ? localize('tabGroup.collapsedAria', "{0}, collapsed, {1}", label, accessibilityStatus) : localize('tabGroup.expandedAria', "{0}, {1}", label, accessibilityStatus));
+		header.title = localize('tabGroup.headerTitle', "{0} ({1})", label, accessibilityStatus);
 	}
 
 	private registerTabGroupHeaderListeners(header: HTMLElement, groupId: string): DisposableStore {

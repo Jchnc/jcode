@@ -278,7 +278,7 @@ suite('MultiEditorTabsControl', () => {
 				{ name: 'Second', count: '2', unsaved: null, label: 'Second, 2 tabs' }
 			],
 			unsaved: [
-				{ name: 'First', count: '2', unsaved: '1 unsaved tabs', label: 'First, 2 tabs, 1 unsaved' },
+				{ name: 'First', count: '2', unsaved: '1 unsaved tab', label: 'First, 2 tabs, 1 unsaved' },
 				{ name: 'Second', count: '2', unsaved: null, label: 'Second, 2 tabs' }
 			],
 			manyUnsaved: [
@@ -480,6 +480,39 @@ suite('MultiEditorTabsControl', () => {
 		assert.deepStrictEqual({ afterArrow, afterEnter }, {
 			afterArrow: { icon: undefined, focused: 'Rocket', checked: ['No Icon'], tabbable: ['Rocket'] },
 			afterEnter: { icon: 'rocket', focused: 'Rocket', checked: ['Rocket'], tabbable: ['Rocket'] }
+		});
+	});
+
+	test('tab labels tell screen readers about the tab group and whether it is collapsed', () => {
+		const [first, second] = model.getEditors(EditorsOrder.SEQUENTIAL);
+		const tabLabels = () => Array.from(container.querySelectorAll('.tabs-container > .tab')).map(tab => tab.getAttribute('aria-label'));
+		const setTabGroupsEnabled = (enabled: boolean) => {
+			const oldOptions = partOptions;
+			partOptions = { ...partOptions, tabGroups: { enabled } };
+			control.updateOptions(oldOptions, partOptions);
+		};
+
+		const ungrouped = tabLabels();
+
+		const group = model.createTabGroup([first, second], 'Work', 'blue');
+		assert.ok(group);
+		const grouped = tabLabels();
+
+		model.setTabGroupCollapsed(group.id, true);
+		const collapsed = tabLabels();
+
+		model.renameTabGroup(group.id, 'Review');
+		const renamed = tabLabels();
+
+		setTabGroupsEnabled(false);
+		const disabled = tabLabels();
+
+		assert.deepStrictEqual({ ungrouped, grouped, collapsed, renamed, disabled }, {
+			ungrouped: ['file0.txt', 'file1.txt'],
+			grouped: ['file0.txt, tab group Work', 'file1.txt, tab group Work'],
+			collapsed: ['file0.txt, tab group Work, collapsed', 'file1.txt, tab group Work, collapsed'],
+			renamed: ['file0.txt, tab group Review, collapsed', 'file1.txt, tab group Review, collapsed'],
+			disabled: ['file0.txt', 'file1.txt']
 		});
 	});
 
