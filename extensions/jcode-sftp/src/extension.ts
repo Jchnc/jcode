@@ -25,6 +25,7 @@ export function activate(context: ExtensionContext): void {
 		commands.registerCommand('jcodeSftp.edit', (target?: string | RemoteProfile) => run(() => manager.edit(target))),
 		commands.registerCommand('jcodeSftp.delete', (target?: string | RemoteProfile) => run(() => manager.delete(target))),
 		commands.registerCommand('jcodeSftp.import', () => run(() => manager.import())),
+		commands.registerCommand('jcodeSftp.importSshConfig', () => run(() => manager.importSshConfig())),
 		commands.registerCommand('jcodeSftp.export', () => run(() => manager.export()))
 	);
 }

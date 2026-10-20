@@ -12,7 +12,7 @@
 		"compile": "node ../../node_modules/@typescript/native/bin/tsc --project tsconfig.json",
 		"test": "node -e \"require('node:fs').rmSync('out/test', { recursive: true, force: true })\" && npm run compile && node --test \"out/test/**/*.test.js\""
 	},
-	"activationEvents": ["onFileSystem:jcode-sftp", "onView:jcodeSftp.connections", "onCommand:jcodeSftp.connect", "onCommand:jcodeSftp.reconnect", "onCommand:jcodeSftp.new", "onCommand:jcodeSftp.open", "onCommand:jcodeSftp.edit", "onCommand:jcodeSftp.delete", "onCommand:jcodeSftp.import", "onCommand:jcodeSftp.export", "onCommand:jcodeSftp.disconnect", "onCommand:jcodeSftp.showStatusMenu"],
+	"activationEvents": ["onFileSystem:jcode-sftp", "onView:jcodeSftp.connections", "onCommand:jcodeSftp.connect", "onCommand:jcodeSftp.reconnect", "onCommand:jcodeSftp.new", "onCommand:jcodeSftp.open", "onCommand:jcodeSftp.edit", "onCommand:jcodeSftp.delete", "onCommand:jcodeSftp.import", "onCommand:jcodeSftp.importSshConfig", "onCommand:jcodeSftp.export", "onCommand:jcodeSftp.disconnect", "onCommand:jcodeSftp.showStatusMenu"],
 	"capabilities": {
 		"virtualWorkspaces": true,
 		"untrustedWorkspaces": { "supported": true }
@@ -43,6 +43,7 @@
 			{ "command": "jcodeSftp.edit", "title": "%command.edit%", "category": "%command.category%", "icon": "$(edit)" },
 			{ "command": "jcodeSftp.delete", "title": "%command.delete%", "category": "%command.category%", "icon": "$(trash)" },
 			{ "command": "jcodeSftp.import", "title": "%command.import%", "category": "%command.category%", "icon": "$(cloud-download)" },
+			{ "command": "jcodeSftp.importSshConfig", "title": "%command.importSshConfig%", "category": "%command.category%", "icon": "$(server-environment)" },
 			{ "command": "jcodeSftp.export", "title": "%command.export%", "category": "%command.category%", "icon": "$(cloud-upload)" }
 		],
 		"menus": {
@@ -51,6 +52,7 @@
 			],
 			"view/title": [
 				{ "command": "jcodeSftp.new", "when": "view == jcodeSftp.connections", "group": "navigation@1" },
+				{ "command": "jcodeSftp.importSshConfig", "when": "view == jcodeSftp.connections", "group": "navigation@2" },
 				{ "command": "jcodeSftp.import", "when": "view == jcodeSftp.connections", "group": "2_transfer@1" },
 				{ "command": "jcodeSftp.export", "when": "view == jcodeSftp.connections", "group": "2_transfer@2" }
 			],

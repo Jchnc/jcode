@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { commands, EventEmitter, ExtensionContext, l10n, QuickPickItemKind, ThemeIcon, TreeDataProvider, TreeItem, TreeItemCollapsibleState, Uri, window, workspace, type LogOutputChannel, type QuickPickItem, type TreeView } from 'vscode';
@@ -11,6 +12,8 @@ import { ConnectionForm, ConnectionFormResult } from './connectionForm';
 import { ConnectionStatus } from './connectionStatus';
 import { SftpFileSystemProvider } from './fileSystemProvider';
 import { exportEncryptedProfiles, exportProfiles, importProfiles, isEncryptedExport } from './profileJson';
+import { hostsToImport, profileFromHost, readSshConfig, type SshConfigHost } from './sshConfig';
+import { localSshConfigEnvironment, userSshConfigPath } from './sshConfigFiles';
 import { planStatusMenu, type StatusMenuChoice, type StatusMenuFailure } from './statusPresentation';
 import { planWorkspaceFolders, type WorkspacePlan } from './workspacePlan';
 
@@ -250,6 +253,55 @@ export class ConnectionManager implements TreeDataProvider<RemoteProfile> {
 		void window.showInformationMessage(encrypted || restored
 			? l10n.t('Imported {0} connections and restored {1} saved credentials.', count, restored)
 			: l10n.t('Imported {0} connections. This export did not contain credentials.', count));
+	}
+
+	/** Describes what a host from an SSH config would connect with, for the line under its name in the list. */
+	private describeSshHost(host: SshConfigHost): string {
+		const parts: string[] = [];
+		if (host.identityFile) { parts.push(l10n.t('Key: {0}', host.identityFile)); }
+		if (host.proxyJump) { parts.push(l10n.t('Via {0} (the jump host is not imported)', host.proxyJump)); }
+		if (host.usesProxyCommand) { parts.push(l10n.t('Uses ProxyCommand, which is not supported')); }
+		return parts.join(' · ');
+	}
+
+	/**
+	 * Adds connections for hosts that the user selects from their SSH config (`~/.ssh/config`). Passwords
+	 * and passphrases are never read: JCode asks for them when connecting, like for any new connection.
+	 */
+	async importSshConfig(): Promise<void> {
+		const configPath = userSshConfigPath();
+		const hosts = await readSshConfig(configPath, localSshConfigEnvironment());
+		if (!hosts) {
+			void window.showInformationMessage(l10n.t('No SSH config file was found at {0}.', configPath));
+			return;
+		}
+		const available = hostsToImport(hosts, this.connections.profiles);
+		if (!available.length) {
+			void window.showInformationMessage(hosts.length
+				? l10n.t('All hosts in {0} are already in your connections.', configPath)
+				: l10n.t('{0} does not define any hosts to import. Host patterns with wildcards are not imported.', configPath));
+			return;
+		}
+		const picked = await window.showQuickPick<QuickPickItem & { host: SshConfigHost }>(available.map(host => ({
+			label: host.alias,
+			description: `${host.user}@${host.hostName}:${host.port}`,
+			detail: this.describeSshHost(host) || undefined,
+			host
+		})), {
+			title: l10n.t('Import Connections from SSH Config'),
+			placeHolder: l10n.t('Select the hosts to import from {0}', configPath),
+			canPickMany: true,
+			matchOnDescription: true,
+			matchOnDetail: true,
+			ignoreFocusOut: true
+		});
+		if (!picked?.length) { return; }
+		const agentAvailable = Boolean(process.env.SSH_AUTH_SOCK);
+		for (const { host } of picked) {
+			await this.connections.saveProfile(profileFromHost(host, { id: randomUUID(), agentAvailable }));
+		}
+		this.refresh();
+		void window.showInformationMessage(l10n.t('Imported {0} connections from {1}. Edit a connection to choose its remote folder. Passwords and key passphrases are not imported; JCode asks for them when you connect.', picked.length, configPath));
 	}
 
 	async export(): Promise<void> {
