@@ -5,7 +5,7 @@
 
 import { Event } from '../../../../base/common/event.js';
 import { URI } from '../../../../base/common/uri.js';
-import { IRange } from '../../../../editor/common/core/range.js';
+import { IRange, Range } from '../../../../editor/common/core/range.js';
 import { localize } from '../../../../nls.js';
 import { MenuId } from '../../../../platform/actions/common/actions.js';
 import { RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
@@ -265,14 +265,16 @@ export interface IBookmarkTextEdit {
 }
 
 /**
- * Whether an edit deleted a whole line, content and line break, rather than merely changing its text.
+ * Whether an edit consumed a whole line, content and line break, rather than merely changing its
+ * text. What the edit inserts in its place does not matter: a line that was replaced is gone, and
+ * {@link resolveBookmarkLinesAfterEdit} looks for its content in the inserted text.
  *
  * @param lineNumber The line number before the edit.
  * @param lineMaxColumn The max column of that line before the edit.
  */
 export function isBookmarkLineRemoved(edit: IBookmarkTextEdit, lineNumber: number, lineMaxColumn: number): boolean {
-	const { range, text } = edit;
-	if (/[\r\n]/.test(text) || range.startLineNumber === range.endLineNumber || lineNumber < range.startLineNumber || lineNumber > range.endLineNumber) {
+	const { range } = edit;
+	if (range.startLineNumber === range.endLineNumber || lineNumber < range.startLineNumber || lineNumber > range.endLineNumber) {
 		return false;
 	}
 
@@ -289,6 +291,148 @@ export function isBookmarkLineRemoved(edit: IBookmarkTextEdit, lineNumber: numbe
 		return range.startColumn === 1 && (!isEmpty || range.endColumn === 1);
 	}
 	return range.endColumn >= lineMaxColumn && (!isEmpty || range.startColumn > 1);
+}
+
+/**
+ * A bookmarked line as it was right before an edit.
+ */
+export interface IEditedBookmark {
+	readonly id: string;
+	readonly lineNumber: number;
+	readonly maxColumn: number;
+	readonly lineText: string;
+}
+
+/**
+ * What an edit did to a bookmark whose line did not simply stay put or shift along: the bookmark
+ * is either gone with its line, or follows the content of its line to another line.
+ */
+export type BookmarkLineResolution = { readonly kind: 'removed' } | { readonly kind: 'moved'; readonly lineNumber: number };
+
+/**
+ * The text after an edit, as far as {@link resolveBookmarkLinesAfterEdit} needs it.
+ */
+export interface IBookmarkEditedText {
+	getLineCount(): number;
+	getLineContent(lineNumber: number): string;
+}
+
+/**
+ * Works out what a change did to the bookmarked lines that the range tracking of the editor can not follow.
+ * Tracked ranges are offsets in the text, so when an edit spans lines, a bookmark inside it lands wherever the
+ * offset arithmetic puts it, rather than with the content of its line. That is what happens with edits that
+ * delete a line and bring it back elsewhere, such as Move Line Up and Down and Sort Lines, with a paste over
+ * whole lines, and with a replacement across line breaks.
+ *
+ * - A line that an edit consumed is searched for among the lines that the edits inserted, and its bookmark
+ *   follows it there. When it is not found and its line break is gone too, the bookmark is removed.
+ * - The rest of a line that an edit joined to an earlier line keeps its bookmark, on the line that results.
+ * - An empty line that Move Line Up or Down moved keeps its bookmark, see {@link findMovedEmptyLine}.
+ *
+ * Bookmarks that are not in the result stay where the editor tracked them.
+ *
+ * @param edits The edits of one change, with ranges in the coordinates of the text before the change.
+ * @param bookmarks The bookmarks as they were before the change.
+ * @param text The text after the change.
+ */
+export function resolveBookmarkLinesAfterEdit(edits: readonly IBookmarkTextEdit[], bookmarks: readonly IEditedBookmark[], text: IBookmarkEditedText): Map<string, BookmarkLineResolution> {
+	const resolutions = new Map<string, BookmarkLineResolution>();
+	if (bookmarks.length === 0) {
+		return resolutions;
+	}
+
+	// Edits are described in the text before the change, so each edit starts further down by the lines added above it.
+	let precedingDelta = 0;
+	const blocks = [...edits].sort((left, right) => Range.compareRangesUsingEnds(left.range, right.range)).map((edit): IEditBlock => {
+		const lines = edit.text.split(/\r\n|\r|\n/);
+		const lineDelta = lines.length - 1 - (edit.range.endLineNumber - edit.range.startLineNumber);
+		const block = { edit, lines, lineDelta, startLine: edit.range.startLineNumber + precedingDelta };
+		precedingDelta += lineDelta;
+		return block;
+	});
+
+	let insertedLines: { readonly lineNumber: number; readonly text: string }[] | undefined;
+	const getInsertedLines = () => insertedLines ??= blocks.flatMap(({ edit, lines, startLine }) => edit.text === '' ? [] : lines.flatMap((line, index) => {
+		// Only whole lines count, not a line that got the rest of another line attached to it.
+		const lineNumber = startLine + index;
+		const lineText = normalizeLine(line);
+		return lineText && lineNumber <= text.getLineCount() && normalizeLine(text.getLineContent(lineNumber)) === lineText ? [{ lineNumber, text: lineText }] : [];
+	}));
+
+	const claimed = new Set<number>();
+	for (const bookmark of [...bookmarks].sort((left, right) => left.lineNumber - right.lineNumber)) {
+		const { lineNumber, maxColumn } = bookmark;
+		const lineText = normalizeLine(bookmark.lineText);
+		const isRemoved = edits.some(edit => isBookmarkLineRemoved(edit, lineNumber, maxColumn));
+
+		if (lineText && (isRemoved || edits.some(({ range }) => isLineTextCovered(range, lineNumber, maxColumn)))) {
+			// Follows the content of its line, to the closest line with the same text.
+			const expectedLineNumber = lineNumber + blocks.reduce((delta, block) => block.edit.range.endLineNumber < lineNumber ? delta + block.lineDelta : delta, 0);
+			let target: number | undefined;
+			for (const candidate of getInsertedLines()) {
+				if (candidate.text === lineText && !claimed.has(candidate.lineNumber) && (target === undefined || Math.abs(candidate.lineNumber - expectedLineNumber) < Math.abs(target - expectedLineNumber))) {
+					target = candidate.lineNumber;
+				}
+			}
+			if (target !== undefined) {
+				claimed.add(target);
+				resolutions.set(bookmark.id, { kind: 'moved', lineNumber: target });
+				continue;
+			}
+		}
+
+		if (isRemoved) {
+			resolutions.set(bookmark.id, { kind: 'removed' });
+			continue;
+		}
+
+		const emptyLineMovedTo = !lineText && maxColumn === 1 ? findMovedEmptyLine(blocks, lineNumber, text) : undefined;
+		if (emptyLineMovedTo !== undefined) {
+			resolutions.set(bookmark.id, { kind: 'moved', lineNumber: emptyLineMovedTo });
+			continue;
+		}
+
+		const joinedTo = blocks.find(({ edit: { range } }) => range.startLineNumber < lineNumber && range.endLineNumber === lineNumber);
+		if (joinedTo) {
+			resolutions.set(bookmark.id, { kind: 'moved', lineNumber: joinedTo.startLine + joinedTo.lines.length - 1 });
+		}
+	}
+	return resolutions;
+}
+
+/**
+ * An edit of a change, with the line it starts on in the text after the change.
+ */
+interface IEditBlock {
+	readonly edit: IBookmarkTextEdit;
+	readonly lines: readonly string[];
+	readonly lineDelta: number;
+	readonly startLine: number;
+}
+
+/**
+ * An empty line has no text to follow. Move Line Up and Down move an empty line by typing the text of
+ * the neighboring line into it and clearing that line, so when a change does exactly that, the empty
+ * line went to the line that was cleared.
+ *
+ * @returns The line, in the text after the change, that the empty line moved to.
+ */
+function findMovedEmptyLine(blocks: readonly IEditBlock[], lineNumber: number, text: IBookmarkEditedText): number | undefined {
+	const typed = blocks.find(({ edit: { range, text: inserted } }) => range.startLineNumber === lineNumber && range.endLineNumber === lineNumber && range.startColumn === 1 && range.endColumn === 1 && inserted !== '' && !/[\r\n]/.test(inserted));
+	if (!typed) {
+		return undefined;
+	}
+	const cleared = blocks.find(({ edit: { range, text: inserted } }) => inserted === '' && Math.abs(range.startLineNumber - lineNumber) === 1 && range.endLineNumber === range.startLineNumber && range.startColumn === 1 && range.endColumn === typed.edit.text.length + 1);
+	return cleared && cleared.startLine <= text.getLineCount() && text.getLineContent(cleared.startLine) === '' ? cleared.startLine : undefined;
+}
+
+/**
+ * Whether a range takes all the text of a line, which has some, whether or not it takes the line break.
+ */
+function isLineTextCovered(range: IRange, lineNumber: number, lineMaxColumn: number): boolean {
+	const startsBefore = range.startLineNumber < lineNumber || range.startLineNumber === lineNumber && range.startColumn === 1;
+	const endsAfter = range.endLineNumber > lineNumber || range.endLineNumber === lineNumber && range.endColumn >= lineMaxColumn;
+	return lineMaxColumn > 1 && startsBefore && endsAfter;
 }
 
 function normalizeLine(value: string): string {

@@ -23,7 +23,7 @@ import { IStorageService, StorageScope, StorageTarget } from '../../../../platfo
 import { registerColor } from '../../../../platform/theme/common/colorRegistry.js';
 import { themeColorFromId } from '../../../../platform/theme/common/themeService.js';
 import { IUriIdentityService } from '../../../../platform/uriIdentity/common/uriIdentity.js';
-import { CONTEXT_CODE_BOOKMARKS_PRESENT, CONTEXT_CODE_BOOKMARKS_STALE_PRESENT, findBookmarkLine, ICodeBookmark, ICodeBookmarkAnchor, ICodeBookmarksService, isBookmarkLineRemoved, mergeDuplicateBookmarks } from '../common/bookmarks.js';
+import { CONTEXT_CODE_BOOKMARKS_PRESENT, CONTEXT_CODE_BOOKMARKS_STALE_PRESENT, findBookmarkLine, ICodeBookmark, ICodeBookmarkAnchor, ICodeBookmarksService, mergeDuplicateBookmarks, resolveBookmarkLinesAfterEdit } from '../common/bookmarks.js';
 
 const STORAGE_KEY = 'jcode.codeBookmarks';
 
@@ -339,13 +339,20 @@ export class CodeBookmarksService extends Disposable implements ICodeBookmarksSe
 			return;
 		}
 
+		// The range tracking of the editor does not know where the content of a line went when an edit
+		// spans lines, such as when a line is moved, so those bookmarks are placed from the edit itself.
+		const edited = [...entry.bookmarks].map(([id, tracked]) => ({ id, lineNumber: tracked.lineNumber, maxColumn: tracked.maxColumn, lineText: tracked.anchor.lineText }));
 		const removed = new Set<string>();
-		for (const [id, tracked] of entry.bookmarks) {
-			if (event.changes.some(change => isBookmarkLineRemoved(change, tracked.lineNumber, tracked.maxColumn))) {
+		const moved = new Map<string, number>();
+		for (const [id, resolution] of resolveBookmarkLinesAfterEdit(event.changes, edited, entry.model)) {
+			if (resolution.kind === 'removed') {
 				removed.add(id);
+			} else {
+				moved.set(id, resolution.lineNumber);
 			}
 		}
 		this.markStale(removed);
+		this.moveTrackedBookmarks(entry, moved);
 		this.captureTrackedBookmarks(entry);
 
 		if (this.hasBookmarksSharingLine(entry)) {
@@ -388,6 +395,31 @@ export class CodeBookmarksService extends Disposable implements ICodeBookmarksSe
 				anchor: captureModelAnchor(entry.model, lineNumber)
 			});
 		}
+	}
+
+	/**
+	 * Moves the decorations of bookmarks to the lines their content went to.
+	 */
+	private moveTrackedBookmarks(entry: ITrackedModel, moved: ReadonlyMap<string, number>): void {
+		const decorations: { readonly id: string; readonly decorationId: string; readonly decoration: IModelDeltaDecoration }[] = [];
+		for (const [id, lineNumber] of moved) {
+			const tracked = entry.bookmarks.get(id);
+			const bookmark = this._bookmarks.find(candidate => candidate.id === id);
+			if (tracked && bookmark) {
+				decorations.push({ id, decorationId: tracked.decorationId, decoration: { range: new Range(lineNumber, 1, lineNumber, 1), options: createDecorationOptions(bookmark) } });
+			}
+		}
+		if (decorations.length === 0) {
+			return;
+		}
+
+		const decorationIds = entry.model.deltaDecorations(decorations.map(({ decorationId }) => decorationId), decorations.map(({ decoration }) => decoration));
+		decorations.forEach(({ id }, index) => {
+			const tracked = entry.bookmarks.get(id);
+			if (tracked) {
+				entry.bookmarks.set(id, { ...tracked, decorationId: decorationIds[index], lineNumber: moved.get(id) ?? tracked.lineNumber });
+			}
+		});
 	}
 
 	/**

@@ -6,7 +6,7 @@
 import assert from 'assert';
 import { URI } from '../../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { captureBookmarkAnchor, findAdjacentBookmark, findBookmarkLine, groupBookmarksByFile, ICodeBookmark, isBookmarkLineRemoved, mergeDuplicateBookmarks } from '../../common/bookmarks.js';
+import { captureBookmarkAnchor, findAdjacentBookmark, findBookmarkLine, groupBookmarksByFile, ICodeBookmark, isBookmarkLineRemoved, mergeDuplicateBookmarks, resolveBookmarkLinesAfterEdit } from '../../common/bookmarks.js';
 
 suite('Code bookmarks', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -59,7 +59,7 @@ suite('Code bookmarks', () => {
 			clearTextOnly: edit(3, 1, 3, 6),
 			editInsideLine: edit(3, 2, 3, 4),
 			joinWithPreviousLine: edit(2, 6, 3, 1),
-			deleteStartOfLine: edit(3, 1, 4, 1, 'moved\n'),
+			replaceLineWithOtherLines: edit(3, 1, 4, 1, 'moved\n'),
 			typeNewLine: edit(3, 3, 3, 3, '\n'),
 			otherLine: edit(5, 1, 6, 1)
 		}, {
@@ -70,7 +70,7 @@ suite('Code bookmarks', () => {
 			clearTextOnly: false,
 			editInsideLine: false,
 			joinWithPreviousLine: false,
-			deleteStartOfLine: false,
+			replaceLineWithOtherLines: true,
 			typeNewLine: false,
 			otherLine: false
 		});
@@ -91,6 +91,32 @@ suite('Code bookmarks', () => {
 			deleteEmptyLine: true,
 			backspaceOnEmptyLine: true
 		});
+	});
+
+	test('lets a line that an edit inserted once be followed by one bookmark only', () => {
+		// Lines 1 to 3 are replaced by two lines, of which only one has the text of the two bookmarked lines.
+		const after = ['a', '}'];
+		const text = { getLineCount: () => after.length, getLineContent: (lineNumber: number) => after[lineNumber - 1] };
+		const bookmark = (id: string, lineNumber: number) => ({ id, lineNumber, maxColumn: 2, lineText: '}' });
+
+		const resolutions = resolveBookmarkLinesAfterEdit(
+			[{ range: { startLineNumber: 1, startColumn: 1, endLineNumber: 3, endColumn: 2 }, text: after.join('\n') }],
+			[bookmark('second', 2), bookmark('first', 1)],
+			text);
+
+		assert.deepStrictEqual([...resolutions], [['first', { kind: 'moved', lineNumber: 2 }], ['second', { kind: 'removed' }]]);
+	});
+
+	test('does not look for the text of a line that an edit merely changed', () => {
+		const after = ['alpha', 'beta changed', 'gamma'];
+		const text = { getLineCount: () => after.length, getLineContent: (lineNumber: number) => after[lineNumber - 1] };
+
+		const resolutions = resolveBookmarkLinesAfterEdit(
+			[{ range: { startLineNumber: 2, startColumn: 1, endLineNumber: 2, endColumn: 5 }, text: 'beta changed' }],
+			[{ id: 'a', lineNumber: 2, maxColumn: 5, lineText: 'beta' }],
+			text);
+
+		assert.deepStrictEqual([...resolutions], []);
 	});
 
 	test('merges bookmarks that share a line and keeps their notes', () => {
