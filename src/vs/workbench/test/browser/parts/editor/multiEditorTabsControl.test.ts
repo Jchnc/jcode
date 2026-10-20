@@ -46,10 +46,12 @@ suite('MultiEditorTabsControl', () => {
 	let groupView: IEditorGroupView;
 	let groupsView: IEditorGroupsView;
 	let editorPartsView: IEditorPartsView;
+	let openedEditors: EditorInput[];
 
 	setup(() => {
 		disposables = new DisposableStore();
 		partOptions = { ...DEFAULT_EDITOR_PART_OPTIONS };
+		openedEditors = [];
 
 		// The tabs control resolves the shared modifier key emitter on creation,
 		// so dispose it again to keep each test independent of the Alt state that
@@ -90,6 +92,7 @@ suite('MultiEditorTabsControl', () => {
 			override renameTabGroup(groupId: string, name: string) { model.renameTabGroup(groupId, name); }
 			override recolorTabGroup(groupId: string, color: string) { model.recolorTabGroup(groupId, color); }
 			override setTabGroupCollapsed(groupId: string, collapsed: boolean) { model.setTabGroupCollapsed(groupId, collapsed); }
+			override async openEditor(editor: EditorInput) { openedEditors.push(editor); return undefined; }
 			override setTabGroupIcon(groupId: string, icon: string | undefined) { model.setTabGroupIcon(groupId, icon); }
 			override setTabGroupSaved(groupId: string, saved: boolean) { model.setTabGroupSaved(groupId, saved); }
 			override setTabGroupLocked(groupId: string, locked: boolean) { model.setTabGroupLocked(groupId, locked); }
@@ -275,20 +278,20 @@ suite('MultiEditorTabsControl', () => {
 
 		assert.deepStrictEqual({ initial, unsaved, manyUnsaved, saved, otherHeaderReused: tabGroupHeaders()[1] === otherHeader && otherHeader.querySelector('.tab-group-count') === otherHeaderCount }, {
 			initial: [
-				{ name: 'First', count: '2', unsaved: null, label: 'First, 2 tabs' },
-				{ name: 'Second', count: '2', unsaved: null, label: 'Second, 2 tabs' }
+				{ name: 'First', count: '2', unsaved: null, label: 'First, expanded, 2 tabs' },
+				{ name: 'Second', count: '2', unsaved: null, label: 'Second, expanded, 2 tabs' }
 			],
 			unsaved: [
-				{ name: 'First', count: '2', unsaved: '1 unsaved tab', label: 'First, 2 tabs, 1 unsaved' },
-				{ name: 'Second', count: '2', unsaved: null, label: 'Second, 2 tabs' }
+				{ name: 'First', count: '2', unsaved: '1 unsaved tab', label: 'First, expanded, 2 tabs, 1 unsaved' },
+				{ name: 'Second', count: '2', unsaved: null, label: 'Second, expanded, 2 tabs' }
 			],
 			manyUnsaved: [
-				{ name: 'First', count: '2', unsaved: '2 unsaved tabs', label: 'First, 2 tabs, 2 unsaved' },
-				{ name: 'Second', count: '2', unsaved: null, label: 'Second, 2 tabs' }
+				{ name: 'First', count: '2', unsaved: '2 unsaved tabs', label: 'First, expanded, 2 tabs, 2 unsaved' },
+				{ name: 'Second', count: '2', unsaved: null, label: 'Second, expanded, 2 tabs' }
 			],
 			saved: [
-				{ name: 'First', count: '2', unsaved: null, label: 'First, 2 tabs' },
-				{ name: 'Second', count: '2', unsaved: null, label: 'Second, 2 tabs' }
+				{ name: 'First', count: '2', unsaved: null, label: 'First, expanded, 2 tabs' },
+				{ name: 'Second', count: '2', unsaved: null, label: 'Second, expanded, 2 tabs' }
 			],
 			otherHeaderReused: true
 		});
@@ -598,6 +601,84 @@ suite('MultiEditorTabsControl', () => {
 		const collapsed = describeMotion();
 
 		assert.deepStrictEqual(collapsed, { displayed: false, tabTransition: '0s', headerTransition: '0s' });
+	});
+
+	test('tab group headers show the same details as vertical tab group headers', () => {
+		const [first, second] = openNamedEditors(['a.ts', 'b.ts']);
+		const tabGroup = model.createTabGroup([first, second], 'Work', 'blue');
+		assert.ok(tabGroup);
+		model.setTabGroupSaved(tabGroup.id, true);
+		model.setTabGroupLocked(tabGroup.id, true);
+
+		// An editor that is being saved no longer counts as unsaved
+		first.setDirty();
+		second.setDirty();
+		second.isSaving = () => true;
+		control.updateEditorDirty(first);
+		control.updateEditorDirty(second);
+
+		const header = tabGroupHeaders()[0];
+		const twistie = header.querySelector('.tab-group-twistie');
+		const describeHeader = () => ({
+			sameTwistie: header.querySelector('.tab-group-twistie') === twistie,
+			twistieHidden: twistie?.getAttribute('aria-hidden'),
+			saved: !!header.querySelector('.tab-group-saved'),
+			locked: !!header.querySelector('.tab-group-lock'),
+			unsaved: header.querySelector('.tab-group-dirty-indicator')?.getAttribute('title'),
+			count: header.querySelector('.tab-group-count')?.textContent,
+			expanded: header.getAttribute('aria-expanded'),
+			label: header.getAttribute('aria-label'),
+			title: header.title
+		});
+
+		const expanded = describeHeader();
+		model.setTabGroupCollapsed(tabGroup.id, true);
+		const collapsed = describeHeader();
+
+		const common = { sameTwistie: true, twistieHidden: 'true', saved: true, locked: true, unsaved: '1 unsaved tab', count: '2', title: 'Work (2 tabs, 1 unsaved, saved, locked)' };
+		assert.deepStrictEqual({ expanded, collapsed }, {
+			expanded: { ...common, expanded: 'true', label: 'Work, expanded, 2 tabs, 1 unsaved, saved, locked' },
+			collapsed: { ...common, expanded: 'false', label: 'Work, collapsed, 2 tabs, 1 unsaved, saved, locked' }
+		});
+	});
+
+	test('keyboard and wheel navigation skip the tabs that a collapsed tab group hides', () => {
+		const [, second, third] = openNamedEditors(['a.ts', 'b.ts', 'c.ts', 'd.ts']);
+		const tabGroup = model.createTabGroup([second, third], 'Work', 'blue');
+		assert.ok(tabGroup);
+		model.setTabGroupCollapsed(tabGroup.id, true);
+
+		const tabs = Array.from(container.querySelectorAll<HTMLElement>('.tabs-container > .tab'));
+		const navigate = (tab: HTMLElement, keyCode: number) => {
+			openedEditors = [];
+			tab.dispatchEvent(new KeyboardEvent(EventType.KEY_UP, { keyCode, bubbles: true, cancelable: true }));
+			return openedEditors.map(editor => editor.getName());
+		};
+		const wheel = (deltaY: number) => {
+			openedEditors = [];
+			container.querySelector('.tabs-container')!.dispatchEvent(new WheelEvent(EventType.MOUSE_WHEEL, { deltaY, shiftKey: true, bubbles: true, cancelable: true }));
+			return openedEditors.map(editor => editor.getName());
+		};
+
+		assert.deepStrictEqual({
+			strip: describeTabStrip(),
+			arrowLeftFromLast: navigate(tabs[3], 37),
+			arrowRightFromFirst: navigate(tabs[0], 39),
+			endFromFirst: navigate(tabs[0], 35),
+			homeFromLast: navigate(tabs[3], 36),
+			arrowRightFromHidden: navigate(tabs[1], 39),
+			arrowLeftFromHidden: navigate(tabs[2], 37),
+			wheelUpFromLast: wheel(-10)
+		}, {
+			strip: ['a.ts', '[Work]', 'b.ts (hidden)', 'c.ts (hidden)', 'd.ts'],
+			arrowLeftFromLast: ['a.ts'],
+			arrowRightFromFirst: ['d.ts'],
+			endFromFirst: ['d.ts'],
+			homeFromLast: ['a.ts'],
+			arrowRightFromHidden: ['d.ts'],
+			arrowLeftFromHidden: ['a.ts'],
+			wheelUpFromLast: ['a.ts']
+		});
 	});
 
 	function connectedGroup(): HTMLElement {

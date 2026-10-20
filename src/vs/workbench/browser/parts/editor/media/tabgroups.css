@@ -79,6 +79,27 @@
 	display: none;
 }
 
+/* The twistie shows whether the group is expanded and turns as it collapses and expands. */
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header > .tab-group-twistie {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+	color: inherit;
+	font-size: var(--vscode-fontSize-label3);
+	opacity: 0.72;
+	transition: transform 160ms cubic-bezier(0.2, 0, 0, 1), opacity 120ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header:hover > .tab-group-twistie,
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header:focus-visible > .tab-group-twistie {
+	opacity: 1;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header.collapsed > .tab-group-twistie {
+	transform: rotate(-90deg);
+}
+
 .monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header > .tab-group-icon {
 	font-size: var(--vscode-fontSize-label1);
 	color: inherit;
@@ -408,6 +429,7 @@
 /* Reduced motion. These selectors outrank the rules that declare the transitions above. */
 .monaco-workbench.monaco-reduce-motion .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header,
 .monaco-workbench.monaco-reduce-motion .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header > .tab-group-count,
+.monaco-workbench.monaco-reduce-motion .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header > .tab-group-twistie,
 .monaco-workbench.monaco-reduce-motion .part.editor > .content .editor-group-container > .title .tabs-container > .tab.in-tab-group:not(.active):not(.tab-group-collapsed),
 .monaco-workbench.monaco-reduce-motion .part.editor > .content .editor-group-container > .title .tabs-container > .tab.tab-group-collapsed {
 	transition: none;

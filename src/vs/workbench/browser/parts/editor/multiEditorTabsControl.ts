@@ -675,7 +675,8 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 				return;
 			}
 
-			const nextEditor = this.groupView.getEditorByIndex(this.groupView.getIndexOfEditor(activeEditor) + tabSwitchDirection);
+			const visibleEditors = this.getVisibleEditors();
+			const nextEditor = visibleEditors[visibleEditors.indexOf(activeEditor) + tabSwitchDirection];
 			if (!nextEditor) {
 				return;
 			}
@@ -1318,18 +1319,23 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 
 			// Navigate in editors
 			else if ([KeyCode.LeftArrow, KeyCode.RightArrow, KeyCode.UpArrow, KeyCode.DownArrow, KeyCode.Home, KeyCode.End].some(kb => event.equals(kb))) {
-				let editorIndex = this.toEditorIndex(tabIndex);
+				// Skip the tabs that a collapsed tab group hides. Search from the position of
+				// this tab rather than its visible index, because the tab can be on its way out
+				// of a group that was just collapsed.
+				const editors = this.groupView.getEditors(EditorsOrder.SEQUENTIAL);
+				const editorIndex = this.toEditorIndex(tabIndex);
+				const isVisible = (editor: EditorInput) => !this.isHiddenByCollapsedTabGroup(editor);
+				let target: EditorInput | undefined;
 				if (event.equals(KeyCode.LeftArrow) || event.equals(KeyCode.UpArrow)) {
-					editorIndex = editorIndex - 1;
+					target = editors.slice(0, editorIndex).findLast(isVisible);
 				} else if (event.equals(KeyCode.RightArrow) || event.equals(KeyCode.DownArrow)) {
-					editorIndex = editorIndex + 1;
+					target = editors.slice(editorIndex + 1).find(isVisible);
 				} else if (event.equals(KeyCode.Home)) {
-					editorIndex = 0;
+					target = editors.find(isVisible);
 				} else {
-					editorIndex = this.groupView.count - 1;
+					target = editors.findLast(isVisible);
 				}
 
-				const target = this.groupView.getEditorByIndex(editorIndex);
 				if (target) {
 					handled = true;
 					this.groupView.openEditor(target, { preserveFocus: true }, { focusTabControl: true });
@@ -1969,8 +1975,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		tabContainer.classList.toggle('in-tab-group', !!tabGroup);
 		if (tabGroup) {
 			tabContainer.style.setProperty('--tab-group-color', getEditorTabGroupColor(tabGroup.color));
-			const isHiddenByCollapse = tabGroup.collapsed && !this.tabsModel.isActive(editor);
-			tabContainer.classList.toggle('tab-group-collapsed', isHiddenByCollapse);
+			tabContainer.classList.toggle('tab-group-collapsed', this.isHiddenByCollapsedTabGroup(editor));
 
 			const previousEditor = tabIndex > 0 ? this.tabsModel.getEditorByIndex(tabIndex - 1) : undefined;
 			const nextEditor = this.tabsModel.getEditorByIndex(tabIndex + 1);
@@ -2904,6 +2909,21 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		this.renderedTabGroupState = this.getTabGroupRenderState();
 	}
 
+	/**
+	 * Whether the tab of the editor is hidden because its tab group is collapsed. The
+	 * active editor of a collapsed tab group stays visible as its only visible member.
+	 */
+	private isHiddenByCollapsedTabGroup(editor: EditorInput): boolean {
+		return this.groupsView.partOptions.tabGroups.enabled && !!this.groupView.getTabGroupForEditor(editor)?.collapsed && !this.groupView.isActive(editor);
+	}
+
+	/**
+	 * The editors of the group, from all tab rows, that have a visible tab.
+	 */
+	private getVisibleEditors(): EditorInput[] {
+		return this.groupView.getEditors(EditorsOrder.SEQUENTIAL).filter(editor => !this.isHiddenByCollapsedTabGroup(editor));
+	}
+
 	private getTabGroupStats(onlyGroupId?: string): Map<string, ITabGroupStats> {
 		const stats = new Map<string, ITabGroupStats>();
 		this.tabsModel.getEditors(EditorsOrder.SEQUENTIAL).forEach((editor, index) => {
@@ -2919,7 +2939,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 			}
 
 			groupStats.count++;
-			if (editor.isDirty()) {
+			if (editor.isDirty() && !editor.isSaving()) {
 				groupStats.dirtyCount++;
 			}
 		});
@@ -3036,6 +3056,13 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		header.setAttribute('role', 'button');
 		header.tabIndex = 0;
 
+		// Unlike the other contents of the header, the twistie is created once so that
+		// it can turn when the group expands and collapses
+		const twistie = $('span.tab-group-twistie');
+		twistie.classList.add(...ThemeIcon.asClassNameArray(Codicon.chevronDown));
+		twistie.setAttribute('aria-hidden', 'true');
+		header.appendChild(twistie);
+
 		this.tabGroupHeaders.set(groupId, { element: header, disposables: this.registerTabGroupHeaderListeners(header, groupId) });
 
 		return header;
@@ -3046,7 +3073,11 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 	 * header element and its listeners stay alive across updates.
 	 */
 	private renderTabGroupHeader(header: HTMLElement, group: IEditorTabGroup, { count, dirtyCount }: ITabGroupStats): void {
-		clearNode(header);
+		for (const child of Array.from(header.children)) {
+			if (!child.classList.contains('tab-group-twistie')) {
+				child.remove();
+			}
+		}
 		header.setAttribute('draggable', String(!group.locked));
 		header.classList.toggle('collapsed', group.collapsed);
 		header.classList.toggle('saved', group.saved);
@@ -3057,6 +3088,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		if (group.icon) {
 			const icon = $('span.tab-group-icon');
 			icon.classList.add('codicon', `codicon-${group.icon}`);
+			icon.setAttribute('aria-hidden', 'true');
 			header.appendChild(icon);
 		}
 
@@ -3104,7 +3136,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		} else if (group.locked) {
 			accessibilityStatus = localize('tabGroup.statusLocked', "{0}, locked", status);
 		}
-		header.setAttribute('aria-label', group.collapsed ? localize('tabGroup.collapsedAria', "{0}, collapsed, {1}", label, accessibilityStatus) : localize('tabGroup.expandedAria', "{0}, {1}", label, accessibilityStatus));
+		header.setAttribute('aria-label', group.collapsed ? localize('tabGroup.collapsedAria', "{0}, collapsed, {1}", label, accessibilityStatus) : localize('tabGroup.expandedAria', "{0}, expanded, {1}", label, accessibilityStatus));
 		header.title = localize('tabGroup.headerTitle', "{0} ({1})", label, accessibilityStatus);
 	}
 
@@ -3134,11 +3166,21 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 			}
 		}));
 
-		disposables.add(addDisposableListener(header, EventType.CONTEXT_MENU, e => {
+		const showContextMenu = (e: Event) => {
 			EventHelper.stop(e, true);
 			const group = getGroup();
 			if (group) {
 				new TabGroupContextMenu(this.groupView, this.editorPartsView, this.contextViewService, this.editorService, this.historyService, this.tabsContainer ?? header.parentElement ?? header).show(group, header, e);
+			}
+		};
+
+		disposables.add(addDisposableListener(header, EventType.CONTEXT_MENU, e => showContextMenu(e)));
+
+		// Context menu on Shift+F10, like tabs
+		disposables.add(addDisposableListener(header, EventType.KEY_DOWN, e => {
+			const event = new StandardKeyboardEvent(e);
+			if (event.shiftKey && event.keyCode === KeyCode.F10) {
+				showContextMenu(e);
 			}
 		}));
 
