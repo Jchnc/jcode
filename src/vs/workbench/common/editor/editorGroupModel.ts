@@ -1485,11 +1485,17 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 		}
 
 		this.pushTabGroupUndoState();
+
+		// Editors next to the group (for example editors that were just dropped there)
+		// join it where they are. Others go to the end of the group in their order.
 		const selected = new Set(candidates);
-		const remainingEditors = this.editors.filter(editor => !selected.has(editor));
-		const lastGroupIndex = remainingEditors.findLastIndex(editor => this.editorTabGroups.get(editor) === groupId);
-		remainingEditors.splice(lastGroupIndex + 1, 0, ...candidates);
-		this.editors.splice(0, this.editors.length, ...remainingEditors);
+		const memberIndexes = this.editors.flatMap((editor, index) => selected.has(editor) || this.editorTabGroups.get(editor) === groupId ? [index] : []);
+		if (memberIndexes[memberIndexes.length - 1] - memberIndexes[0] + 1 !== memberIndexes.length) {
+			const remainingEditors = this.editors.filter(editor => !selected.has(editor));
+			const lastGroupIndex = remainingEditors.findLastIndex(editor => this.editorTabGroups.get(editor) === groupId);
+			remainingEditors.splice(lastGroupIndex + 1, 0, ...candidates);
+			this.editors.splice(0, this.editors.length, ...remainingEditors);
+		}
 
 		const affectedGroups = new Set<IEditorTabGroup>();
 		for (const editor of candidates) {
@@ -1507,9 +1513,7 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 		}
 		this.pinTabGroupMembers(candidates);
 
-		for (const affectedGroup of affectedGroups) {
-			this.pruneTabGroup(affectedGroup.id);
-		}
+		this.notifyTabGroupMembershipChanged(affectedGroups);
 		this._onDidModelChange.fire({ kind: GroupModelChangeKind.TAB_GROUP_CHANGED, tabGroup: group });
 	}
 

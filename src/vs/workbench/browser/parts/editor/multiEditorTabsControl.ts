@@ -3353,7 +3353,10 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 							droppedEditors.push(editor);
 						}
 
-						targetEditorIndex++;
+						// The next editor goes right after this one. A tab group can place an editor elsewhere than
+						// requested (for example past a locked group), so continue from where it ended up.
+						const droppedEditorIndex = this.groupView.getIndexOfEditor(editor);
+						targetEditorIndex = droppedEditorIndex >= 0 ? droppedEditorIndex + 1 : targetEditorIndex + 1;
 					}
 
 					if (targetTabGroupId) {

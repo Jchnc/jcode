@@ -775,6 +775,70 @@ suite('EditorGroupModel', () => {
 			});
 		});
 
+		test('adding editors next to a tab group joins them where they are', () => {
+			const group = createEditorGroupModel();
+			const [, , c, d, e, f] = openEditors(group, 7);
+			group.createTabGroup([d, e], 'G');
+			const events = recordEvents(group);
+
+			group.addToTabGroup(group.tabGroups[0].id, [c]);
+			const afterAddingInFront = describeLayout(group);
+			group.addToTabGroup(group.tabGroups[0].id, [f]);
+
+			assert.deepStrictEqual({ afterAddingInFront, afterAddingBehind: describeLayout(group), events, violations: findTabGroupViolations(group) }, {
+				afterAddingInFront: ['a', 'b', 'c:G', 'd:G', 'e:G', 'f', 'g'],
+				afterAddingBehind: ['a', 'b', 'c:G', 'd:G', 'e:G', 'f:G', 'g'],
+				events: ['changed:G', 'changed:G'],
+				violations: []
+			});
+		});
+
+		test('adding several editors next to a tab group keeps their order', () => {
+			const group = createEditorGroupModel();
+			const [, b, c, d, e] = openEditors(group, 6);
+			group.createTabGroup([d], 'G');
+
+			// The order in which the editors are given does not matter: they stay where they are
+			group.addToTabGroup(group.tabGroups[0].id, [c, b, e]);
+
+			assert.deepStrictEqual({ layout: describeLayout(group), violations: findTabGroupViolations(group) }, {
+				layout: ['a', 'b:G', 'c:G', 'd:G', 'e:G', 'f'],
+				violations: []
+			});
+		});
+
+		test('adding editors that are not next to a tab group moves them to the end of the group in their order', () => {
+			const group = createEditorGroupModel();
+			const [a, b, c, d, , f, g] = openEditors(group, 7);
+			group.createTabGroup([c, d], 'G');
+
+			group.addToTabGroup(group.tabGroups[0].id, [g, a]);
+			const afterAddingFarEditors = describeLayout(group);
+			group.addToTabGroup(group.tabGroups[0].id, [f, b]);
+
+			assert.deepStrictEqual({ afterAddingFarEditors, afterAddingMixed: describeLayout(group), violations: findTabGroupViolations(group) }, {
+				afterAddingFarEditors: ['b', 'c:G', 'd:G', 'a:G', 'g:G', 'e', 'f'],
+				afterAddingMixed: ['c:G', 'd:G', 'a:G', 'g:G', 'b:G', 'f:G', 'e'],
+				violations: []
+			});
+		});
+
+		test('an editor next to a tab group that belongs to another tab group joins in place and leaves the other group', () => {
+			const group = createEditorGroupModel();
+			const [, b, c, d, e] = openEditors(group, 6);
+			group.createTabGroup([b, c], 'G');
+			group.createTabGroup([d, e], 'H');
+			const events = recordEvents(group);
+
+			group.addToTabGroup(group.tabGroups[0].id, [d]);
+
+			assert.deepStrictEqual({ layout: describeLayout(group), events, violations: findTabGroupViolations(group) }, {
+				layout: ['a', 'b:G', 'c:G', 'd:G', 'e:H', 'f'],
+				events: ['changed:H', 'changed:G'],
+				violations: []
+			});
+		});
+
 		test('moving an editor in between the members of a tab group makes it join the group', () => {
 			const group = createEditorGroupModel();
 			const [a, , , , e] = openEditors(group, 5);

@@ -24,6 +24,9 @@ import { MultiRowEditorControl } from '../../../../browser/parts/editor/multiRow
 import { EditorInputCapabilities, EditorsOrder, IEditorPartOptions, Verbosity } from '../../../../common/editor.js';
 import { EditorGroupModel } from '../../../../common/editor/editorGroupModel.js';
 import { EditorInput } from '../../../../common/editor/editorInput.js';
+import { DraggedEditorIdentifier } from '../../../../browser/dnd.js';
+import { LocalSelectionTransfer } from '../../../../../platform/dnd/browser/dnd.js';
+import { IEditorOptions } from '../../../../../platform/editor/common/editor.js';
 import { DecorationsService } from '../../../../services/decorations/browser/decorationsService.js';
 import { IDecorationsService } from '../../../../services/decorations/common/decorations.js';
 import { IHostService } from '../../../../services/host/browser/host.js';
@@ -89,6 +92,12 @@ suite('MultiEditorTabsControl', () => {
 			override createTabGroup(editors: EditorInput[], name?: string, color?: string) { return model.createTabGroup(editors, name, color); }
 			override dissolveTabGroup(groupId: string) { model.dissolveTabGroup(groupId); }
 			override addToTabGroup(groupId: string, editors: EditorInput[]) { model.addToTabGroup(groupId, editors); }
+			override removeFromTabGroup(editors: EditorInput[]) { model.removeFromTabGroup(editors); }
+			override moveEditor(editor: EditorInput, target: IEditorGroupView, options?: IEditorOptions) {
+				model.moveEditor(editor, options?.index ?? model.indexOf(editor));
+				return true;
+			}
+			override focus() { }
 			override renameTabGroup(groupId: string, name: string) { model.renameTabGroup(groupId, name); }
 			override recolorTabGroup(groupId: string, color: string) { model.recolorTabGroup(groupId, color); }
 			override setTabGroupCollapsed(groupId: string, collapsed: boolean) { model.setTabGroupCollapsed(groupId, collapsed); }
@@ -297,6 +306,16 @@ suite('MultiEditorTabsControl', () => {
 		});
 	});
 
+	/** Drops the editors on the tab at the given index (its left half) like a user would do by dragging them there. */
+	function dropEditorsOnTab(editors: EditorInput[], tabIndex: number): void {
+		const transfer = LocalSelectionTransfer.getInstance<DraggedEditorIdentifier>();
+		transfer.setData(editors.map(editor => new DraggedEditorIdentifier({ editor, groupId: groupView.id })), DraggedEditorIdentifier.prototype);
+
+		const tab = container.querySelectorAll<HTMLElement>('.tabs-container > .tab')[tabIndex];
+		tab.dispatchEvent(new DragEvent(EventType.DROP, { bubbles: true, cancelable: true, clientX: tab.getBoundingClientRect().left + 1 }));
+		transfer.clearData(DraggedEditorIdentifier.prototype);
+	}
+
 	function describeTabStrip(): string[] {
 		return Array.from(container.querySelectorAll<HTMLElement>('.tabs-container > .tab, .tabs-container > .tab-group-header')).map(element => {
 			if (element.classList.contains('tab-group-header')) {
@@ -306,6 +325,21 @@ suite('MultiEditorTabsControl', () => {
 			return `${element.querySelector('.label-name')?.textContent}${element.classList.contains('tab-group-collapsed') ? ' (hidden)' : ''}`;
 		});
 	}
+
+	test('dropping several editors on a locked tab group keeps their order', () => {
+		const [a, b, first, second, third] = openNamedEditors(['a.ts', 'b.ts', 'first.ts', 'second.ts', 'third.ts']);
+		const tabGroup = model.createTabGroup([first, second, third], 'Locked', 'blue');
+		model.setTabGroupLocked(tabGroup!.id, true);
+
+		dropEditorsOnTab([a, b], 3);
+		const afterMovingRight = model.getEditors(EditorsOrder.SEQUENTIAL).map(editor => editor.getName());
+		dropEditorsOnTab([b, a], 1);
+
+		assert.deepStrictEqual({ afterMovingRight, afterMovingLeft: model.getEditors(EditorsOrder.SEQUENTIAL).map(editor => editor.getName()) }, {
+			afterMovingRight: ['first.ts', 'second.ts', 'third.ts', 'a.ts', 'b.ts'],
+			afterMovingLeft: ['b.ts', 'a.ts', 'first.ts', 'second.ts', 'third.ts']
+		});
+	});
 
 	test('tab group changes update the existing tabs once per burst of events', () => {
 		const [first, second, , fourth] = openNamedEditors(['a.ts', 'b.ts', 'c.ts', 'd.ts']);

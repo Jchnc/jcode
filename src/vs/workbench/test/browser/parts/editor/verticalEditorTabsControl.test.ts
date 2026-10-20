@@ -14,6 +14,9 @@ import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/tes
 import { TreeViewsDnDService } from '../../../../../editor/common/services/treeViewsDnd.js';
 import { ITreeViewsDnDService } from '../../../../../editor/common/services/treeViewsDndService.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
+import { LocalSelectionTransfer } from '../../../../../platform/dnd/browser/dnd.js';
+import { IEditorOptions } from '../../../../../platform/editor/common/editor.js';
+import { DraggedEditorIdentifier } from '../../../../browser/dnd.js';
 import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { NullHoverService } from '../../../../../platform/hover/test/browser/nullHoverService.js';
 import { SyncDescriptor } from '../../../../../platform/instantiation/common/descriptors.js';
@@ -127,6 +130,13 @@ suite('VerticalEditorTabsControl', () => {
 			override isSticky(editorOrIndex: EditorInput | number) { return model.isSticky(editorOrIndex); }
 			override isSelected(editorOrIndex: EditorInput | number) { return model.isSelected(editorOrIndex); }
 			override setTabGroupCollapsed(groupId: string, collapsed: boolean) { model.setTabGroupCollapsed(groupId, collapsed); }
+			override addToTabGroup(groupId: string, editors: EditorInput[]) { model.addToTabGroup(groupId, editors); }
+			override removeFromTabGroup(editors: EditorInput[]) { model.removeFromTabGroup(editors); }
+			override moveEditor(editor: EditorInput, target: IEditorGroupView, options?: IEditorOptions) {
+				model.moveEditor(editor, options?.index ?? model.indexOf(editor));
+				return true;
+			}
+			override focus() { }
 			override createEditorActions() { return { actions: { primary: [], secondary: [] }, onDidChange: Event.None }; }
 			override async openEditor(editor: EditorInput) {
 				openedEditors.push(editor);
@@ -339,6 +349,23 @@ suite('VerticalEditorTabsControl', () => {
 			headerKept: true,
 			focused: true
 		});
+	});
+
+	test('dropping editors before the first tab of a tab group joins them to the group in front, in their order', () => {
+		const editors = model.getEditors(EditorsOrder.SEQUENTIAL);
+		model.createTabGroup(editors.slice(3, 5), 'Work', 'blue');
+		const dropped = [editors[8], editors[7]];
+		layoutControl(1000);
+
+		const transfer = LocalSelectionTransfer.getInstance<DraggedEditorIdentifier>();
+		transfer.setData(dropped.map(editor => new DraggedEditorIdentifier({ editor, groupId: groupView.id })), DraggedEditorIdentifier.prototype);
+		const row = rows()[3];
+		row.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, clientY: row.getBoundingClientRect().top }));
+		transfer.clearData(DraggedEditorIdentifier.prototype);
+
+		assert.deepStrictEqual(model.getEditors(EditorsOrder.SEQUENTIAL).map(editor => `${(editor as TestEditorInput).getName()}${model.getTabGroupForEditor(editor) ? ':Work' : ''}`).slice(2, 9), [
+			'file2.txt', 'file8.txt:Work', 'file7.txt:Work', 'file3.txt:Work', 'file4.txt:Work', 'file5.txt', 'file6.txt'
+		]);
 	});
 
 	test('toggling a tab group keeps focus on its header', () => {
