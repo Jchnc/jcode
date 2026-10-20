@@ -236,6 +236,16 @@ function generateTabGroupId(): string {
  */
 const LEGACY_TAB_GROUP_ID = /^editor\.tabGroup\.\d+$/;
 
+/**
+ * State of the tab groups to go back to when undoing a tab group change. A snapshot
+ * only holds on to editors that are still open: see `releaseFromTabGroupUndoStack`.
+ */
+interface ITabGroupUndoSnapshot {
+	readonly groups: readonly IEditorTabGroup[];
+	readonly membership: Map<EditorInput, string>;
+	readonly editors: EditorInput[];
+}
+
 export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 
 	private static IDS = 0;
@@ -269,7 +279,7 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 
 	private _tabGroups: IEditorTabGroup[] = [];						// ordered tab groups
 	private readonly editorTabGroups = new Map<EditorInput, string>();	// editor -> tab group id
-	private readonly tabGroupUndoStack: { groups: IEditorTabGroup[]; membership: Map<EditorInput, string>; editors: EditorInput[] }[] = [];
+	private readonly tabGroupUndoStack: ITabGroupUndoSnapshot[] = [];
 
 	private editorOpenPositioning: ('left' | 'right' | 'first' | 'last') | undefined;
 	private focusRecentEditorAfterClose: boolean | undefined;
@@ -657,6 +667,9 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 			this.editorTabGroups.delete(editor);
 			this.pruneTabGroup(tabGroupId);
 		}
+
+		// Snapshots to undo tab group changes must not retain the closed editor
+		this.releaseFromTabGroupUndoStack(editor);
 
 		// Remove from arrays
 		this.splice(index, true);
@@ -1581,25 +1594,49 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 			return false;
 		}
 
+		// Sticky editors stay in front and out of tab groups no matter what the snapshot says,
+		// and editors that were opened since the snapshot go after the ones it knows about.
+		const stickyEditors = this.editors.slice(0, this.sticky + 1);
+		const unrestorableEditors = new Set(stickyEditors);
 		const currentEditors = new Set(this.editors);
-		const restoredOrder = snapshot.editors.filter(editor => currentEditors.has(editor));
-		for (const editor of this.editors) {
-			if (!restoredOrder.includes(editor)) {
-				restoredOrder.push(editor);
-			}
-		}
-		this.editors = restoredOrder;
-		this._tabGroups = snapshot.groups.map(group => ({ ...group }));
+		const restoredEditors = snapshot.editors.filter(editor => currentEditors.has(editor) && !unrestorableEditors.has(editor));
+		const restoredEditorsSet = new Set(restoredEditors);
+		this.editors = [
+			...stickyEditors,
+			...restoredEditors,
+			...this.editors.filter(editor => !unrestorableEditors.has(editor) && !restoredEditorsSet.has(editor))
+		];
+
 		this.editorTabGroups.clear();
-		const restoredGroupIds = new Set(this._tabGroups.map(group => group.id));
+		const restoredGroupIds = new Set(snapshot.groups.map(group => group.id));
 		for (const [editor, groupId] of snapshot.membership) {
-			if (currentEditors.has(editor) && restoredGroupIds.has(groupId)) {
+			if (restoredEditorsSet.has(editor) && restoredGroupIds.has(groupId)) {
 				this.editorTabGroups.set(editor, groupId);
 			}
 		}
 
+		// Tab groups whose editors were all closed in the meantime do not come back
+		const groupIdsWithMembers = new Set(this.editorTabGroups.values());
+		this._tabGroups = snapshot.groups.filter(group => groupIdsWithMembers.has(group.id)).map(group => ({ ...group }));
+		this.pinTabGroupMembers(Array.from(this.editorTabGroups.keys()));
+
 		this._onDidModelChange.fire({ kind: GroupModelChangeKind.TAB_GROUP_CHANGED });
 		return true;
+	}
+
+	/**
+	 * Closed editors are of no use for undoing tab group changes and holding on
+	 * to them would keep disposed editors alive.
+	 */
+	private releaseFromTabGroupUndoStack(editor: EditorInput): void {
+		for (const snapshot of this.tabGroupUndoStack) {
+			snapshot.membership.delete(editor);
+
+			const index = snapshot.editors.indexOf(editor);
+			if (index >= 0) {
+				snapshot.editors.splice(index, 1);
+			}
+		}
 	}
 
 	private pushTabGroupUndoState(): void {
@@ -1983,6 +2020,7 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 		this.transient.clear();
 		this.editorTabGroups.clear();
 		this._tabGroups = [];
+		this.tabGroupUndoStack.length = 0;
 
 		super.dispose();
 	}

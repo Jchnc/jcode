@@ -1074,6 +1074,63 @@ suite('EditorGroupModel', () => {
 			});
 		});
 
+		test('undoing a tab group change does not bring back an editor that was closed and opened again', () => {
+			const group = createEditorGroupModel();
+			const [, b, c] = openEditors(group, 4);
+			const tabGroup = group.createTabGroup([b, c], 'G')!;
+			group.dissolveTabGroup(tabGroup.id);
+
+			group.closeEditor(b);
+			group.openEditor(b, { pinned: true, index: 3 });
+			const undone = group.undoLastTabGroupAction();
+
+			assert.deepStrictEqual({ undone, layout: describeLayout(group), canUndoAgain: group.canUndoTabGroupAction }, {
+				undone: true,
+				layout: ['a', 'c:G', 'd', 'b'],
+				canUndoAgain: true
+			});
+		});
+
+		test('undoing a tab group change does not bring back a tab group whose editors were all closed', () => {
+			const group = createEditorGroupModel();
+			const [a, b] = openEditors(group, 3);
+			const tabGroup = group.createTabGroup([a, b], 'G')!;
+			group.dissolveTabGroup(tabGroup.id);
+
+			group.closeEditor(a);
+			group.closeEditor(b);
+			group.undoLastTabGroupAction();
+
+			assert.deepStrictEqual({ layout: describeLayout(group), tabGroups: group.tabGroups.length }, { layout: ['c'], tabGroups: 0 });
+		});
+
+		test('undoing a tab group change keeps sticky editors in front and ungrouped', () => {
+			const group = createEditorGroupModel();
+			const [, b, c] = openEditors(group, 4);
+			group.createTabGroup([b, c], 'G');
+			group.stick(c);
+
+			group.undoLastTabGroupAction();
+
+			assert.deepStrictEqual({ layout: describeLayout(group), stickyCount: group.stickyCount, sticky: group.isSticky(c), violations: findTabGroupViolations(group) }, {
+				layout: ['c', 'a', 'b', 'd'],
+				stickyCount: 1,
+				sticky: true,
+				violations: []
+			});
+		});
+
+		test('disposing the model clears the undo stack of tab group changes', () => {
+			const group = createEditorGroupModel();
+			const [a, b] = openEditors(group, 2);
+			group.createTabGroup([a, b], 'G');
+			const canUndoBefore = group.canUndoTabGroupAction;
+
+			group.dispose();
+
+			assert.deepStrictEqual({ canUndoBefore, canUndoAfter: group.canUndoTabGroupAction }, { canUndoBefore: true, canUndoAfter: false });
+		});
+
 		test('tab groups stay contiguous and free of sticky editors across random operations', () => {
 			const group = createEditorGroupModel();
 			const editors = openEditors(group, 8);
@@ -1088,7 +1145,7 @@ suite('EditorGroupModel', () => {
 			for (let step = 0; step < 500; step++) {
 				const editor = editors[random(editors.length)];
 				const tabGroups = group.tabGroups;
-				const operation = random(9);
+				const operation = random(10);
 				switch (operation) {
 					case 0:
 					case 1:
@@ -1119,6 +1176,9 @@ suite('EditorGroupModel', () => {
 						if (tabGroups.length > 0) {
 							group.moveTabGroup(tabGroups[random(tabGroups.length)].id, random(editors.length + 1));
 						}
+						break;
+					case 9:
+						group.undoLastTabGroupAction();
 						break;
 				}
 
