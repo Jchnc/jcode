@@ -5,105 +5,16 @@
 
 import './registerVscodeStub';
 import assert from 'node:assert';
-import { EventEmitter } from 'node:events';
 import { describe, test } from 'node:test';
-import type { SFTPWrapper } from 'ssh2';
-import { SftpConnections, type ConnectionStorage, type RemoteProfile, type SshClient } from '../connection';
+import { SftpConnections } from '../connection';
 import { ReconnectBackoff } from '../reconnectBackoff';
-
-const profile: RemoteProfile = { id: 'a', name: 'Production', host: 'prod.example.com', port: 22, username: 'deploy', root: '/srv', authentication: 'password' };
-
-/** A server that accepts or refuses connections on demand, and records how often it was tried. */
-class FakeServer {
-	up = true;
-	attempts = 0;
-	/** Called when a client starts connecting. */
-	onAttempt: () => void = () => undefined;
-	/** When set, attempts wait until {@link settle} is called. */
-	hold = false;
-	private readonly waiting: (() => void)[] = [];
-	private readonly sessions: EventEmitter[] = [];
-
-	client(): SshClient {
-		return new FakeClient(this);
-	}
-
-	/** Starts an attempt, which ends right away unless the server is held. */
-	attempt(client: EventEmitter): void {
-		this.attempts++;
-		this.onAttempt();
-		const outcome = () => this.up ? client.emit('ready') : client.emit('error', Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:22'), { code: 'ECONNREFUSED' }));
-		if (this.hold) {
-			this.waiting.push(outcome);
-		} else {
-			setImmediate(outcome);
-		}
-	}
-
-	open(): EventEmitter {
-		const session = new EventEmitter();
-		this.sessions.push(session);
-		return session;
-	}
-
-	settle(): void {
-		for (const outcome of this.waiting.splice(0)) {
-			outcome();
-		}
-	}
-
-	/** Ends every live session the way a dropped network does. */
-	drop(): void {
-		for (const session of this.sessions.splice(0)) {
-			session.emit('close');
-		}
-	}
-}
-
-class FakeClient extends EventEmitter {
-	constructor(private readonly server: FakeServer) {
-		super();
-	}
-
-	connect(): this {
-		this.server.attempt(this);
-		return this;
-	}
-
-	sftp(callback: (error: Error | undefined, sftp: SFTPWrapper) => void): boolean {
-		// Connections only listen for the close of a session, so any emitter can stand in for one.
-		callback(undefined, this.server.open() as unknown as SFTPWrapper);
-		return true;
-	}
-
-	exec(): boolean {
-		return false;
-	}
-
-	destroy(): void { }
-}
-
-function createStorage(): ConnectionStorage {
-	const values = new Map<string, unknown>([['jcodeSftp.profiles', [profile]]]);
-	const secrets = new Map<string, string>([['jcodeSftp.credential.a', 'secret']]);
-	return {
-		globalState: {
-			get: <T>(key: string, fallback?: T): T => (values.has(key) ? values.get(key) : fallback) as T,
-			update: async (key: string, value: unknown) => { values.set(key, value); }
-		},
-		secrets: {
-			get: async key => secrets.get(key),
-			store: async (key, value) => { secrets.set(key, value); },
-			delete: async key => { secrets.delete(key); }
-		}
-	};
-}
+import { createStorage, FakeServer } from './fakeSsh';
 
 function create(): { connections: SftpConnections; server: FakeServer; advance(milliseconds: number): void; states: string[] } {
 	let now = 1_000_000;
 	const server = new FakeServer();
 	const backoff = new ReconnectBackoff({ baseDelay: 10_000, maxDelay: 60_000 }, () => now, () => 0.999999);
-	const connections = new SftpConnections(createStorage(), backoff, () => server.client());
+	const connections = new SftpConnections(createStorage(), { backoff, createClient: () => server.client() });
 	const states: string[] = [];
 	connections.onDidChangeState(id => states.push(connections.getState(id)));
 	return { connections, server, advance: milliseconds => { now += milliseconds; }, states };

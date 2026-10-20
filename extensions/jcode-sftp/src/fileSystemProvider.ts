@@ -9,7 +9,7 @@ import picomatch from 'picomatch';
 import { utils, type FileEntryWithStats, type SFTPWrapper, type Stats } from 'ssh2';
 import { commands, EventEmitter, FileChangeType, FileSystemError, FileSystemProvider, FileStat, FileType, l10n, Uri, window, workspace, type Disposable, type FileChangeEvent, type LogOutputChannel } from 'vscode';
 import { SftpConnections } from './connection';
-import { linkCountCommand, parseLinkCount, planOwnership } from './saveStrategy';
+import { planOwnership } from './saveStrategy';
 import { TreePoller, type PollLimits, type PollSource, type SnapshotEntry } from './treePoller';
 
 /** A watch request and the progress of its poller. */
@@ -216,9 +216,9 @@ export class SftpFileSystemProvider implements FileSystemProvider {
 		this.changes.fire([{ type: created ? FileChangeType.Created : FileChangeType.Changed, uri }]);
 	}
 
-	/** Reads the hard link count with `stat`, assuming a single link when the server cannot report it. */
+	/** Reads the hard link count, assuming a single link when the server cannot report it. */
 	private async hasMultipleLinks(authority: string, path: string): Promise<boolean> {
-		return (parseLinkCount(await this.connections.exec(authority, linkCountCommand(path))) ?? 1) > 1;
+		return (await this.connections.linkCount(authority, path) ?? 1) > 1;
 	}
 
 	/** Writes the content in chunks starting at the beginning of the file. */
@@ -367,7 +367,12 @@ export class SftpFileSystemProvider implements FileSystemProvider {
 				}
 				await operation<void>(callback => sftp.rmdir(path, callback));
 			};
-			await remove(uri.path);
+			try {
+				await remove(uri.path);
+			} finally {
+				// Deleting a file can leave another hard link to it with one link fewer.
+				this.connections.invalidateLinkCounts(uri.authority, uri.path);
+			}
 		});
 		this.changes.fire([{ type: FileChangeType.Deleted, uri }]);
 	}
@@ -385,7 +390,13 @@ export class SftpFileSystemProvider implements FileSystemProvider {
 			if (target && !options.overwrite) {
 				throw FileSystemError.FileExists(newUri);
 			}
-			await this.replace(sftp, oldUri.path, newUri.path, target);
+			try {
+				await this.replace(sftp, oldUri.path, newUri.path, target);
+			} finally {
+				// Both paths now lead to other files, which can have other link counts.
+				this.connections.invalidateLinkCounts(oldUri.authority, oldUri.path);
+				this.connections.invalidateLinkCounts(newUri.authority, newUri.path);
+			}
 		});
 		if (oldUri.path === newUri.path) { return; }
 		this.changes.fire([{ type: FileChangeType.Deleted, uri: oldUri }, { type: FileChangeType.Created, uri: newUri }]);
@@ -528,6 +539,10 @@ export class SftpFileSystemProvider implements FileSystemProvider {
 				request.dueAt = Date.now() + this.pollInterval();
 			}
 			if (events.size) {
+				for (const { uri } of events.values()) {
+					// Something else changed these files, possibly by replacing them with files that have other link counts.
+					this.connections.invalidateLinkCounts(uri.authority, uri.path);
+				}
 				this.changes.fire([...events.values()]);
 			}
 		} finally {

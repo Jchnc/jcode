@@ -10,7 +10,7 @@ import { SftpFileSystemProvider } from './fileSystemProvider';
 
 export function activate(context: ExtensionContext): void {
 	const log = window.createOutputChannel(l10n.t('JCode Remote SSH/SFTP'), { log: true });
-	const connections = new SftpConnections(context);
+	const connections = new SftpConnections(context, { log });
 	const provider = new SftpFileSystemProvider(connections, log);
 	const manager = new ConnectionManager(context, connections, provider, log);
 	const run = (action: () => Promise<void>) => manager.run(action);

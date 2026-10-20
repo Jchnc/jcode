@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { Client, type ClientChannel, type ClientErrorExtensions, type ConnectConfig, type SFTPWrapper } from 'ssh2';
 import { EventEmitter, l10n, window, type Memento, type SecretStorage } from 'vscode';
 import { classifyAuthFailure } from './authFailure';
+import { LinkCounter, type ExecResult, type LinkCountFailure } from './linkCounter';
 import { PausableTimeout } from './pausableTimeout';
 import { ReconnectBackoff } from './reconnectBackoff';
 
@@ -59,8 +60,8 @@ export interface ConnectionStorage {
 interface Connection {
 	client: SshClient;
 	sftp: SFTPWrapper;
-	/** Set once the server refuses or ignores command execution so it is not retried. */
-	execUnavailable?: boolean;
+	/** Reads hard link counts for saves. It lives and dies with the connection, so a new connection asks the server again. */
+	links: LinkCounter;
 }
 
 interface PendingConnection {
@@ -74,6 +75,16 @@ interface PendingConnection {
 /** Who needs a connection: a request of the user, or work in the background that can wait and try again later. */
 export interface ConnectionRequest {
 	background?: boolean;
+}
+
+/** Optional parts of {@link SftpConnections}, which tests replace. */
+export interface SftpConnectionsOptions {
+	/** Decides how long background attempts wait after failures. */
+	backoff?: ReconnectBackoff;
+	/** Creates the SSH client of a connection attempt. */
+	createClient?: () => SshClient;
+	/** Receives notes about connection behavior, such as why hard links cannot be detected. */
+	log?: { info(message: string): void };
 }
 
 const profilesKey = 'jcodeSftp.profiles';
@@ -97,11 +108,15 @@ export class SftpConnections {
 	/** Fires when a connection attempt fails, including when its credential is missing or refused. */
 	readonly onDidFailToConnect = this.failureEmitter.event;
 
-	constructor(
-		private readonly context: ConnectionStorage,
-		private readonly backoff = new ReconnectBackoff(),
-		private readonly createClient: () => SshClient = () => new Client()
-	) { }
+	private readonly backoff: ReconnectBackoff;
+	private readonly createClient: () => SshClient;
+	private readonly log: { info(message: string): void } | undefined;
+
+	constructor(private readonly context: ConnectionStorage, options: SftpConnectionsOptions = {}) {
+		this.backoff = options.backoff ?? new ReconnectBackoff();
+		this.createClient = options.createClient ?? (() => new Client());
+		this.log = options.log;
+	}
 
 	get profiles(): RemoteProfile[] {
 		return this.context.globalState.get<RemoteProfile[]>(profilesKey, []);
@@ -250,35 +265,33 @@ export class SftpConnections {
 		}
 	}
 
+	private describeLinkFailure(endpoint: string, failure: LinkCountFailure): string {
+		return failure === 'refused'
+			? `${endpoint} does not run commands, so saves assume that files have a single hard link.`
+			: `${endpoint} did not report a hard link count, which suggests it is not a POSIX server, so saves assume that files have a single hard link.`;
+	}
+
 	/**
-	 * Runs a short command beside the SFTP session and resolves its output, or undefined when the
-	 * server refuses it, it fails, or it takes longer than the timeout. Servers that do not allow
-	 * command execution are remembered so later calls return immediately.
+	 * Runs a short command beside the SFTP session and resolves its output and exit code, or undefined
+	 * when the server refuses it or it takes longer than the timeout.
 	 */
-	async exec(id: string, command: string, timeout = 5000): Promise<string | undefined> {
-		await this.sftp(id);
-		const connection = this.active.get(id);
-		if (!connection || connection.execUnavailable) {
-			return undefined;
-		}
-		return new Promise<string | undefined>(resolve => {
+	private execute(client: SshClient, command: string, timeout = 5000): Promise<ExecResult | undefined> {
+		return new Promise<ExecResult | undefined>(resolve => {
 			let output = '';
 			let channel: ClientChannel | undefined;
 			let timedOut = false;
 			const timer = setTimeout(() => {
 				timedOut = true;
-				connection.execUnavailable = true;
 				channel?.close();
 				resolve(undefined);
 			}, timeout);
-			const finish = (value: string | undefined) => {
+			const finish = (value: ExecResult | undefined) => {
 				clearTimeout(timer);
 				resolve(value);
 			};
 			try {
-				connection.client.exec(command, (error, stream) => {
+				client.exec(command, (error, stream) => {
 					if (error || timedOut) {
-						connection.execUnavailable = true;
 						stream?.close();
 						finish(undefined);
 						return;
@@ -290,7 +303,7 @@ export class SftpConnections {
 						}
 					});
 					stream.stderr.on('data', () => undefined);
-					stream.once('close', (code: number | null) => finish(code === 0 ? output : undefined));
+					stream.once('close', (code: number | null) => finish({ output, code }));
 					// Send EOF right away so a forced command that reads input (such as internal-sftp) exits instead of waiting for the timeout.
 					stream.end();
 				});
@@ -298,6 +311,26 @@ export class SftpConnections {
 				finish(undefined);
 			}
 		});
+	}
+
+	/**
+	 * The number of hard links to a remote file, or undefined when the server cannot tell: it does not
+	 * run commands or does not answer like a POSIX server. A count is kept for a short while, and
+	 * a server that cannot tell is not asked again until the connection is replaced.
+	 */
+	async linkCount(id: string, path: string): Promise<number | undefined> {
+		await this.sftp(id);
+		return this.active.get(id)?.links.count(path);
+	}
+
+	/** Forgets the link counts of a path and everything below it, or of the whole server when no path is given, after the files there changed. */
+	invalidateLinkCounts(id: string, path?: string): void {
+		const links = this.active.get(id)?.links;
+		if (path === undefined) {
+			links?.clear();
+		} else {
+			links?.invalidate(path);
+		}
 	}
 
 	/**
@@ -440,7 +473,7 @@ export class SftpConnections {
 						} else {
 							sftp.once('close', invalidate);
 							settled = true;
-							resolve({ client, sftp });
+							resolve({ client, sftp, links: new LinkCounter(command => this.execute(client, command), failure => this.log?.info(this.describeLinkFailure(endpoint, failure))) });
 						}
 					});
 				});
