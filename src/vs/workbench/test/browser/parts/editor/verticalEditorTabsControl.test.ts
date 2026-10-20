@@ -13,15 +13,19 @@ import { mock } from '../../../../../base/test/common/mock.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { TreeViewsDnDService } from '../../../../../editor/common/services/treeViewsDnd.js';
 import { ITreeViewsDnDService } from '../../../../../editor/common/services/treeViewsDndService.js';
+import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
+import { NullHoverService } from '../../../../../platform/hover/test/browser/nullHoverService.js';
+import { SyncDescriptor } from '../../../../../platform/instantiation/common/descriptors.js';
+import { Registry } from '../../../../../platform/registry/common/platform.js';
 import { DEFAULT_EDITOR_PART_OPTIONS, IEditorGroupsView, IEditorGroupView, IEditorPartsView } from '../../../../browser/parts/editor/editor.js';
-import { VerticalEditorTabsControl } from '../../../../browser/parts/editor/verticalEditorTabsControl.js';
-import { EditorInputCapabilities, EditorsOrder, IEditorPartOptions } from '../../../../common/editor.js';
+import { computeVerticalTabsWidth, VerticalEditorTabsControl } from '../../../../browser/parts/editor/verticalEditorTabsControl.js';
+import { EditorExtensions, EditorInputCapabilities, EditorsOrder, IEditorFactoryRegistry, IEditorPartOptions } from '../../../../common/editor.js';
 import { EditorGroupModel } from '../../../../common/editor/editorGroupModel.js';
 import { EditorInput } from '../../../../common/editor/editorInput.js';
 import { DecorationsService } from '../../../../services/decorations/browser/decorationsService.js';
 import { IDecorationsService } from '../../../../services/decorations/common/decorations.js';
 import { INotebookDocumentService, NotebookDocumentWorkbenchService } from '../../../../services/notebook/common/notebookDocumentService.js';
-import { TestFileEditorInput, workbenchInstantiationService } from '../../workbenchTestServices.js';
+import { createEditorPart, ITestInstantiationService, registerTestEditor, TestFileEditorInput, workbenchInstantiationService, workbenchTeardown } from '../../workbenchTestServices.js';
 
 /** The `keyCode` of keyboard events as the browser reports it. */
 const domKeyCodes = { 'Enter': 13, ' ': 32, 'End': 35, 'Home': 36, 'ArrowLeft': 37, 'ArrowUp': 38, 'ArrowRight': 39, 'ArrowDown': 40 };
@@ -459,5 +463,149 @@ suite('VerticalEditorTabsControl', () => {
 		row.querySelector<HTMLElement>('.vertical-tab-actions .action-label')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: domKeyCodes.Enter, bubbles: true, cancelable: true } as KeyboardEventInit));
 
 		assert.deepStrictEqual({ opened, openedByNestedControl: openedEditors.map(editor => editor.getName()) }, { opened: ['file3.txt'], openedByNestedControl: [] });
+	});
+
+	test('the column width shrinks toward its minimum, then falls back to a compact rail, and leaves the editor room', () => {
+		const contentWidths = [1000, 460, 420, 360, 359, 300, 100, 60, 20, 0];
+
+		assert.deepStrictEqual({
+			regular: contentWidths.map(contentWidth => computeVerticalTabsWidth(contentWidth, 0, 240, 220)),
+			withGapAndNoEditorMinimum: contentWidths.map(contentWidth => computeVerticalTabsWidth(contentWidth, 10, 240, 0)),
+			editorNeverCollapses: Array.from({ length: 2000 }, (_, index) => index + 1).every(contentWidth => contentWidth - computeVerticalTabsWidth(contentWidth, 0, 500, 0) >= 1)
+		}, {
+			regular: [240, 240, 200, 140, 48, 48, 48, 30, 10, 0],
+			withGapAndNoEditorMinimum: [240, 230, 190, 48, 48, 48, 45, 25, 5, 0],
+			editorNeverCollapses: true
+		});
+	});
+
+	test('a narrow column renders icons only, with the unsaved dot, stacked editor actions and the group header reduced to its color', () => {
+		model.createTabGroup(model.getEditors(EditorsOrder.SEQUENTIAL).slice(2, 4), 'Work', 'blue');
+		const dirtyEditor = model.getEditorByIndex(1) as TestEditorInput;
+		dirtyEditor.setDirty();
+		control.updateEditorDirty(dirtyEditor);
+		const root = container.querySelector('.vertical-tabs-and-actions-container')!;
+		const display = (element: Element | null) => element ? mainWindow.getComputedStyle(element).display : undefined;
+		const measure = () => {
+			const [clean, dirty] = [rows()[0], rows()[1]];
+			const header = container.querySelector('.vertical-tab-group-header')!;
+			return {
+				compact: root.classList.contains('compact'),
+				names: display(clean.querySelector('.monaco-icon-label-container')),
+				actions: display(clean.querySelector('.vertical-tab-actions')),
+				editorActions: display(root.querySelector('.vertical-tabs-actions')),
+				toolbar: mainWindow.getComputedStyle(root.querySelector('.vertical-tabs-toolbar')!).flexDirection,
+				cleanDot: display(clean.querySelector('.vertical-tab-dirty-dot')),
+				dirtyDot: display(dirty.querySelector('.vertical-tab-dirty-dot')),
+				headerParts: Array.from(header.children).filter(child => display(child) !== 'none').map(child => child.className.split(' ')[0])
+			};
+		};
+
+		layoutControl(600, 240);
+		const regular = measure();
+		layoutControl(600, 48);
+		const compact = measure();
+		layoutControl(600, 240);
+		const restored = measure();
+
+		assert.deepStrictEqual({ regular, compact, restored }, {
+			regular: { compact: false, names: 'flex', actions: 'block', editorActions: 'block', toolbar: 'row', cleanDot: 'none', dirtyDot: 'none', headerParts: ['vertical-tab-group-twistie', 'vertical-tab-group-name', 'vertical-tab-group-count'] },
+			compact: { compact: true, names: 'none', actions: 'none', editorActions: 'block', toolbar: 'column', cleanDot: 'none', dirtyDot: 'block', headerParts: ['vertical-tab-group-color-dot'] },
+			restored: { compact: false, names: 'flex', actions: 'block', editorActions: 'block', toolbar: 'row', cleanDot: 'none', dirtyDot: 'none', headerParts: ['vertical-tab-group-twistie', 'vertical-tab-group-name', 'vertical-tab-group-count'] }
+		});
+	});
+
+	test('the compact rendering keeps file icons even when icons are turned off', () => {
+		partOptions = { ...partOptions, showIcons: false };
+		control.dispose();
+		reset(container);
+		control = createControl();
+		const hasIcon = () => {
+			const label = rows()[0].querySelector('.vertical-tab-label')!;
+			return label.classList.contains('file-icon') && !!label.closest('.show-file-icons'); // the icon theme paints only below that class
+		};
+
+		layoutControl(600, 240);
+		const regular = hasIcon();
+		layoutControl(600, 48);
+		const compact = hasIcon();
+		layoutControl(600, 240);
+
+		assert.deepStrictEqual({ regular, compact, restored: hasIcon() }, { regular: false, compact: true, restored: false });
+	});
+
+	test('tab group headers describe themselves through the hover service', () => {
+		const hovers = new Map<HTMLElement, string>();
+		instantiationService.stub(IHoverService, {
+			...NullHoverService,
+			setupManagedHover: (_delegate, target, content) => {
+				hovers.set(target, typeof content === 'string' ? content : '');
+				return { dispose: () => hovers.delete(target), show: () => { }, hide: () => { }, update: tooltip => { hovers.set(target, typeof tooltip === 'string' ? tooltip : ''); } };
+			}
+		});
+		control.dispose();
+		reset(container);
+		model.createTabGroup(model.getEditors(EditorsOrder.SEQUENTIAL).slice(2, 4), 'Work', 'blue');
+		control = createControl();
+
+		const header = container.querySelector<HTMLElement>('.vertical-tab-group-header')!;
+		assert.deepStrictEqual({ hover: hovers.get(header), nativeTitle: header.title }, { hover: 'Work (2 editors)', nativeTitle: '' });
+	});
+});
+
+suite('EditorGroupView vertical tabs layout', () => {
+
+	const disposables = new DisposableStore();
+	let instantiationService: ITestInstantiationService | undefined;
+
+	setup(() => {
+		disposables.add(registerTestEditor('VerticalTabsLayoutTestEditor', [new SyncDescriptor(TestFileEditorInput)], 'verticalTabsLayoutTestEditorInput'));
+	});
+
+	teardown(async () => {
+		if (instantiationService) {
+			await workbenchTeardown(instantiationService);
+			instantiationService = undefined;
+		}
+
+		disposables.clear();
+	});
+
+	ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('narrow groups shrink the vertical tabs, then compact them, and keep the editor area visible', async () => {
+		instantiationService = workbenchInstantiationService(undefined, disposables);
+		instantiationService.invokeFunction(accessor => Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).start(accessor));
+		const part = await createEditorPart(instantiationService, disposables);
+		const group = part.activeGroup as IEditorGroupView;
+		const layoutAt = (width: number) => {
+			group.layout(width, 400, 0, 0);
+			return {
+				width,
+				tabs: group.element.querySelector<HTMLElement>('.vertical-tabs-container')!.style.width,
+				editor: group.element.querySelector<HTMLElement>('.editor-container')!.style.width
+			};
+		};
+
+		const topTabsMinimumWidth = group.minimumWidth;
+		disposables.add(part.enforcePartOptions({ showTabs: 'multiple', tabPosition: 'left', verticalTabsWidth: 240 }));
+
+		assert.deepStrictEqual({
+			minimumWidthGrowsByTheCompactColumn: group.minimumWidth - topTabsMinimumWidth,
+			tabsPaintFileIcons: group.element.querySelector('.vertical-tabs-container')!.classList.contains('show-file-icons'),
+			layouts: [1000, 500, 400, 360, 359, 300, 100].map(layoutAt)
+		}, {
+			minimumWidthGrowsByTheCompactColumn: 48,
+			tabsPaintFileIcons: true,
+			layouts: [
+				{ width: 1000, tabs: '240px', editor: '760px' },
+				{ width: 500, tabs: '240px', editor: '260px' },
+				{ width: 400, tabs: '180px', editor: '220px' },
+				{ width: 360, tabs: '140px', editor: '220px' },
+				{ width: 359, tabs: '48px', editor: '311px' },
+				{ width: 300, tabs: '48px', editor: '252px' },
+				{ width: 100, tabs: '48px', editor: '52px' }
+			]
+		});
 	});
 });

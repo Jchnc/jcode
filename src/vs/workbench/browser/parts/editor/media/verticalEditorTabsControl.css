@@ -393,3 +393,110 @@
 	background: transparent;
 	color: var(--vscode-foreground);
 }
+
+/*
+ * Compact rendering. When a group is too narrow for the labeled column, the control
+ * adds `compact` to its root and the column becomes an icon rail: the file icon, an
+ * unsaved dot and the tab group color rail. Names stay available through the row hovers.
+ */
+
+.monaco-workbench .part.editor > .content .vertical-tab-dirty-dot {
+	display: none;
+}
+
+/* The toolbar stacks its actions, so that the editor actions stay reachable in the rail. */
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-body .vertical-tabs-and-actions-container.compact .vertical-tabs-toolbar {
+	flex: 0 0 auto;
+	flex-direction: column;
+	justify-content: flex-start;
+	gap: 2px;
+	padding: 3px 0;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-body .vertical-tabs-and-actions-container.compact .vertical-tabs-toolbar .monaco-action-bar .actions-container {
+	flex-direction: column;
+	gap: 2px;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-body .vertical-tabs-and-actions-container.compact .vertical-tab-actions {
+	display: none;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-body .vertical-tabs-and-actions-container.compact .vertical-tab,
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-body .vertical-tabs-and-actions-container.compact .vertical-tab.in-tab-group {
+	justify-content: center;
+	width: calc(100% - 8px);
+	margin: 2px 4px;
+	padding: 0;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-body .vertical-tabs-and-actions-container.compact .vertical-tab > .vertical-tab-label {
+	flex: 0 0 auto;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-body .vertical-tabs-and-actions-container.compact .vertical-tab > .vertical-tab-label::before {
+	padding-right: 0;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-body .vertical-tabs-and-actions-container.compact .vertical-tab > .vertical-tab-label .monaco-icon-label-container {
+	display: none;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-body .vertical-tabs-and-actions-container.compact .vertical-tab.dirty > .vertical-tab-dirty-dot {
+	display: block;
+	position: absolute;
+	top: 5px;
+	right: 6px;
+	font-size: 8px;
+	line-height: 8px;
+	color: var(--vscode-tab-inactiveModifiedBorder, var(--vscode-focusBorder));
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-body .vertical-tabs-and-actions-container.compact .vertical-tab.active.dirty > .vertical-tab-dirty-dot {
+	color: var(--vscode-tab-activeModifiedBorder, var(--vscode-focusBorder));
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-body .vertical-tabs-and-actions-container.compact .vertical-tab-group-header {
+	justify-content: center;
+	gap: 0;
+	width: 28px;
+	height: 22px;
+	margin: 6px auto 2px;
+	padding: 0;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-body .vertical-tabs-and-actions-container.compact .vertical-tab-group-header::before {
+	display: none;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-body .vertical-tabs-and-actions-container.compact .vertical-tab-group-header > :not(.vertical-tab-group-color-dot) {
+	display: none;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-body .vertical-tabs-and-actions-container.compact .vertical-tab-group-color-dot {
+	display: block;
+	box-sizing: border-box;
+	width: 10px;
+	height: 10px;
+	border-radius: var(--vscode-cornerRadius-circle, 9999px);
+	background: var(--tab-group-color);
+}
+
+/* A collapsed group shows a ring instead of a filled dot. */
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-body .vertical-tabs-and-actions-container.compact .vertical-tab-group-header.collapsed .vertical-tab-group-color-dot {
+	background: transparent;
+	box-shadow: inset 0 0 0 2px var(--tab-group-color);
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-body .vertical-tabs-and-actions-container.compact .vertical-tabs-section-label {
+	height: 1px;
+	margin: 4px 8px;
+	padding: 0;
+	overflow: hidden;
+	font-size: 0;
+	background: var(--vscode-widget-border, var(--vscode-contrastBorder, transparent));
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-body .vertical-tabs-and-actions-container.compact .vertical-tabs-section-label:first-child {
+	display: none;
+}

@@ -9,6 +9,7 @@ import { StandardKeyboardEvent } from '../../../../base/browser/keyboardEvent.js
 import { StandardMouseEvent } from '../../../../base/browser/mouseEvent.js';
 import { ActionBar } from '../../../../base/browser/ui/actionbar/actionbar.js';
 import { applyDragImage } from '../../../../base/browser/ui/dnd/dnd.js';
+import { getDefaultHoverDelegate } from '../../../../base/browser/ui/hover/hoverDelegateFactory.js';
 import { ScrollableElement } from '../../../../base/browser/ui/scrollbar/scrollableElement.js';
 import { KeyCode } from '../../../../base/common/keyCodes.js';
 import { DisposableMap, DisposableStore } from '../../../../base/common/lifecycle.js';
@@ -22,6 +23,7 @@ import { assertReturnsDefined } from '../../../../base/common/types.js';
 import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
 import { IContextMenuService, IContextViewService } from '../../../../platform/contextview/browser/contextView.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
+import { IHoverService } from '../../../../platform/hover/browser/hover.js';
 import { IKeybindingService } from '../../../../platform/keybinding/common/keybinding.js';
 import { IMenuService, MenuId } from '../../../../platform/actions/common/actions.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
@@ -45,11 +47,33 @@ import { DEFAULT_LABELS_CONTAINER, IResourceLabel, ResourceLabels } from '../../
 import { CloseEditorTabAction, UnpinEditorAction } from './editorActions.js';
 import { getTabGroupMembers, UNLOCK_GROUP_COMMAND_ID } from './editorCommands.js';
 import { EditorCommandsContextActionRunner, EditorTabsControl } from './editorTabsControl.js';
-import { IEditorGroupMenuIds, IEditorGroupsView, IEditorGroupView, IEditorPartsView, IInternalEditorOpenOptions, isEditorGroupView, prepareMoveCopyEditors } from './editor.js';
+import { DEFAULT_EDITOR_MIN_DIMENSIONS, IEditorGroupMenuIds, IEditorGroupsView, IEditorGroupView, IEditorPartsView, IInternalEditorOpenOptions, isEditorGroupView, prepareMoveCopyEditors } from './editor.js';
 import { IEditorTitleControlDimensions } from './editorTitleControl.js';
 import { TabGroupContextMenu } from './tabGroupContextMenu.js';
 
 class DraggedVerticalEditorIdentifier extends DraggedEditorIdentifier { }
+
+/** The narrowest width at which the vertical tab column still shows labels. */
+export const VERTICAL_TABS_MIN_WIDTH = 140;
+
+/** The width of the icons-only column a group falls back to when it cannot fit the labeled one. */
+export const VERTICAL_TABS_COMPACT_WIDTH = 48;
+
+/**
+ * Computes the width of the vertical tab column of a group. The column shrinks from its
+ * preferred width toward {@link VERTICAL_TABS_MIN_WIDTH} so that the editor keeps its minimum
+ * width, and only once even that does not fit it collapses into the compact icons-only rail.
+ * The editor always keeps at least half of a group too small for either.
+ */
+export function computeVerticalTabsWidth(contentWidth: number, gap: number, preferredWidth: number, minimumEditorWidth: number): number {
+	const availableWidth = Math.max(0, contentWidth - gap);
+	const roomForTabs = availableWidth - Math.max(minimumEditorWidth, DEFAULT_EDITOR_MIN_DIMENSIONS.width);
+	if (roomForTabs >= VERTICAL_TABS_MIN_WIDTH) {
+		return Math.max(VERTICAL_TABS_MIN_WIDTH, Math.min(preferredWidth, roomForTabs));
+	}
+
+	return Math.min(VERTICAL_TABS_COMPACT_WIDTH, Math.floor(availableWidth / 2));
+}
 
 /** The parts of a rendered tab row that non-structural updates touch. */
 interface IVerticalTab {
@@ -82,6 +106,7 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 	private readonly unpinEditorAction = this._register(this.instantiationService.createInstance(UnpinEditorAction, UnpinEditorAction.ID, UnpinEditorAction.LABEL));
 	private lastSingleSelectSelectedEditor: EditorInput | undefined;
 	private tabStop: HTMLElement | undefined;
+	private compact = false;
 	private dropTarget: HTMLElement | undefined;
 	private lastMouseWheelEventTime = 0;
 
@@ -107,6 +132,7 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		@IEditorService private readonly editorService: IEditorService,
 		@IHistoryService private readonly historyService: IHistoryService,
 		@IContextViewService private readonly contextViewService: IContextViewService,
+		@IHoverService private readonly hoverService: IHoverService,
 	) {
 		super(parent, editorPartsView, groupsView, groupView, tabsModel, menuIds, breadcrumbsInHeader, useModernUITabs, contextMenuService, instantiationService, contextKeyService, keybindingService, notificationService, quickInputService, themeService, editorResolverService, hostService, menuService);
 
@@ -450,11 +476,11 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		header.appendChild(count);
 
 		const label = group.name || localize('verticalTabs.unnamedGroup', "Tab Group");
+		const hover = disposables.add(this.hoverService.setupManagedHover(getDefaultHoverDelegate('mouse'), header, ''));
 		const updateStatus = () => {
 			const dirtyCount = members.filter(editor => editor.isDirty() && !editor.isSaving()).length;
 			if (dirtyCount > 0) {
-				dirtyIndicator.title = localize('verticalTabs.groupDirtyCount', "{0} unsaved tabs", dirtyCount);
-				header.insertBefore(dirtyIndicator, dirtyIndicatorAnchor);
+				header.insertBefore(dirtyIndicator, dirtyIndicatorAnchor); // the header hover reports the unsaved count
 			} else {
 				dirtyIndicator.remove();
 			}
@@ -462,7 +488,7 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 			const status = dirtyCount > 0 ? localize('verticalTabs.groupStatusDirty', "{0} editors, {1} unsaved", members.length, dirtyCount) : localize('verticalTabs.groupStatus', "{0} editors", members.length);
 			const accessibilityStatus = [status, group.saved ? localize('verticalTabs.groupSaved', "saved") : undefined, group.locked ? localize('verticalTabs.groupLocked', "locked") : undefined].filter(Boolean).join(', ');
 			header.setAttribute('aria-label', localize('verticalTabs.groupAria', "{0}, {1}", label, accessibilityStatus)); // aria-expanded announces the state
-			header.title = localize('verticalTabs.groupTitle', "{0} ({1})", label, accessibilityStatus);
+			hover.update(localize('verticalTabs.groupTitle', "{0} ({1})", label, accessibilityStatus));
 		};
 		updateStatus();
 		this.tabGroupHeaders.set(group.id, { element: header, updateStatus });
@@ -603,6 +629,9 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		// are not announced as nested controls.
 		const actionsContainer = $('.vertical-tab-actions', { 'aria-hidden': 'true' });
 		row.appendChild(actionsContainer);
+		const dirtyDot = $('.vertical-tab-dirty-dot', { 'aria-hidden': 'true' }); // only shown by the compact rendering
+		dirtyDot.classList.add(...ThemeIcon.asClassNameArray(Codicon.circleFilled));
+		row.appendChild(dirtyDot);
 		const that = this;
 		const actionRunner = disposables.add(new EditorCommandsContextActionRunner({
 			groupId: this.groupView.id,
@@ -637,7 +666,7 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 				badges: this.groupsView.partOptions.decorations.badges
 			},
 			icon: editor.getIcon(),
-			hideIcon: !this.groupsView.partOptions.showIcons
+			hideIcon: !this.groupsView.partOptions.showIcons && !this.compact // the compact rendering has nothing but the icon to identify a tab
 		});
 
 		const resource = EditorResourceAccessor.getOriginalUri(editor, { supportSideBySide: SideBySideEditor.PRIMARY });
@@ -1417,6 +1446,13 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		return editorActions;
 	}
 
+	protected override updateEditorActionsToolbar(): void {
+		super.updateEditorActionsToolbar();
+		if (this.compact) {
+			this.layoutScrollbar(); // the compact toolbar stacks its actions, so they change the height left for the list
+		}
+	}
+
 	protected override get tabHeight(): 28 | 32 {
 		return this.groupsView.partOptions.tabHeight === 'compact' ? 28 : 32;
 	}
@@ -1425,12 +1461,32 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		return 0;
 	}
 
+	/**
+	 * Switches between the labeled rendering and the compact icons-only one (file icon,
+	 * unsaved dot and group color rail). Names stay available through the row hovers.
+	 */
+	private updateCompact(compact: boolean): void {
+		if (compact === this.compact) {
+			return;
+		}
+
+		this.compact = compact;
+		this.root?.classList.toggle('compact', compact);
+		this.root?.classList.toggle('show-file-icons', compact); // the icon theme only paints file icons within this class, which the group sets only while icons are shown
+		if (!this.groupsView.partOptions.showIcons) {
+			for (const [editor, tab] of this.tabs) {
+				this.renderTabLabel(editor, tab); // icons are always shown while compact
+			}
+		}
+	}
+
 	layout(dimensions: IEditorTitleControlDimensions): Dimension {
 		this.dimensions = dimensions.container;
 		if (this.root) {
 			this.root.style.width = `${this.dimensions.width}px`;
 			this.root.style.height = `${this.dimensions.height}px`;
 		}
+		this.updateCompact(this.dimensions.width > 0 && this.dimensions.width < VERTICAL_TABS_MIN_WIDTH);
 		this.layoutScrollbar();
 		this.revealActiveTab();
 		return this.dimensions;

@@ -58,6 +58,7 @@ import { IConfigurationService } from '../../../../platform/configuration/common
 import { FLOATING_PANEL_MARGIN } from '../../../services/layout/browser/layoutService.js';
 import { EditorGroupWatermark } from './editorGroupWatermark.js';
 import { EditorTitleControl } from './editorTitleControl.js';
+import { computeVerticalTabsWidth, VERTICAL_TABS_COMPACT_WIDTH, VERTICAL_TABS_MIN_WIDTH } from './verticalEditorTabsControl.js';
 import { EditorPane } from './editorPane.js';
 import { IEditorResolverService } from '../../../services/editor/common/editorResolverService.js';
 import { IHostService } from '../../../services/host/browser/host.js';
@@ -134,6 +135,7 @@ export class EditorGroupView extends Themable implements IEditorGroupView {
 	private readonly verticalTabsSash: Sash;
 	private resizedVerticalTabsWidth: number | undefined;
 	private sashStartWidth: number | undefined;
+	private layoutVerticalTabsWidth = 0; // the width the vertical tabs were last laid out with, which can be below the preferred one
 
 	private readonly progressBar: ProgressBar;
 
@@ -245,14 +247,14 @@ export class EditorGroupView extends Themable implements IEditorGroupView {
 				getVerticalSashHeight: () => this.bodyContainer.clientHeight
 			}, { orientation: Orientation.VERTICAL }));
 			this._register(this.verticalTabsSash.addClass('vertical-tabs-sash'));
-			this._register(this.verticalTabsSash.onDidStart(() => this.sashStartWidth = this.verticalTabsWidth));
+			this._register(this.verticalTabsSash.onDidStart(() => this.sashStartWidth = this.layoutVerticalTabsWidth));
 			this._register(this.verticalTabsSash.onDidChange(event => {
 				if (this.sashStartWidth === undefined) {
 					return;
 				}
 				const direction = this.groupsView.partOptions.tabPosition === 'right' ? -1 : 1;
-				const maxWidth = Math.min(500, Math.max(140, this.bodyContainer.clientWidth - this.editorPane.minimumWidth - this.verticalTabsGap));
-				this.resizedVerticalTabsWidth = Math.min(maxWidth, Math.max(140, this.sashStartWidth + direction * (event.currentX - event.startX)));
+				const maxWidth = Math.min(500, Math.max(VERTICAL_TABS_MIN_WIDTH, this.bodyContainer.clientWidth - this.editorPane.minimumWidth - this.verticalTabsGap));
+				this.resizedVerticalTabsWidth = Math.min(maxWidth, Math.max(VERTICAL_TABS_MIN_WIDTH, this.sashStartWidth + direction * (event.currentX - event.startX)));
 				this.relayout();
 			}));
 			this._register(this.verticalTabsSash.onDidEnd(() => {
@@ -602,6 +604,7 @@ export class EditorGroupView extends Themable implements IEditorGroupView {
 		this.bodyContainer.classList.toggle('vertical-tabs-left', hasVerticalTabs && tabPosition === 'left');
 		this.bodyContainer.classList.toggle('vertical-tabs-right', hasVerticalTabs && tabPosition === 'right');
 		this.verticalTabsContainer.classList.toggle('hidden', !hasVerticalTabs);
+		this.verticalTabsContainer.classList.toggle('show-file-icons', this.groupsView.partOptions.showIcons); // the icon theme only paints file icons within this class
 		this.verticalTabsSash.state = hasVerticalTabs ? SashState.Enabled : SashState.Disabled;
 	}
 
@@ -2337,7 +2340,7 @@ export class EditorGroupView extends Themable implements IEditorGroupView {
 
 	readonly element: HTMLElement = $('div');
 
-	get minimumWidth(): number { return this.editorPane.minimumWidth + this.verticalTabsWidth + this.verticalTabsGap; }
+	get minimumWidth(): number { return this.editorPane.minimumWidth + (this.verticalTabsWidth > 0 ? VERTICAL_TABS_COMPACT_WIDTH : 0) + this.verticalTabsGap; }
 	get minimumHeight(): number { return this.editorPane.minimumHeight; }
 	get maximumWidth(): number { return this.editorPane.maximumWidth + this.verticalTabsWidth + this.verticalTabsGap; }
 	get maximumHeight(): number { return this.editorPane.maximumHeight; }
@@ -2358,8 +2361,14 @@ export class EditorGroupView extends Themable implements IEditorGroupView {
 		this.element.classList.toggle('max-height-478px', height <= 478);
 
 		const contentWidth = Math.max(0, width - this._contentRightInset);
-		const verticalTabsWidth = Math.min(this.verticalTabsWidth, contentWidth);
-		const verticalTabsGap = verticalTabsWidth > 0 ? this.verticalTabsGap : 0;
+
+		// The vertical tabs give way to the editor: they shrink toward their minimum width and
+		// then become a compact icons-only column, so the editor never collapses to nothing.
+		const preferredVerticalTabsWidth = this.verticalTabsWidth;
+		const verticalTabsGap = preferredVerticalTabsWidth > 0 ? this.verticalTabsGap : 0;
+		const verticalTabsWidth = preferredVerticalTabsWidth > 0 ? computeVerticalTabsWidth(contentWidth, verticalTabsGap, preferredVerticalTabsWidth, this.editorPane.minimumWidth) : 0;
+		this.layoutVerticalTabsWidth = verticalTabsWidth;
+		this.verticalTabsSash.state = verticalTabsWidth >= VERTICAL_TABS_MIN_WIDTH ? SashState.Enabled : SashState.Disabled; // a compact column is not resizable
 		const editorWidth = Math.max(0, contentWidth - verticalTabsWidth - verticalTabsGap);
 
 		// Vertical tabs use the full group height; their header follows only the editor column.
