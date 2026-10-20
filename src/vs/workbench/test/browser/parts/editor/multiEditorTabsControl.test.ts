@@ -657,6 +657,23 @@ suite('MultiEditorTabsControl', () => {
 		assert.deepStrictEqual(results, results.map(result => ({ ...result, distinctNaturalWidths: true, firstName: 'a-significantly-longer-filename.ts', longWidthPreserved: true, remainingWidthsPreserved: true })));
 	});
 
+	test('moving an editor in between the tabs of a tab group keeps every tab labelled with its editor', () => {
+		const [a, b, c, d] = openNamedEditors(['a.ts', 'b.ts', 'c.ts', 'd.ts']);
+		model.createTabGroup([b, c, d], 'Work', 'blue');
+
+		// The model moves the editor into the group and reports it, then the group view updates the title control
+		model.moveEditor(a, 2);
+		control.moveEditor(a, 0, 2);
+
+		assert.deepStrictEqual({
+			tabs: Array.from(container.querySelectorAll('.tabs-container > .tab')).map(tab => tab.querySelector('.label-name')?.textContent),
+			tabGroupOfMovedEditor: model.getTabGroupForEditor(a)?.name
+		}, {
+			tabs: ['b.ts', 'c.ts', 'a.ts', 'd.ts'],
+			tabGroupOfMovedEditor: 'Work'
+		});
+	});
+
 	test('unreserved fit widths refresh when tab index and label format options change', async () => {
 		const group = connectedGroup();
 		const root = group.closest<HTMLElement>('.monaco-workbench')!;

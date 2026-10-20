@@ -834,10 +834,13 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 
 	moveEditor(editor: EditorInput, fromTabIndex: number, targetTabIndex: number): void {
 
-		// Move the editor label
-		const editorLabel = this.tabLabels[fromTabIndex];
-		this.tabLabels.splice(fromTabIndex, 1);
-		this.tabLabels.splice(targetTabIndex, 0, editorLabel);
+		// Move the editor label, unless the tabs were already rebuilt after the editor
+		// moved (this happens when the move changes the tab group of the editor)
+		if (this.tabLabels[targetTabIndex]?.editor !== editor) {
+			const editorLabel = this.tabLabels[fromTabIndex];
+			this.tabLabels.splice(fromTabIndex, 1);
+			this.tabLabels.splice(targetTabIndex, 0, editorLabel);
+		}
 
 		// Redraw tabs in the range of the move
 		this.forEachTab((editor, tabIndex, tabContainer, tabLabelWidget, tabLabel, tabActionBar) => {

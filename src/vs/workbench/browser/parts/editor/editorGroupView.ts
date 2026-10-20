@@ -1572,8 +1572,13 @@ export class EditorGroupView extends Themable implements IEditorGroupView {
 			this.model.moveEditor(editor, moveToIndex);
 			this.model.pin(editor);
 
-			// Forward to title control
-			this.titleControl.moveEditor(editor, currentIndex, moveToIndex, oldStickyCount !== this.model.stickyCount);
+			// Forward to title control. The model can place the editor at another
+			// index than requested (for example to not split a tab group) or not move
+			// it at all, so use the index it ended up at.
+			const newIndexOfEditor = this.model.indexOf(editor);
+			if (newIndexOfEditor !== currentIndex) {
+				this.titleControl.moveEditor(editor, currentIndex, newIndexOfEditor, oldStickyCount !== this.model.stickyCount);
+			}
 			this.titleControl.pinEditor(editor);
 		}
 
