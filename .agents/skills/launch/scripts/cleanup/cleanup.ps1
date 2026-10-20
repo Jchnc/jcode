@@ -32,6 +32,8 @@ if (-not [string]::IsNullOrWhiteSpace($PlaywrightSession)) {
 	}
 }
 
+# Upstream Code - OSS builds `Code - OSS.exe`; this fork's product.json (nameShort) builds `JCode.exe`.
+$codeProcessNames = @('Code - OSS.exe', 'JCode.exe')
 $userDataDir = Join-Path $RunDir 'user-data'
 $userDataArgument = "--user-data-dir=$userDataDir"
 $remainingProcesses = @()
@@ -40,7 +42,7 @@ for ($attempt = 0; $attempt -lt 5; $attempt++) {
 		Get-CimInstance Win32_Process |
 			Where-Object {
 				$commandLine = $_.CommandLine
-				$_.Name -eq 'Code - OSS.exe' -and
+				$codeProcessNames -contains $_.Name -and
 				$null -ne $commandLine -and
 				(Test-CommandLineHasArgument $commandLine $userDataArgument)
 			}
@@ -58,14 +60,14 @@ $remainingProcesses = @(
 	Get-CimInstance Win32_Process |
 		Where-Object {
 			$commandLine = $_.CommandLine
-			$_.Name -eq 'Code - OSS.exe' -and
+			$codeProcessNames -contains $_.Name -and
 			$null -ne $commandLine -and
 			(Test-CommandLineHasArgument $commandLine $userDataArgument)
 		}
 )
 if ($remainingProcesses.Count -gt 0) {
 	$processIds = $remainingProcesses.ProcessId -join ', '
-	throw "Code OSS processes still reference the run directory: $processIds"
+	throw "Code processes still reference the run directory: $processIds"
 }
 
 for ($attempt = 0; $attempt -lt 5 -and (Test-Path -LiteralPath $RunDir); $attempt++) {

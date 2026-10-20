@@ -457,7 +457,7 @@ kill "$PID" 2>/dev/null || true
 rm -rf "$(dirname "$LOG")"
 ```
 
-On Windows, use the cleanup helper. The PID returned by `code.bat` can be a short-lived wrapper, so the helper finds and terminates only `Code - OSS.exe` processes whose `--user-data-dir` references this launch's exact `runDir`, then removes the throwaway profile:
+On Windows, use the cleanup helper. The PID returned by `code.bat` can be a short-lived wrapper, so the helper finds and terminates only `Code - OSS.exe` or `JCode.exe` (this fork's binary) processes whose `--user-data-dir` references this launch's exact `runDir`, then removes the throwaway profile:
 
 ```powershell
 $cleanup = Join-Path $skillDir 'scripts\cleanup\cleanup.ps1'
