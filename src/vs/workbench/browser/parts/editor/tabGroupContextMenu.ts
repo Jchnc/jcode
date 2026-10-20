@@ -16,7 +16,7 @@ import { localize } from '../../../../nls.js';
 import { EDITOR_TAB_GROUP_COLORS, IEditorTabGroup } from '../../../common/editor/editorTabGroup.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { IHistoryService } from '../../../services/history/common/history.js';
-import { getTabGroupMembers } from './editorCommands.js';
+import { closeTabGroup, getTabGroupMembers } from './editorCommands.js';
 import { IEditorGroupView, IEditorPartsView, isEditorGroupView, prepareMoveCopyEditors } from './editor.js';
 
 /** The shared tab group popup for horizontal and vertical editor tabs. */
@@ -228,7 +228,7 @@ export class TabGroupContextMenu {
 				appendAction(localize('moveTabGroupToNewWindow', 'Move Group into New Window'), Codicon.emptyWindow, () => this.moveTabGroupToNewWindow(group), group.locked);
 				appendAction(group.saved ? localize('unsaveTabGroup', 'Stop Saving Group') : localize('saveTabGroup', 'Save Group'), Codicon.bookmark, () => this.groupView.setTabGroupSaved(group.id, !group.saved));
 				appendAction(group.locked ? localize('unlockTabGroup', 'Unlock Group') : localize('lockTabGroup', 'Lock Group'), group.locked ? Codicon.unlock : Codicon.lock, () => this.groupView.setTabGroupLocked(group.id, !group.locked));
-				appendAction(localize('closeTabGroup', 'Close Group'), Codicon.closeAll, () => this.closeTabGroup(group), group.locked);
+				appendAction(localize('closeTabGroup', 'Close Group'), Codicon.closeAll, () => closeTabGroup(this.groupView, group, this.historyService, true), group.locked);
 
 				const separator = actionList.appendChild($('.tab-group-menu-separator'));
 				separator.setAttribute('role', 'separator');
@@ -288,18 +288,6 @@ export class TabGroupContextMenu {
 		const pane = await this.editorService.openEditor({ resource: undefined, options: { pinned: true, index: lastMemberIndex + 1 } }, this.groupView);
 		if (pane?.input) {
 			this.groupView.addToTabGroup(group.id, [pane.input]);
-		}
-	}
-
-	private async closeTabGroup(group: IEditorTabGroup): Promise<void> {
-		if (group.locked) {
-			return;
-		}
-		const members = getTabGroupMembers(this.groupView, group.id);
-		const savedEditors = members.map(editor => ({ editor, index: this.groupView.getIndexOfEditor(editor) }));
-		const closed = await this.groupView.closeEditors(members, { preserveFocus: true });
-		if (closed && group.saved) {
-			this.historyService.saveClosedTabGroup(group, savedEditors);
 		}
 	}
 

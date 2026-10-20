@@ -1470,6 +1470,24 @@ export function getTabGroupMembers(groupView: IEditorGroupView, groupId: string)
 	return groupView.getEditors(EditorsOrder.SEQUENTIAL).filter(editor => groupView.getTabGroupForEditor(editor)?.id === groupId);
 }
 
+/**
+ * Closes all editors of a tab group, which are the tabs of that group only. A group
+ * that is saved is recorded in the saved groups history so that it can be reopened.
+ * Locked groups are left untouched.
+ */
+export async function closeTabGroup(groupView: IEditorGroupView, tabGroup: IEditorTabGroup, historyService: IHistoryService, preserveFocus?: boolean): Promise<void> {
+	if (tabGroup.locked) {
+		return;
+	}
+
+	const members = getTabGroupMembers(groupView, tabGroup.id);
+	const savedEditors = members.map(editor => ({ editor, index: groupView.getIndexOfEditor(editor) }));
+	const closed = await groupView.closeEditors(members, { preserveFocus });
+	if (closed && tabGroup.saved) {
+		historyService.saveClosedTabGroup(tabGroup, savedEditors);
+	}
+}
+
 export async function pickTabGroupName(quickInputService: IQuickInputService, currentName: string): Promise<string | undefined> {
 	return quickInputService.input({
 		prompt: localize('tabGroup.namePrompt', 'Enter a name for the tab group'),
@@ -1859,19 +1877,11 @@ function registerTabGroupCommands(): void {
 				}
 				for (const editor of editors) {
 					const tabGroup = group.getTabGroupForEditor(editor);
-					if (!tabGroup) {
-						continue;
-					}
-					if (tabGroup.locked || seenGroups.has(tabGroup.id)) {
+					if (!tabGroup || tabGroup.locked || seenGroups.has(tabGroup.id)) {
 						continue;
 					}
 					seenGroups.add(tabGroup.id);
-					const members = getTabGroupMembers(group, tabGroup.id);
-					const savedEditors = members.map(member => ({ editor: member, index: group.getIndexOfEditor(member) }));
-					const closed = await group.closeEditors(members, { preserveFocus: resolvedContext.preserveFocus });
-					if (closed && tabGroup.saved) {
-						historyService.saveClosedTabGroup(tabGroup, savedEditors);
-					}
+					await closeTabGroup(group, tabGroup, historyService, resolvedContext.preserveFocus);
 					break;
 				}
 			}
