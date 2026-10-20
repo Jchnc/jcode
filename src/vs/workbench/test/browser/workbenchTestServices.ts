@@ -1031,6 +1031,7 @@ export class TestEditorGroupView implements IEditorGroupView {
 	setTabGroupLocked(_groupId: string, _locked: boolean): void { }
 	get canUndoTabGroupAction(): boolean { return false; }
 	undoLastTabGroupAction(): boolean { return false; }
+	revealVerticalTabsFilter(): void { }
 	lock(locked: boolean): void { }
 	focus(): void { }
 	get scopedContextKeyService(): IContextKeyService { throw new Error('not implemented'); }

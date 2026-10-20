@@ -36,7 +36,14 @@
 	background: var(--vscode-editorGroupHeader-tabsBackground);
 }
 
-.monaco-workbench .part.editor > .content .vertical-tabs-new-tab {
+.monaco-workbench .part.editor > .content .vertical-tabs-toolbar-leading {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+}
+
+.monaco-workbench .part.editor > .content .vertical-tabs-toolbar-button {
+	flex: 0 0 auto;
 	width: 24px;
 	height: 24px;
 	padding: 0;
@@ -47,12 +54,61 @@
 	cursor: pointer;
 }
 
-.monaco-workbench .part.editor > .content .vertical-tabs-new-tab:hover {
+.monaco-workbench .part.editor > .content .vertical-tabs-toolbar-button:hover {
 	background: var(--vscode-toolbar-hoverBackground);
 }
 
-.monaco-workbench .part.editor > .content .vertical-tabs-new-tab:focus-visible {
+.monaco-workbench .part.editor > .content .vertical-tabs-toolbar-button:focus-visible {
 	outline: 1px solid var(--vscode-focusBorder);
+}
+
+/* The filter button stays pressed while the filter shows. */
+.monaco-workbench .part.editor > .content .vertical-tabs-filter-toggle[aria-pressed='true'] {
+	background: var(--vscode-inputOption-activeBackground);
+	color: var(--vscode-inputOption-activeForeground);
+	outline: 1px solid var(--vscode-inputOption-activeBorder, transparent);
+	outline-offset: -1px;
+}
+
+/* Quick filter. It sits between the toolbar and the list while it shows. */
+.monaco-workbench .part.editor > .content .vertical-tabs-filter {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	flex: 0 0 auto;
+	padding: 2px 4px 4px;
+	box-sizing: border-box;
+	background: var(--vscode-editorGroupHeader-tabsBackground);
+}
+
+.monaco-workbench .part.editor > .content .vertical-tabs-filter[hidden] {
+	display: none;
+}
+
+.monaco-workbench .part.editor > .content .vertical-tabs-filter-input {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.monaco-workbench .part.editor > .content .vertical-tabs-and-actions-container.empty > .vertical-tabs-filter {
+	display: none;
+}
+
+.monaco-workbench .part.editor > .content .vertical-tabs-filter-empty {
+	padding: 12px 10px;
+	text-align: center;
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-fontSize-label1);
+}
+
+/* What of a name or a path matches the filter. */
+.monaco-workbench .part.editor > .content .vertical-tab .monaco-highlighted-label .highlight {
+	color: var(--vscode-list-highlightForeground);
+}
+
+.monaco-workbench .part.editor > .content .vertical-tab-group-name .monaco-highlighted-label .highlight {
+	text-decoration: underline;
+	text-underline-offset: 2px;
 }
 
 .monaco-workbench .part.editor > .content .vertical-tabs-actions {
@@ -413,6 +469,14 @@
 	display: none;
 }
 
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-body .vertical-tabs-and-actions-container.compact :is(.vertical-tabs-filter-toggle, .vertical-tabs-filter) {
+	display: none;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-body .vertical-tabs-and-actions-container.compact .vertical-tabs-toolbar-leading {
+	flex-direction: column;
+}
+
 /* The toolbar stacks its actions, so that the editor actions stay reachable in the rail. */
 .monaco-workbench .part.editor > .content .editor-group-container > .editor-group-body .vertical-tabs-and-actions-container.compact .vertical-tabs-toolbar {
 	flex: 0 0 auto;
@@ -667,6 +731,17 @@
 	animation: vertical-tabs-empty-state-in 160ms ease-out;
 }
 
+@keyframes vertical-tabs-filter-in {
+	from {
+		opacity: 0;
+		transform: translateY(-4px);
+	}
+}
+
+.monaco-workbench .part.editor > .content .vertical-tabs-filter:not([hidden]) {
+	animation: vertical-tabs-filter-in 120ms ease-out;
+}
+
 .monaco-workbench.monaco-reduce-motion .part.editor > .content .vertical-tab,
 .monaco-workbench.monaco-reduce-motion .part.editor > .content .vertical-tab-group-header,
 .monaco-workbench.monaco-reduce-motion .part.editor > .content .vertical-tab-actions,
@@ -678,7 +753,8 @@
 .monaco-workbench.monaco-reduce-motion .part.editor > .content .vertical-tab.exiting,
 .monaco-workbench.monaco-reduce-motion .part.editor > .content .vertical-tab-group-header.expanding > .vertical-tab-group-twistie,
 .monaco-workbench.monaco-reduce-motion .part.editor > .content .vertical-tab-group-header.collapsing > .vertical-tab-group-twistie,
-.monaco-workbench.monaco-reduce-motion .part.editor > .content .vertical-tabs-and-actions-container.empty > .vertical-tabs-empty-state {
+.monaco-workbench.monaco-reduce-motion .part.editor > .content .vertical-tabs-and-actions-container.empty > .vertical-tabs-empty-state,
+.monaco-workbench.monaco-reduce-motion .part.editor > .content .vertical-tabs-filter:not([hidden]) {
 	animation: none;
 }
 

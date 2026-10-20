@@ -360,6 +360,12 @@ export interface IEditorGroupView extends IDisposable, ISerializableView, IEdito
 	setTabGroupLocked(groupId: string, locked: boolean): void;
 	readonly canUndoTabGroupAction: boolean;
 	undoLastTabGroupAction(): boolean;
+
+	/**
+	 * Reveals the quick filter of the vertical tabs of this group, if it is not showing yet, and
+	 * moves keyboard focus into it. Does nothing while the group does not show its tabs vertically.
+	 */
+	revealVerticalTabsFilter(): void;
 }
 
 /**

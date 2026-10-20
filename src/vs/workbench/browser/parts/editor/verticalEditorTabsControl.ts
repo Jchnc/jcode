@@ -10,7 +10,11 @@ import { StandardMouseEvent } from '../../../../base/browser/mouseEvent.js';
 import { ActionBar } from '../../../../base/browser/ui/actionbar/actionbar.js';
 import { applyDragImage } from '../../../../base/browser/ui/dnd/dnd.js';
 import { getDefaultHoverDelegate } from '../../../../base/browser/ui/hover/hoverDelegateFactory.js';
+import { status } from '../../../../base/browser/ui/aria/aria.js';
+import { HighlightedLabel } from '../../../../base/browser/ui/highlightedlabel/highlightedLabel.js';
+import { InputBox } from '../../../../base/browser/ui/inputbox/inputBox.js';
 import { ScrollableElement } from '../../../../base/browser/ui/scrollbar/scrollableElement.js';
+import { IMatch } from '../../../../base/common/filters.js';
 import { KeyCode } from '../../../../base/common/keyCodes.js';
 import { disposableTimeout } from '../../../../base/common/async.js';
 import { DisposableMap, DisposableStore } from '../../../../base/common/lifecycle.js';
@@ -31,6 +35,7 @@ import { IMenuService, MenuId } from '../../../../platform/actions/common/action
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
 import { LocalSelectionTransfer } from '../../../../platform/dnd/browser/dnd.js';
+import { defaultInputBoxStyles } from '../../../../platform/theme/browser/defaultStyles.js';
 import { IThemeService } from '../../../../platform/theme/common/themeService.js';
 import { localize } from '../../../../nls.js';
 import { EditorActivation, IEditorOptions } from '../../../../platform/editor/common/editor.js';
@@ -40,19 +45,21 @@ import { IHistoryService } from '../../../services/history/common/history.js';
 import { IMergeGroupOptions, MergeGroupMode } from '../../../services/editor/common/editorGroupsService.js';
 import { IHostService } from '../../../services/host/browser/host.js';
 import { EditorInput } from '../../../common/editor/editorInput.js';
-import { DEFAULT_EDITOR_ASSOCIATION, EditorInputCapabilities, EditorResourceAccessor, EditorsOrder, IEditorPartOptions, IToolbarActions, preventEditorClose, EditorCloseMethod, SideBySideEditor, GroupModelChangeKind } from '../../../common/editor.js';
+import { DEFAULT_EDITOR_ASSOCIATION, EditorInputCapabilities, EditorResourceAccessor, EditorsOrder, IEditorPartOptions, IToolbarActions, preventEditorClose, EditorCloseMethod, SideBySideEditor, GroupModelChangeKind, Verbosity } from '../../../common/editor.js';
+import { VerticalEditorTabsFocusContext } from '../../../common/contextkeys.js';
 import { getEditorTabGroupColor, IEditorTabGroup } from '../../../common/editor/editorTabGroup.js';
 import { IReadonlyEditorGroupModel } from '../../../common/editor/editorGroupModel.js';
 import { computeEditorAriaLabel } from '../../editor.js';
 import { DraggedEditorGroupIdentifier, DraggedEditorIdentifier, DraggedEditorTabGroupIdentifier, ResourcesDropHandler } from '../../dnd.js';
 import { DEFAULT_LABELS_CONTAINER, IResourceLabel, ResourceLabels } from '../../labels.js';
 import { CloseEditorTabAction, UnpinEditorAction } from './editorActions.js';
-import { getTabGroupMembers, UNLOCK_GROUP_COMMAND_ID } from './editorCommands.js';
+import { FILTER_VERTICAL_TABS_COMMAND_ID, getTabGroupMembers, UNLOCK_GROUP_COMMAND_ID } from './editorCommands.js';
 import { EditorCommandsContextActionRunner, EditorTabsControl } from './editorTabsControl.js';
 import { DEFAULT_EDITOR_MIN_DIMENSIONS, IEditorGroupMenuIds, IEditorGroupsView, IEditorGroupView, IEditorPartsView, IInternalEditorOpenOptions, isEditorGroupView, prepareMoveCopyEditors } from './editor.js';
 import { IEditorTitleControlDimensions } from './editorTitleControl.js';
 import { TabGroupContextMenu } from './tabGroupContextMenu.js';
 import { getTabGroupHeaderAriaLabel, getTabGroupHeaderTitle, getTabGroupName, getTabGroupTabAriaLabel } from './tabGroupLabels.js';
+import { filterVerticalTabs, IVerticalTabsFilterMatches, IVerticalTabsFilterResult } from './verticalTabsFilter.js';
 
 class DraggedVerticalEditorIdentifier extends DraggedEditorIdentifier { }
 
@@ -113,6 +120,8 @@ interface IVerticalTab {
 	/** Stands in for the file icon of the compact rendering while the file icon theme has none. */
 	readonly fallbackIcon: HTMLElement;
 	readonly actionBar: ActionBar;
+	/** Set while the list is filtered: what of the label matches the filter. */
+	readonly filterMatches: IVerticalTabsFilterMatches | undefined;
 }
 
 /** A rendered tab group header together with the callback that refreshes its status. */
@@ -141,9 +150,21 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 	private tabStop: HTMLElement | undefined;
 	private compact = false;
 	private newTabAction: HTMLElement | undefined;
+	private filterAction: HTMLElement | undefined;
 	private emptyStateAction: HTMLElement | undefined;
 
-	/** Whether each tab group was collapsed when the list was last drawn, to tell which ones a model change collapses or expands. */
+	/** The quick filter: its bar reveals above the list, and its input is only created once the bar shows for the first time. */
+	private filterBar: HTMLElement | undefined;
+	private filterInput: InputBox | undefined;
+	private filterQuery = '';
+
+	/**
+	 * The tab groups that were collapsed when the filter started. The filter lists their matching
+	 * tabs without expanding them in the model, until they are collapsed in the list again.
+	 */
+	private readonly tabGroupsExpandedByFilter = new Set<string>();
+
+	/** Whether each tab group was shown collapsed when the list was last drawn, to tell which ones a change collapses or expands. */
 	private readonly renderedTabGroups = new Map<string, boolean>();
 	private tabGroupTransitions: ReadonlyMap<string, IVerticalTabGroupTransition> = new Map();
 	private dropTarget: HTMLElement | undefined;
@@ -179,19 +200,31 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		if (this.newTabAction) {
 			this._register(this.hoverService.setupManagedHover(getDefaultHoverDelegate('mouse'), this.newTabAction, localize('verticalTabs.newTab', "New Tab")));
 		}
+		if (this.filterAction) {
+			this._register(this.hoverService.setupManagedHover(getDefaultHoverDelegate('mouse'), this.filterAction, () => {
+				const keybinding = keybindingService.lookupKeybinding(FILTER_VERTICAL_TABS_COMMAND_ID, this.contextMenuContextKeyService)?.getLabel();
+				return keybinding ? localize('verticalTabs.filterTabsKeybinding', "Filter Tabs ({0})", keybinding) : localize('verticalTabs.filterTabs', "Filter Tabs");
+			}));
+		}
 		if (this.emptyStateAction) {
 			this._register(this.hoverService.setupManagedHover(getDefaultHoverDelegate('mouse'), this.emptyStateAction, localize('verticalTabs.newFile', "New File")));
 		}
+
+		// Everything inside the column, i.e. the toolbar, the filter and the list, counts as the vertical tabs holding focus
+		VerticalEditorTabsFocusContext.bindTo(this.contextMenuContextKeyService).set(true);
 		this._register(this.tabsModel.onDidModelChange(event => {
 			if (event.kind === GroupModelChangeKind.TAB_GROUP_CHANGED) {
+				// A group that got expanded in the model no longer needs the filter to list its tabs,
+				// so that collapsing it again while filtering shows
+				for (const groupId of this.tabGroupsExpandedByFilter) {
+					if (!this.tabsModel.tabGroups.some(group => group.id === groupId && group.collapsed)) {
+						this.tabGroupsExpandedByFilter.delete(groupId);
+					}
+				}
+
 				// Whichever way a tab group got collapsed or expanded (header, keyboard, context
 				// menu, command), it arrives here as a change of the model, which drives the animation
-				this.tabGroupTransitions = this.captureTabGroupTransitions();
-				try {
-					this.redraw();
-				} finally {
-					this.tabGroupTransitions = new Map();
-				}
+				this.redrawAnimatingTabGroups();
 			} else if (event.kind === GroupModelChangeKind.TAB_GROUP_CREATED || event.kind === GroupModelChangeKind.TAB_GROUP_REMOVED) {
 				this.redraw();
 			}
@@ -208,15 +241,28 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		this.toolbar = $('.vertical-tabs-toolbar');
 		this.toolbar.draggable = true;
 		this.toolbar.setAttribute('aria-label', localize('verticalTabs.toolbar', "Editor tab actions"));
-		const newTabButton = $<HTMLButtonElement>('button.vertical-tabs-new-tab');
+		const leadingActions = $('.vertical-tabs-toolbar-leading');
+		this.toolbar.appendChild(leadingActions);
+		const newTabButton = $<HTMLButtonElement>('button.vertical-tabs-toolbar-button.vertical-tabs-new-tab');
 		newTabButton.classList.add(...ThemeIcon.asClassNameArray(Codicon.add));
 		newTabButton.type = 'button';
 		newTabButton.setAttribute('aria-label', localize('verticalTabs.newTab', "New Tab"));
-		this.toolbar.appendChild(newTabButton);
+		leadingActions.appendChild(newTabButton);
 		this.newTabAction = newTabButton; // gets its hover once the services are injected
 		this._register(addDisposableListener(newTabButton, EventType.CLICK, event => {
 			EventHelper.stop(event, true);
 			this.openNewTab();
+		}));
+		const filterButton = $<HTMLButtonElement>('button.vertical-tabs-toolbar-button.vertical-tabs-filter-toggle');
+		filterButton.classList.add(...ThemeIcon.asClassNameArray(Codicon.filter));
+		filterButton.type = 'button';
+		filterButton.setAttribute('aria-label', localize('verticalTabs.filterTabs', "Filter Tabs"));
+		filterButton.setAttribute('aria-pressed', 'false');
+		leadingActions.appendChild(filterButton);
+		this.filterAction = filterButton;
+		this._register(addDisposableListener(filterButton, EventType.CLICK, event => {
+			EventHelper.stop(event, true);
+			this.toggleFilter();
 		}));
 		this.createEditorActionsToolBar(this.toolbar, ['vertical-tabs-actions']);
 		this.root.appendChild(this.toolbar);
@@ -231,6 +277,11 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		}));
 		this._register(addDisposableListener(this.toolbar, EventType.DRAG, event => lastGroupDragEvent = event));
 		this._register(addDisposableListener(this.toolbar, EventType.DRAG_END, event => void this.onGroupDragEnd(event, lastGroupDragEvent, this.toolbar!, isNewWindowOperation)));
+
+		// The quick filter reveals above the list. Its input is created when it shows for the first time.
+		this.filterBar = $('.vertical-tabs-filter');
+		this.filterBar.hidden = true;
+		this.root.appendChild(this.filterBar);
 
 		// The list mixes editor tabs with collapsible tab group headers, which a tablist
 		// cannot own. A tree can: headers are expandable items, tabs are selectable items.
@@ -349,6 +400,156 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		}, this.groupView.id);
 	}
 
+	private get isFiltering(): boolean {
+		return this.filterQuery.trim().length > 0;
+	}
+
+	/**
+	 * Whether the list shows a tab group collapsed. While filtering, the groups that were
+	 * collapsed when the filter started list their matching tabs until they are collapsed again.
+	 */
+	private isTabGroupCollapsedInList(group: IEditorTabGroup): boolean {
+		return group.collapsed && !(this.isFiltering && this.tabGroupsExpandedByFilter.has(group.id));
+	}
+
+	/** What the quick filter leaves in the list, or `undefined` while it filters nothing. */
+	private getFilterResult(editors: readonly EditorInput[]): IVerticalTabsFilterResult | undefined {
+		if (!this.isFiltering) {
+			return undefined;
+		}
+
+		const tabGroupsEnabled = this.groupsView.partOptions.tabGroups.enabled;
+		return filterVerticalTabs(
+			this.filterQuery,
+			editors.map(editor => ({
+				name: editor.getName(),
+				description: editor.getDescription(Verbosity.MEDIUM),
+				tabGroupId: tabGroupsEnabled ? this.tabsModel.getTabGroupForEditor(editor)?.id : undefined
+			})),
+			tabGroupsEnabled ? this.tabsModel.tabGroups.map(group => ({ id: group.id, name: getTabGroupName(group) })) : []
+		);
+	}
+
+	private isFilterVisible(): boolean {
+		return !!this.filterBar && !this.filterBar.hidden;
+	}
+
+	/** Shows the quick filter above the list, or hides it again together with its query. */
+	private toggleFilter(): void {
+		if (this.isFilterVisible()) {
+			this.closeFilter();
+		} else {
+			this.revealFilter();
+		}
+	}
+
+	/** Shows the quick filter above the list, if it is not showing yet, and moves keyboard focus into its input. */
+	revealFilter(): void {
+		const bar = this.filterBar;
+		if (!bar || this.compact) {
+			return; // the compact rail has no room for it
+		}
+
+		const input = this.filterInput ?? this.createFilterInput(bar);
+		bar.hidden = false;
+		this.filterAction?.setAttribute('aria-pressed', 'true');
+		this.layoutScrollbar();
+		input.focus();
+		input.select();
+	}
+
+	private createFilterInput(bar: HTMLElement): InputBox {
+		const inputContainer = $('.vertical-tabs-filter-input');
+		bar.appendChild(inputContainer);
+		const input = this.filterInput = this._register(new InputBox(inputContainer, this.contextViewService, {
+			placeholder: localize('verticalTabs.filterPlaceholder', "Filter by name or path"),
+			ariaLabel: localize('verticalTabs.filterAriaLabel', "Filter editor tabs by name or path"),
+			inputBoxStyles: defaultInputBoxStyles
+		}));
+		this._register(input.onDidChange(value => this.onFilterQueryChanged(value)));
+		this._register(addDisposableListener(input.inputElement, EventType.KEY_DOWN, event => this.onFilterKeyDown(event)));
+
+		const closeButton = $<HTMLButtonElement>('button.vertical-tabs-toolbar-button.vertical-tabs-filter-close');
+		closeButton.classList.add(...ThemeIcon.asClassNameArray(Codicon.close));
+		closeButton.type = 'button';
+		closeButton.setAttribute('aria-label', localize('verticalTabs.closeFilter', "Close Tab Filter"));
+		bar.appendChild(closeButton);
+		this._register(this.hoverService.setupManagedHover(getDefaultHoverDelegate('mouse'), closeButton, localize('verticalTabs.closeFilter', "Close Tab Filter")));
+		this._register(addDisposableListener(closeButton, EventType.CLICK, event => {
+			EventHelper.stop(event, true);
+			this.closeFilter();
+		}));
+
+		return input;
+	}
+
+	/** Hides the quick filter and its query, so the list shows all tabs again, and brings keyboard focus back to the list. */
+	private closeFilter(): void {
+		const bar = this.filterBar;
+		if (!bar || bar.hidden) {
+			return;
+		}
+
+		const activeElement = this.root ? getWindow(this.root).document.activeElement : null;
+		const hadFocus = !!activeElement && !!this.root?.contains(activeElement) && !this.toolbar?.contains(activeElement); // the toolbar button that toggled the filter does not count
+		this.filterQuery = '';
+		this.tabGroupsExpandedByFilter.clear();
+		if (this.filterInput) {
+			this.filterInput.value = '';
+		}
+		bar.hidden = true;
+		this.filterAction?.setAttribute('aria-pressed', 'false');
+		this.redraw();
+		if (hadFocus) {
+			const activeRow = this.tabsModel.activeEditor ? this.tabs.get(this.tabsModel.activeEditor)?.element : undefined;
+			const item = activeRow ?? this.getItems()[0];
+			item?.focus();
+			this.setTabStop(item);
+		}
+	}
+
+	private onFilterQueryChanged(query: string): void {
+		if (query === this.filterQuery) {
+			return;
+		}
+
+		const wasFiltering = this.isFiltering;
+		this.filterQuery = query;
+		if (!wasFiltering && this.isFiltering) {
+			// A new filter lists the matching tabs of collapsed tab groups too, without changing the groups
+			this.tabGroupsExpandedByFilter.clear();
+			for (const group of this.tabsModel.tabGroups) {
+				if (group.collapsed) {
+					this.tabGroupsExpandedByFilter.add(group.id);
+				}
+			}
+		}
+		this.redraw();
+
+		const editors = this.tabsModel.getEditors(EditorsOrder.SEQUENTIAL);
+		const matching = this.getFilterResult(editors)?.tabs.size;
+		if (matching !== undefined) {
+			status(matching === 0 ? localize('verticalTabs.filterNoMatches', "No matching tabs") : localize('verticalTabs.filterMatches', "{0} of {1} tabs match", matching, editors.length));
+		}
+	}
+
+	private onFilterKeyDown(event: KeyboardEvent): void {
+		const keyboardEvent = new StandardKeyboardEvent(event);
+		if (keyboardEvent.equals(KeyCode.Escape)) {
+			EventHelper.stop(event, true);
+			this.closeFilter();
+		} else if (keyboardEvent.equals(KeyCode.DownArrow)) {
+			EventHelper.stop(event, true);
+			this.focusItem(this.getItems()[0]); // into the results
+		} else if (keyboardEvent.equals(KeyCode.Enter)) {
+			const firstTab = this.getItems().find(item => this.getEditorOfRow(item));
+			if (firstTab) {
+				EventHelper.stop(event, true);
+				this.focusItem(firstTab); // opens the first match
+			}
+		}
+	}
+
 	/**
 	 * Rebuilds the whole list. Only structural changes (editors or tab groups being
 	 * added, removed or moved, option changes) warrant this; everything else updates
@@ -370,7 +571,8 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		const editors = this.tabsModel.getEditors(EditorsOrder.SEQUENTIAL);
 		this.renderedTabGroups.clear();
 		const tabGroupsEnabled = this.groupsView.partOptions.tabGroups.enabled;
-		const showPinnedSection = this.groupsView.partOptions.pinnedTabsOnSeparateRow && this.tabsModel.stickyCount > 0;
+		const filter = this.getFilterResult(editors);
+		const showPinnedSection = !filter && this.groupsView.partOptions.pinnedTabsOnSeparateRow && this.tabsModel.stickyCount > 0;
 		for (let index = 0; index < editors.length; index++) {
 			const editor = editors[index];
 			if (showPinnedSection && index === 0) {
@@ -378,18 +580,25 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 			} else if (showPinnedSection && index === this.tabsModel.stickyCount) {
 				this.tabsContainer.appendChild(this.createSectionLabel(localize('verticalTabs.editors', "Editors"), this.tabsModel.stickyCount, false));
 			}
+
+			const filterMatches = filter?.tabs.get(index);
+			if (filter && !filterMatches) {
+				continue; // the filter leaves the tab out
+			}
+
 			const tabGroup = tabGroupsEnabled ? this.tabsModel.getTabGroupForEditor(editor) : undefined;
+			const collapsed = !!tabGroup && this.isTabGroupCollapsedInList(tabGroup); // a filter lists the matching tabs of a collapsed group without changing the group
 			const transition = tabGroup ? this.tabGroupTransitions.get(tabGroup.id) : undefined;
 			if (tabGroup && !this.renderedTabGroups.has(tabGroup.id)) {
-				const header = this.createTabGroupHeader(tabGroup, editors);
+				const header = this.createTabGroupHeader(tabGroup, editors, collapsed, filter?.tabGroups.get(tabGroup.id));
 				if (transition) {
 					header.classList.add(transition.kind === 'expand' ? 'expanding' : 'collapsing');
 				}
 				this.tabsContainer.appendChild(header);
-				this.renderedTabGroups.set(tabGroup.id, tabGroup.collapsed);
+				this.renderedTabGroups.set(tabGroup.id, collapsed);
 			}
 
-			if (tabGroup?.collapsed && !this.tabsModel.isActive(editor)) {
+			if (collapsed && !this.tabsModel.isActive(editor)) {
 				const exitingRow = transition?.exitingRows.get(editor);
 				if (exitingRow) {
 					this.tabsContainer.appendChild(this.animateExitingRow(exitingRow));
@@ -397,11 +606,17 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 				continue;
 			}
 
-			const row = this.createTab(editor);
+			const row = this.createTab(editor, filterMatches);
 			if (transition?.kind === 'expand' && !transition.existing.has(editor)) {
 				this.animateEnteringRow(row);
 			}
 			this.tabsContainer.appendChild(row);
+		}
+
+		if (filter?.tabs.size === 0) {
+			const message = $('.vertical-tabs-filter-empty', { 'aria-hidden': 'true' }); // the filter announces the result
+			message.textContent = localize('verticalTabs.filterNoMatches', "No matching tabs");
+			this.tabsContainer.appendChild(message);
 		}
 
 		this.root?.classList.toggle('empty', editors.length === 0);
@@ -442,8 +657,18 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		return undefined;
 	}
 
+	/** Redraws the list and animates the tab groups that it now shows collapsed or expanded. */
+	private redrawAnimatingTabGroups(): void {
+		this.tabGroupTransitions = this.captureTabGroupTransitions();
+		try {
+			this.redraw();
+		} finally {
+			this.tabGroupTransitions = new Map();
+		}
+	}
+
 	/**
-	 * Finds the tab groups that the model change about to be drawn collapses or expands and
+	 * Finds the tab groups that the change about to be drawn collapses or expands in the list and
 	 * takes what the animation needs from the rows that are still on screen: the editors that
 	 * had a row and copies of the rows that a collapse removes. Nothing animates while motion
 	 * is reduced.
@@ -455,13 +680,14 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		}
 
 		for (const group of this.tabsModel.tabGroups) {
+			const collapsed = this.isTabGroupCollapsedInList(group);
 			const wasCollapsed = this.renderedTabGroups.get(group.id);
-			if (wasCollapsed === undefined || wasCollapsed === group.collapsed) {
+			if (wasCollapsed === undefined || wasCollapsed === collapsed) {
 				continue; // not drawn before, or drawn in the state that it is in now
 			}
 
 			const exitingRows = new Map<EditorInput, HTMLElement>();
-			if (group.collapsed) {
+			if (collapsed) {
 				for (const [editor, tab] of this.tabs) {
 					if (this.tabsModel.getTabGroupForEditor(editor)?.id === group.id && !this.tabsModel.isActive(editor)) {
 						exitingRows.set(editor, tab.element.cloneNode(true) as HTMLElement); // taken now, the redraw replaces the rows
@@ -469,7 +695,7 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 				}
 			}
 
-			transitions.set(group.id, { kind: group.collapsed ? 'collapse' : 'expand', existing: new Set(this.tabs.keys()), exitingRows });
+			transitions.set(group.id, { kind: collapsed ? 'collapse' : 'expand', existing: new Set(this.tabs.keys()), exitingRows });
 		}
 
 		return transitions;
@@ -589,18 +815,18 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		}
 	}
 
-	private createTabGroupHeader(group: IEditorTabGroup, editors: readonly EditorInput[]): HTMLElement {
+	private createTabGroupHeader(group: IEditorTabGroup, editors: readonly EditorInput[], collapsed: boolean, nameMatches: readonly IMatch[] | undefined): HTMLElement {
 		const members = editors.filter(editor => this.tabsModel.getTabGroupForEditor(editor)?.id === group.id);
 		const header = $('.vertical-tab-group-header', {
 			role: 'treeitem',
 			tabindex: -1,
 			draggable: !group.locked,
 			'aria-level': 1,
-			'aria-expanded': String(!group.collapsed)
+			'aria-expanded': String(!collapsed)
 		});
 		const disposables = this.registerRow(header);
 		header.dataset.tabGroupId = group.id;
-		header.classList.toggle('collapsed', group.collapsed);
+		header.classList.toggle('collapsed', collapsed);
 		header.classList.toggle('saved', group.saved);
 		header.classList.toggle('locked', group.locked);
 		header.style.setProperty('--tab-group-color', getEditorTabGroupColor(group.color));
@@ -642,7 +868,11 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 
 		const label = getTabGroupName(group);
 		const name = $('span.vertical-tab-group-name');
-		name.textContent = label;
+		if (nameMatches?.length) {
+			disposables.add(new HighlightedLabel(name)).set(label, nameMatches);
+		} else {
+			name.textContent = label;
+		}
 		header.appendChild(name);
 		const dirtyIndicatorAnchor = lockIndicator ?? name;
 
@@ -783,14 +1013,19 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 	}
 
 	private toggleTabGroup(group: IEditorTabGroup): void {
-		this.setTabGroupCollapsed(group, !group.collapsed);
+		this.setTabGroupCollapsed(group, !this.isTabGroupCollapsedInList(group));
 	}
 
 	private setTabGroupCollapsed(group: IEditorTabGroup, collapsed: boolean): void {
+		if (collapsed && group.collapsed && this.isFiltering && this.tabGroupsExpandedByFilter.delete(group.id)) {
+			this.redrawAnimatingTabGroups(); // collapsed in the model all along, only the filter listed its tabs
+			return;
+		}
+
 		this.groupView.setTabGroupCollapsed(group.id, collapsed); // the model change redraws the list and animates it
 	}
 
-	private createTab(editor: EditorInput): HTMLElement {
+	private createTab(editor: EditorInput, filterMatches: IVerticalTabsFilterMatches | undefined): HTMLElement {
 		const row = $('.vertical-tab', { role: 'treeitem', tabindex: -1, draggable: true });
 		const disposables = this.registerRow(row);
 		const tabGroup = this.groupsView.partOptions.tabGroups.enabled ? this.tabsModel.getTabGroupForEditor(editor) : undefined;
@@ -800,7 +1035,7 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 			row.style.setProperty('--tab-group-color', getEditorTabGroupColor(tabGroup.color));
 		}
 
-		const label = disposables.add(this.tabResourceLabels.create(row, { hoverTargetOverride: row }));
+		const label = disposables.add(this.tabResourceLabels.create(row, { hoverTargetOverride: row, supportHighlights: true, supportDescriptionHighlights: true }));
 		const fallbackIcon = $('span.vertical-tab-fallback-icon', { 'aria-hidden': 'true' });
 		row.appendChild(fallbackIcon);
 		// The row is the only Tab stop: its actions are reached with the keyboard through
@@ -822,7 +1057,7 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		}));
 		actionBar.setFocusable(false);
 
-		const tab: IVerticalTab = { element: row, label, fallbackIcon, actionBar };
+		const tab: IVerticalTab = { element: row, label, fallbackIcon, actionBar, filterMatches };
 		this.tabs.set(editor, tab);
 		this.renderTabLabel(editor, tab);
 		this.renderTabActions(editor, tab);
@@ -835,8 +1070,11 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 	private renderTabLabel(editor: EditorInput, tab: IVerticalTab): void {
 		tab.label.setResource({
 			resource: EditorResourceAccessor.getOriginalUri(editor, { supportSideBySide: SideBySideEditor.BOTH }),
-			name: editor.getName()
+			name: editor.getName(),
+			description: tab.filterMatches ? editor.getDescription(Verbosity.MEDIUM) : undefined // the path shows while filtering, to tell why a tab matched
 		}, {
+			matches: tab.filterMatches?.name,
+			descriptionMatches: tab.filterMatches?.description,
 			title: this.getHoverTitle(editor),
 			italic: !this.tabsModel.isPinned(editor),
 			extraClasses: ['vertical-tab-label', ...editor.getLabelExtraClasses()],
@@ -900,26 +1138,29 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		// Tell screen readers which tab group a tab is in, and whether it is the one tab of a collapsed group that remains listed
 		const ariaLabel = computeEditorAriaLabel(editor, this.groupView.getIndexOfEditor(editor), this.groupView, this.editorPartsView.count);
 		const tabGroup = this.groupsView.partOptions.tabGroups.enabled ? this.tabsModel.getTabGroupForEditor(editor) : undefined;
-		row.setAttribute('aria-label', tabGroup ? getTabGroupTabAriaLabel(ariaLabel, tabGroup) : ariaLabel);
+		row.setAttribute('aria-label', tabGroup ? getTabGroupTabAriaLabel(ariaLabel, tabGroup, this.isTabGroupCollapsedInList(tabGroup)) : ariaLabel);
 	}
 
 	/**
 	 * Gives every item its position within its level of the tree, which is the set screen
 	 * readers count in: tab group headers and the tabs outside of groups form the first level,
 	 * the tabs of a group form the second level below its header (including the tabs that a
-	 * collapsed group hides). Positions only change with the structure, i.e. on a redraw.
+	 * collapsed group hides, but not the ones that a filter leaves out). Positions only change
+	 * with the structure, i.e. on a redraw.
 	 */
 	private updateItemPositions(): void {
 		const tabGroupMembers = new Map<string, EditorInput[]>();
 		if (this.groupsView.partOptions.tabGroups.enabled) {
-			for (const editor of this.tabsModel.getEditors(EditorsOrder.SEQUENTIAL)) {
+			const editors = this.tabsModel.getEditors(EditorsOrder.SEQUENTIAL);
+			const filter = this.getFilterResult(editors);
+			editors.forEach((editor, index) => {
 				const tabGroup = this.tabsModel.getTabGroupForEditor(editor);
-				if (tabGroup) {
+				if (tabGroup && (!filter || filter.tabs.has(index))) { // the members that the filter leaves out are not in the list
 					const members = tabGroupMembers.get(tabGroup.id) ?? [];
 					members.push(editor);
 					tabGroupMembers.set(tabGroup.id, members);
 				}
-			}
+			});
 		}
 
 		const topLevelItems = this.getItems().filter(item => !item.classList.contains('in-tab-group'));
@@ -1458,21 +1699,30 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		const items = this.getItems();
 		const index = items.indexOf(item);
 		let target: HTMLElement | undefined;
-		if (keyboardEvent.equals(KeyCode.UpArrow)) {
+		if (keyboardEvent.equals(KeyCode.Escape) && this.isFilterVisible()) {
+			EventHelper.stop(event, true);
+			this.closeFilter();
+			return;
+		} else if (keyboardEvent.equals(KeyCode.UpArrow)) {
 			target = items[index - 1];
+			if (!target && this.filterInput && this.isFilterVisible()) {
+				EventHelper.stop(event, true);
+				this.filterInput.focus(); // back out of the results
+				return;
+			}
 		} else if (keyboardEvent.equals(KeyCode.DownArrow)) {
 			target = items[index + 1];
 		} else if (keyboardEvent.equals(KeyCode.Home)) {
 			target = items[0];
 		} else if (keyboardEvent.equals(KeyCode.End)) {
 			target = items[items.length - 1];
-		} else if (tabGroup && keyboardEvent.equals(KeyCode.LeftArrow) && !tabGroup.collapsed) {
+		} else if (tabGroup && keyboardEvent.equals(KeyCode.LeftArrow) && !this.isTabGroupCollapsedInList(tabGroup)) {
 			EventHelper.stop(event, true);
 			this.setTabGroupCollapsed(tabGroup, true);
 			return;
 		} else if (tabGroup && keyboardEvent.equals(KeyCode.RightArrow)) {
 			EventHelper.stop(event, true);
-			if (tabGroup.collapsed) {
+			if (this.isTabGroupCollapsedInList(tabGroup)) {
 				this.setTabGroupCollapsed(tabGroup, false);
 			} else {
 				this.focusItem(items[index + 1]); // into the group, as in a tree
@@ -1541,13 +1791,17 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 	}
 
 	private getVisibleEditors(): EditorInput[] {
-		if (!this.groupsView.partOptions.tabGroups.enabled) {
-			return [...this.tabsModel.getEditors(EditorsOrder.SEQUENTIAL)];
-		}
+		const editors = this.tabsModel.getEditors(EditorsOrder.SEQUENTIAL);
+		const filter = this.getFilterResult(editors);
+		const tabGroupsEnabled = this.groupsView.partOptions.tabGroups.enabled;
 
-		return this.tabsModel.getEditors(EditorsOrder.SEQUENTIAL).filter(editor => {
-			const group = this.tabsModel.getTabGroupForEditor(editor);
-			return !group?.collapsed || this.tabsModel.isActive(editor);
+		return editors.filter((editor, index) => {
+			if (filter && !filter.tabs.has(index)) {
+				return false; // the filter leaves the tab out
+			}
+
+			const group = tabGroupsEnabled ? this.tabsModel.getTabGroupForEditor(editor) : undefined;
+			return !group || !this.isTabGroupCollapsedInList(group) || this.tabsModel.isActive(editor);
 		});
 	}
 
@@ -1556,7 +1810,7 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 			return;
 		}
 
-		const toolbarHeight = this.toolbar.offsetHeight;
+		const toolbarHeight = this.toolbar.offsetHeight + (this.filterBar && !this.filterBar.hidden ? this.filterBar.offsetHeight : 0);
 		const listHeight = Math.max(0, this.dimensions.height - toolbarHeight);
 		const scrollbarNode = this.tabsScrollbar.getDomNode();
 		scrollbarNode.style.width = `${this.dimensions.width}px`;
@@ -1610,7 +1864,14 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 	unstickEditor(editor: EditorInput): void { this.redraw(); }
 	setActive(isActive: boolean): void { this.refreshTabStates(); }
 	updateEditorSelections(): void { this.refreshTabStates(); }
-	updateEditorLabel(editor: EditorInput): void { this.updateTab(editor); }
+	updateEditorLabel(editor: EditorInput): void {
+		if (this.isFiltering) {
+			this.redraw(); // a different label can change whether the tab matches the filter
+		} else {
+			this.updateTab(editor);
+		}
+	}
+
 	updateEditorCapabilities(editor: EditorInput): void { this.updateTab(editor); }
 
 	updateEditorDirty(editor: EditorInput): void {
@@ -1669,6 +1930,9 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		}
 
 		this.compact = compact;
+		if (compact) {
+			this.closeFilter(); // the rail has no room for the filter
+		}
 		this.root?.classList.toggle('compact', compact);
 		this.root?.classList.toggle('show-file-icons', compact); // the icon theme only paints file icons within this class, which the group sets only while icons are shown
 		if (!this.groupsView.partOptions.showIcons) {

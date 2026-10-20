@@ -327,6 +327,8 @@ export interface IEditorTabsFixtureOptions {
 		readonly width: number;
 		readonly height?: number;
 		readonly position?: 'left' | 'right';
+		/** Reveals the quick filter of the tab column with this query typed into it. */
+		readonly filter?: string;
 	};
 	readonly breadcrumbs?: {
 		readonly filePath?: 'on' | 'off' | 'last';
@@ -632,6 +634,15 @@ export function renderEditorTabsFixture(ctx: ComponentFixtureContext, options: I
 	titleControl.openEditors(model.getEditors(EditorsOrder.SEQUENTIAL));
 	titleControl.setActive(isGroupActive);
 	layout();
+	if (verticalTabs?.filter !== undefined) {
+		titleControl.revealVerticalTabsFilter();
+		const filterInput = verticalTabsContainer.querySelector<HTMLInputElement>('.vertical-tabs-filter input');
+		if (!filterInput) {
+			throw new Error('The filtered tabs fixture requires the filter of the vertical tabs');
+		}
+		filterInput.value = verticalTabs.filter;
+		filterInput.dispatchEvent(new InputEvent('input', { bubbles: true }));
+	}
 	if (options.activeTabClipping) {
 		disposableStore.add(scheduleAtNextAnimationFrame(getWindow(container), () => {
 			const tabsContainer = titleContainer.querySelector<HTMLElement>('.tabs-container');
@@ -951,6 +962,11 @@ function createLayoutFixtures() {
 				render: render(true, { editors: tabGroupEditorSpecs(), tabGroups: twoTabGroups(), verticalTabs: { width: 240 } }),
 				additionalThemes: ['darkHighContrast', 'lightHighContrast'],
 				expectedVisualDescriptions: ['The vertical tab list shows the expanded Frontend group header with a downward chevron and its three indented rows (the active one highlighted, one with an unsaved dot), and the collapsed Docs group as a header with a sideways chevron and no rows. Ungrouped rows sit before, between, and after the groups.'],
+			}),
+			VerticalFiltered: defineComponentFixture({
+				render: render(true, { editors: tabGroupEditorSpecs(), tabGroups: twoTabGroups(), verticalTabs: { width: 240, filter: 'md' } }),
+				additionalThemes: ['darkHighContrast', 'lightHighContrast'],
+				expectedVisualDescriptions: ['The quick filter above the vertical tab list holds "md". Only the Docs group header and its three markdown tabs are listed, with the matching letters of each name highlighted and the folder shown after each name, although the Docs group is collapsed. The Frontend group and the other tabs are left out.'],
 			}),
 			VerticalCompact: defineComponentFixture({
 				render: render(true, { editors: tabGroupEditorSpecs(), tabGroups: twoTabGroups(), verticalTabs: { width: 48 } }),

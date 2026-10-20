@@ -14,6 +14,7 @@ import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/tes
 import { TreeViewsDnDService } from '../../../../../editor/common/services/treeViewsDnd.js';
 import { ITreeViewsDnDService } from '../../../../../editor/common/services/treeViewsDndService.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
+import { IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
 import { LocalSelectionTransfer } from '../../../../../platform/dnd/browser/dnd.js';
 import { IEditorOptions } from '../../../../../platform/editor/common/editor.js';
 import { DraggedEditorIdentifier } from '../../../../browser/dnd.js';
@@ -32,7 +33,7 @@ import { INotebookDocumentService, NotebookDocumentWorkbenchService } from '../.
 import { createEditorPart, ITestInstantiationService, registerTestEditor, TestFileEditorInput, workbenchInstantiationService, workbenchTeardown } from '../../workbenchTestServices.js';
 
 /** The `keyCode` of keyboard events as the browser reports it. */
-const domKeyCodes = { 'Enter': 13, ' ': 32, 'End': 35, 'Home': 36, 'ArrowLeft': 37, 'ArrowUp': 38, 'ArrowRight': 39, 'ArrowDown': 40 };
+const domKeyCodes = { 'Enter': 13, 'Escape': 27, ' ': 32, 'End': 35, 'Home': 36, 'ArrowLeft': 37, 'ArrowUp': 38, 'ArrowRight': 39, 'ArrowDown': 40 };
 
 class TestEditorInput extends TestFileEditorInput {
 
@@ -40,9 +41,15 @@ class TestEditorInput extends TestFileEditorInput {
 		super(resource, 'testEditorInput');
 	}
 
+	private description: string | undefined;
+
 	override getName(): string { return this.name; }
 
 	setName(name: string): void { this.name = name; }
+
+	override getDescription(): string | undefined { return this.description; }
+
+	setDescription(description: string | undefined): void { this.description = description; }
 }
 
 suite('VerticalEditorTabsControl', () => {
@@ -395,6 +402,188 @@ suite('VerticalEditorTabsControl', () => {
 			collapsed: { header: 'Work, 2 tabs, 1 unsaved, saved, locked', expanded: 'false', rows: ['file0.txt, tab group Work, collapsed', 'file2.txt'] },
 			unnamed: { header: 'Tab Group, 2 tabs, 1 unsaved, saved, locked', expanded: 'false', rows: ['file0.txt, tab group Tab Group, collapsed', 'file2.txt'] }
 		});
+	});
+
+	function filterBar(): HTMLElement {
+		return container.querySelector<HTMLElement>('.vertical-tabs-filter')!;
+	}
+
+	function filterInput(): HTMLInputElement {
+		return filterBar().querySelector<HTMLInputElement>('input')!;
+	}
+
+	function filterToggle(): HTMLButtonElement {
+		return container.querySelector<HTMLButtonElement>('.vertical-tabs-filter-toggle')!;
+	}
+
+	function typeFilter(text: string): void {
+		const input = filterInput();
+		input.value = text;
+		input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+	}
+
+	/** The tabs by their file name and the tab group headers by their name in brackets, in the order of the list. */
+	function listedItems(): string[] {
+		return Array.from(container.querySelectorAll<HTMLElement>('.vertical-tabs-list > :is(.vertical-tab:not(.exiting), .vertical-tab-group-header)'))
+			.map(element => element.dataset.tabGroupId ? `[${element.querySelector('.vertical-tab-group-name')?.textContent}]` : element.dataset.resourceName!);
+	}
+
+	test('the Filter Tabs button reveals a quick filter that narrows the list by name and path and highlights what matched', () => {
+		(model.getEditorByIndex(2) as TestEditorInput).setDescription('src/app');
+		(model.getEditorByIndex(3) as TestEditorInput).setDescription('tests/app');
+		const highlighted = (selector: string) => rows().map(row => Array.from(row.querySelectorAll(`${selector} .highlight`)).map(element => element.textContent).join('+')).filter(text => text);
+		const describeFilter = () => ({
+			hidden: filterBar().hidden,
+			pressed: filterToggle().getAttribute('aria-pressed'),
+			focusInInput: activeElement() === filterInput()
+		});
+
+		const initial = { hidden: filterBar().hidden, pressed: filterToggle().getAttribute('aria-pressed'), label: filterToggle().getAttribute('aria-label'), input: !!container.querySelector('.vertical-tabs-filter input') };
+		filterToggle().click();
+		const revealed = { ...describeFilter(), placeholder: filterInput().placeholder, label: filterInput().getAttribute('aria-label') };
+
+		typeFilter('FILE1');
+		const byName = { items: listedItems(), names: highlighted('.label-name'), descriptions: rows().map(row => row.querySelector('.label-description')?.textContent) };
+		typeFilter('app');
+		const byPath = { items: listedItems(), names: highlighted('.label-name'), descriptions: highlighted('.label-description') };
+		typeFilter('file2 tests');
+		const termsOfDifferentTabs = listedItems();
+		typeFilter('zzz');
+		const noMatches = { items: listedItems(), message: container.querySelector('.vertical-tabs-filter-empty')?.textContent };
+		typeFilter('');
+		const cleared = listedItems().length;
+		filterToggle().click();
+
+		assert.deepStrictEqual({ initial, revealed, byName, byPath, termsOfDifferentTabs, noMatches, cleared, closed: describeFilter() }, {
+			initial: { hidden: true, pressed: 'false', label: 'Filter Tabs', input: false },
+			revealed: { hidden: false, pressed: 'true', focusInInput: true, placeholder: 'Filter by name or path', label: 'Filter editor tabs by name or path' },
+			byName: { items: ['file1.txt', 'file10.txt', 'file11.txt'], names: ['file1', 'file1', 'file1'], descriptions: [undefined, undefined, undefined] },
+			byPath: { items: ['file2.txt', 'file3.txt'], names: [], descriptions: ['app', 'app'] },
+			termsOfDifferentTabs: [],
+			noMatches: { items: [], message: 'No matching tabs' },
+			cleared: 12,
+			closed: { hidden: true, pressed: 'false', focusInInput: false }
+		});
+	});
+
+	test('tab groups stay in the filtered list for the tabs that match, and collapsed groups show their matches without changing', () => {
+		const editors = model.getEditors(EditorsOrder.SEQUENTIAL);
+		const work = model.createTabGroup(editors.slice(2, 5), 'Work', 'blue')!;
+		const play = model.createTabGroup(editors.slice(6, 8), 'Play', 'red')!;
+		model.setTabGroupCollapsed(play.id, true);
+		const playHeader = () => container.querySelector<HTMLElement>(`.vertical-tab-group-header[data-tab-group-id="${play.id}"]`);
+		const describeState = () => ({ items: listedItems().slice(0, 6), playExpanded: playHeader()?.getAttribute('aria-expanded'), playCollapsed: play.collapsed, workCollapsed: work.collapsed });
+
+		const unfiltered = describeState();
+		filterToggle().click();
+		typeFilter('file7');
+		const collapsedGroupMatches = describeState();
+		typeFilter('file3');
+		const expandedGroupMatches = describeState();
+		typeFilter('WORK');
+		const groupNameMatches = { ...describeState(), highlight: container.querySelector('.vertical-tab-group-name .highlight')?.textContent };
+		typeFilter('file');
+		const everyTabMatches = listedItems();
+		pressKey('Escape');
+		const afterEscape = describeState();
+
+		assert.deepStrictEqual({ unfiltered, collapsedGroupMatches, expandedGroupMatches, groupNameMatches, everyTabMatches, afterEscape }, {
+			unfiltered: { items: ['file0.txt', 'file1.txt', '[Work]', 'file2.txt', 'file3.txt', 'file4.txt'], playExpanded: 'false', playCollapsed: true, workCollapsed: false },
+			collapsedGroupMatches: { items: ['[Play]', 'file7.txt'], playExpanded: 'true', playCollapsed: true, workCollapsed: false },
+			expandedGroupMatches: { items: ['[Work]', 'file3.txt'], playExpanded: undefined, playCollapsed: true, workCollapsed: false },
+			groupNameMatches: { items: ['[Work]', 'file2.txt', 'file3.txt', 'file4.txt'], playExpanded: undefined, playCollapsed: true, workCollapsed: false, highlight: 'Work' },
+			everyTabMatches: ['file0.txt', 'file1.txt', '[Work]', 'file2.txt', 'file3.txt', 'file4.txt', 'file5.txt', '[Play]', 'file6.txt', 'file7.txt', 'file8.txt', 'file9.txt', 'file10.txt', 'file11.txt'],
+			afterEscape: { items: ['file0.txt', 'file1.txt', '[Work]', 'file2.txt', 'file3.txt', 'file4.txt'], playExpanded: 'false', playCollapsed: true, workCollapsed: false }
+		});
+	});
+
+	test('while filtering, the header of a group that the filter lists collapses it in the list again, and expanding it is a real expand', () => {
+		const play = model.createTabGroup(model.getEditors(EditorsOrder.SEQUENTIAL).slice(6, 8), 'Play', 'red')!;
+		model.setTabGroupCollapsed(play.id, true);
+		const header = () => container.querySelector<HTMLElement>(`.vertical-tab-group-header[data-tab-group-id="${play.id}"]`)!;
+		const describeState = () => ({
+			items: listedItems().slice(6, 10),
+			expanded: header().getAttribute('aria-expanded'),
+			collapsed: play.collapsed,
+			rowLabel: rows().find(row => !row.classList.contains('exiting') && row.dataset.resourceName === 'file6.txt')?.getAttribute('aria-label')
+		});
+
+		filterToggle().click();
+		typeFilter('file');
+		const listedByFilter = describeState();
+		header().click();
+		const collapsedInList = describeState();
+		header().focus();
+		pressKey('ArrowRight');
+		const expanded = describeState();
+		pressKey('ArrowLeft');
+		const collapsedAgain = describeState();
+		pressKey('Escape');
+		const afterClosing = describeState();
+
+		assert.deepStrictEqual({ listedByFilter, collapsedInList, expanded, collapsedAgain, afterClosing }, {
+			listedByFilter: { items: ['[Play]', 'file6.txt', 'file7.txt', 'file8.txt'], expanded: 'true', collapsed: true, rowLabel: 'file6.txt, tab group Play' },
+			collapsedInList: { items: ['[Play]', 'file8.txt', 'file9.txt', 'file10.txt'], expanded: 'false', collapsed: true, rowLabel: undefined },
+			expanded: { items: ['[Play]', 'file6.txt', 'file7.txt', 'file8.txt'], expanded: 'true', collapsed: false, rowLabel: 'file6.txt, tab group Play' },
+			collapsedAgain: { items: ['[Play]', 'file8.txt', 'file9.txt', 'file10.txt'], expanded: 'false', collapsed: true, rowLabel: undefined },
+			afterClosing: { items: ['[Play]', 'file8.txt', 'file9.txt', 'file10.txt'], expanded: 'false', collapsed: true, rowLabel: undefined }
+		});
+	});
+
+	test('Escape clears and closes the filter, Down moves into the results, Up moves back out and Enter opens the first match', () => {
+		filterToggle().click();
+		typeFilter('file1');
+		const log: Record<string, unknown> = {};
+
+		openedEditors = [];
+		log.down = { prevented: pressKey('ArrowDown'), focused: focusedItem(), opened: openedEditors.map(editor => editor.getName()) };
+		log.downAgain = { prevented: pressKey('ArrowDown'), focused: focusedItem() };
+		pressKey('ArrowUp');
+		log.upToFirst = focusedItem();
+		log.upOut = { prevented: pressKey('ArrowUp'), inInput: activeElement() === filterInput() };
+		openedEditors = [];
+		log.enter = { prevented: pressKey('Enter'), focused: focusedItem(), opened: openedEditors.map(editor => editor.getName()) };
+
+		pressKey('ArrowDown');
+		log.escapeFromList = { prevented: pressKey('Escape'), hidden: filterBar().hidden, query: filterInput().value, listed: listedItems().length, focused: focusedItem() };
+
+		filterToggle().click();
+		typeFilter('file');
+		log.escapeFromInput = { prevented: pressKey('Escape'), hidden: filterBar().hidden, query: filterInput().value, listed: listedItems().length, focused: focusedItem() };
+
+		assert.deepStrictEqual(log, {
+			down: { prevented: true, focused: 'file1.txt', opened: ['file1.txt'] },
+			downAgain: { prevented: true, focused: 'file10.txt' },
+			upToFirst: 'file1.txt',
+			upOut: { prevented: true, inInput: true },
+			enter: { prevented: true, focused: 'file1.txt', opened: ['file1.txt'] },
+			escapeFromList: { prevented: true, hidden: true, query: '', listed: 12, focused: 'file0.txt' },
+			escapeFromInput: { prevented: true, hidden: true, query: '', listed: 12, focused: 'file0.txt' }
+		});
+	});
+
+	test('the filter shows and hides above the list without taking room from it, and leaves the compact rail alone', () => {
+		layoutControl(400, 240);
+		const root = container.querySelector<HTMLElement>('.vertical-tabs-and-actions-container')!;
+		const toolbarHeight = root.querySelector<HTMLElement>('.vertical-tabs-toolbar')!.offsetHeight;
+		const listHeight = () => container.querySelector<HTMLElement>('.monaco-scrollable-element')!.getBoundingClientRect().height;
+		const display = (selector: string) => mainWindow.getComputedStyle(root.querySelector(selector)!).display;
+
+		const closed = { fits: toolbarHeight + listHeight() === 400 };
+		filterToggle().click();
+		const open = { bar: display('.vertical-tabs-filter'), fits: toolbarHeight + filterBar().offsetHeight + listHeight() === 400, listShrank: listHeight() < 400 - toolbarHeight };
+		layoutControl(400, 48);
+		const compact = { hidden: filterBar().hidden, bar: display('.vertical-tabs-filter'), button: display('.vertical-tabs-filter-toggle'), query: filterInput().value, listed: listedItems().length };
+
+		assert.deepStrictEqual({ closed, open, compact }, {
+			closed: { fits: true },
+			open: { bar: 'flex', fits: true, listShrank: true },
+			compact: { hidden: true, bar: 'none', button: 'none', query: '', listed: 12 }
+		});
+	});
+
+	test('the vertical tabs tell the keybinding service that they hold focus', () => {
+		assert.strictEqual(instantiationService.get(IContextKeyService).getContextKeyValue('verticalEditorTabsFocus'), true);
 	});
 
 	test('toggling a tab group keeps focus on its header', () => {

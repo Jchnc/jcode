@@ -28,13 +28,14 @@ import { ITelemetryService } from '../../../../platform/telemetry/common/telemet
 import { ActiveGroupEditorsByMostRecentlyUsedQuickAccess } from './editorQuickAccess.js';
 import { SideBySideEditor } from './sideBySideEditor.js';
 import { TextDiffEditor } from './textDiffEditor.js';
-import { ActiveEditorCanSplitInGroupContext, ActiveEditorGroupEmptyContext, ActiveEditorGroupLockedContext, ActiveEditorStickyContext, ActiveEditorInTabGroupContext, EditorPartModalCanMoveToEditorAreaContext, EditorPartModalContext, EditorPartModalMaximizedContext, EditorPartModalNavigationContext, EditorPartModalSidebarContext, IsSessionsWindowContext, MultipleEditorGroupsContext, SideBySideEditorActiveContext, TextCompareEditorActiveContext } from '../../../common/contextkeys.js';
+import { ActiveEditorCanSplitInGroupContext, ActiveEditorGroupEmptyContext, ActiveEditorGroupLockedContext, ActiveEditorStickyContext, ActiveEditorInTabGroupContext, EditorPartModalCanMoveToEditorAreaContext, EditorPartModalContext, EditorPartModalMaximizedContext, EditorPartModalNavigationContext, EditorPartModalSidebarContext, IsSessionsWindowContext, MultipleEditorGroupsContext, SideBySideEditorActiveContext, TextCompareEditorActiveContext, VerticalEditorTabsFocusContext } from '../../../common/contextkeys.js';
 import { CloseDirection, EditorInputCapabilities, EditorsOrder, GroupIdentifier, IResourceDiffEditorInput, IUntitledTextResourceEditorInput, isDiffEditorInput, isEditorInputWithOptionsAndGroup, isResourceEditorInput } from '../../../common/editor.js';
 import { IMultiDiffEditorOptions } from '../../../../editor/common/multiDiffEditor.js';
 import { EditorInput } from '../../../common/editor/editorInput.js';
 import { SideBySideEditorInput } from '../../../common/editor/sideBySideEditorInput.js';
 import { EditorGroupColumn, columnToEditorGroup } from '../../../services/editor/common/editorGroupColumn.js';
 import { EditorGroupLayout, GroupDirection, GroupLocation, GroupsOrder, IEditorGroup, IEditorGroupsService, IEditorReplacement, IModalEditorPart, preferredSideBySideGroupDirection } from '../../../services/editor/common/editorGroupsService.js';
+import { isAncestorOfActiveElement } from '../../../../base/browser/dom.js';
 import { mainWindow } from '../../../../base/browser/window.js';
 import { IEditorResolverService } from '../../../services/editor/common/editorResolverService.js';
 import { IEditorService, SIDE_GROUP } from '../../../services/editor/common/editorService.js';
@@ -98,6 +99,7 @@ export const OPEN_SAVED_TAB_GROUP_COMMAND_ID = 'workbench.action.editor.openSave
 export const DELETE_SAVED_TAB_GROUP_COMMAND_ID = 'workbench.action.editor.deleteSavedTabGroup';
 export const UNDO_TAB_GROUP_ACTION_COMMAND_ID = 'workbench.action.editor.undoTabGroupAction';
 export const TOGGLE_COLLAPSE_TAB_GROUP_COMMAND_ID = 'workbench.action.editor.toggleCollapseTabGroup';
+export const FILTER_VERTICAL_TABS_COMMAND_ID = 'workbench.action.editor.filterVerticalTabs';
 export const FOCUS_NEXT_TAB_GROUP_COMMAND_ID = 'workbench.action.editor.focusNextTabGroup';
 export const FOCUS_PREVIOUS_TAB_GROUP_COMMAND_ID = 'workbench.action.editor.focusPreviousTabGroup';
 
@@ -2065,6 +2067,31 @@ function registerTabGroupCommands(): void {
 			const active = getActiveTabGroup(accessor, args);
 			if (active) {
 				active.group.setTabGroupCollapsed(active.tabGroup.id, !active.tabGroup.collapsed);
+			}
+		}
+	});
+
+	registerAction2(class extends Action2 {
+		constructor() {
+			super({
+				id: FILTER_VERTICAL_TABS_COMMAND_ID,
+				title: localize2('filterVerticalTabs', "Filter Tabs"),
+				category: Categories.View,
+				f1: false, // only offered where the vertical tabs are, i.e. their toolbar and keyboard focus
+				keybinding: {
+					weight: KeybindingWeight.WorkbenchContrib,
+					when: VerticalEditorTabsFocusContext,
+					primary: KeyMod.CtrlCmd | KeyCode.KeyF
+				}
+			});
+		}
+		run(accessor: ServicesAccessor): void {
+			const editorGroupsService = accessor.get(IEditorGroupsService);
+
+			// The vertical tabs that hold keyboard focus belong to a group that is not necessarily the active one
+			const group = editorGroupsService.groups.find(candidate => isEditorGroupView(candidate) && isAncestorOfActiveElement(candidate.element)) ?? editorGroupsService.activeGroup;
+			if (isEditorGroupView(group)) {
+				group.revealVerticalTabsFilter();
 			}
 		}
 	});

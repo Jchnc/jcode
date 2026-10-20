@@ -129,6 +129,7 @@ export const IsMainEditorCenteredLayoutContext = new RawContextKey<boolean>('isC
 export const SplitEditorsVertically = new RawContextKey<boolean>('splitEditorsVertically', false, localize('splitEditorsVertically', "Whether editors split vertically"));
 export const MainEditorAreaVisibleContext = new RawContextKey<boolean>('mainEditorAreaVisible', true, localize('mainEditorAreaVisible', "Whether the editor area in the main window is visible"));
 export const EditorTabsVisibleContext = new RawContextKey<boolean>('editorTabsVisible', true, localize('editorTabsVisible', "Whether editor tabs are visible"));
+export const VerticalEditorTabsFocusContext = new RawContextKey<boolean>('verticalEditorTabsFocus', false, localize('verticalEditorTabsFocus', "Whether keyboard focus is in the vertical editor tabs"));
 
 //#endregion
 

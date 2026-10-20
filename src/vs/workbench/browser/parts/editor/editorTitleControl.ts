@@ -170,6 +170,12 @@ export class EditorTitleControl extends Themable {
 		return this.editorTabsControl.updateEditorDirty(editor);
 	}
 
+	revealVerticalTabsFilter(): void {
+		if (this.editorTabsControl instanceof VerticalEditorTabsControl) {
+			this.editorTabsControl.revealFilter();
+		}
+	}
+
 	updateOptions(oldOptions: IEditorPartOptions, newOptions: IEditorPartOptions): void {
 
 		// Update editor tabs control if options changed

@@ -1293,6 +1293,10 @@ export class EditorGroupView extends Themable implements IEditorGroupView {
 		return this.model.undoLastTabGroupAction();
 	}
 
+	revealVerticalTabsFilter(): void {
+		this.titleControl.revealVerticalTabsFilter();
+	}
+
 	//#endregion
 
 	//#region openEditor()

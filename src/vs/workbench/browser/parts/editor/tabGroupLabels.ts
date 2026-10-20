@@ -59,9 +59,11 @@ export function getTabGroupHeaderTitle(group: IEditorTabGroup, details: ITabGrou
 /**
  * Extends the accessible name of a tab with the tab group it belongs to. A collapsed
  * group is mentioned as well because it hides the other tabs of the group.
+ *
+ * @param collapsed whether the group shows collapsed, if that differs from its state (e.g. while a filter lists its tabs)
  */
-export function getTabGroupTabAriaLabel(tabAriaLabel: string, group: IEditorTabGroup): string {
-	return group.collapsed ?
+export function getTabGroupTabAriaLabel(tabAriaLabel: string, group: IEditorTabGroup, collapsed = group.collapsed): string {
+	return collapsed ?
 		localize('tabGroup.tabAriaCollapsed', "{0}, tab group {1}, collapsed", tabAriaLabel, getTabGroupName(group)) :
 		localize('tabGroup.tabAria', "{0}, tab group {1}", tabAriaLabel, getTabGroupName(group));
 }

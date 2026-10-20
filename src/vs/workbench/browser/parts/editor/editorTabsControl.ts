@@ -129,7 +129,7 @@ export abstract class EditorTabsControl extends Themable implements IEditorTabsC
 	private readonly editorLayoutActionsToolbarDisposables = this._register(new DisposableStore());
 	private readonly editorLayoutActionsDisposables = this._register(new DisposableStore());
 
-	private readonly contextMenuContextKeyService: IContextKeyService;
+	protected readonly contextMenuContextKeyService: IContextKeyService;
 	private resourceContext: ResourceContextKey;
 
 	private editorPinnedContext: IContextKey<boolean>;
