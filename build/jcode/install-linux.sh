@@ -107,8 +107,9 @@ PACKAGE_URL="$(sed -n 2p <<<"$ASSET")"
 PACKAGE_SHA256="$(sed -n 3p <<<"$ASSET")"
 
 INSTALLED="$(dpkg-query -W -f='${Status} ${Version}' jcode 2>/dev/null || true)"
+# The package version is the release version plus a build suffix, for example 1.2.3-1792522794.
 case "$INSTALLED" in
-	"install ok installed $PACKAGE_VERSION"*) echo "JCode $PACKAGE_VERSION is already installed."; exit 0 ;;
+	"install ok installed $PACKAGE_VERSION" | "install ok installed $PACKAGE_VERSION-"*) echo "JCode $PACKAGE_VERSION is already installed."; exit 0 ;;
 esac
 
 PACKAGE="$TMP/JCode-linux-$ARCH-$PACKAGE_VERSION.deb"
