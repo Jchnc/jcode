@@ -183,6 +183,7 @@ export class TestHistoryService implements IHistoryService {
 	getSavedTabGroups(): readonly ISavedEditorTabGroup[] { return []; }
 	saveClosedTabGroup(_tabGroup: IEditorTabGroup, _editors: readonly { editor: EditorInput; index: number }[]): void { }
 	async reopenSavedTabGroup(_id: string): Promise<void> { }
+	renameSavedTabGroup(_id: string, _name: string): void { }
 	deleteSavedTabGroup(_id: string): void { }
 	async goForward(): Promise<void> { }
 	async goBack(): Promise<void> { }

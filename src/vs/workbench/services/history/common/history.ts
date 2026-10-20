@@ -119,6 +119,9 @@ export interface IHistoryService {
 	 */
 	reopenSavedTabGroup(id: string, group?: GroupIdentifier): Promise<void>;
 
+	/** Changes the name of a closed saved tab group. */
+	renameSavedTabGroup(id: string, name: string): void;
+
 	/** Permanently removes a closed saved tab group. */
 	deleteSavedTabGroup(id: string): void;
 

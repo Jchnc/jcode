@@ -6,7 +6,7 @@
 import { IJSONSchema } from '../../../../base/common/jsonSchema.js';
 import { KeyChord, KeyCode, KeyMod } from '../../../../base/common/keyCodes.js';
 import { Schemas, matchesScheme } from '../../../../base/common/network.js';
-import { extname, isEqual } from '../../../../base/common/resources.js';
+import { basename, extname, isEqual } from '../../../../base/common/resources.js';
 import { isNumber, isObject, isString, isUndefined } from '../../../../base/common/types.js';
 import { URI, UriComponents } from '../../../../base/common/uri.js';
 import { Codicon } from '../../../../base/common/codicons.js';
@@ -22,13 +22,13 @@ import { IInstantiationService, ServicesAccessor } from '../../../../platform/in
 import { KeybindingWeight, KeybindingsRegistry } from '../../../../platform/keybinding/common/keybindingsRegistry.js';
 import { IListService, IOpenEvent, RawWorkbenchListFocusContextKey, WorkbenchTreeFindOpen, WorkbenchTreeStickyScrollFocused } from '../../../../platform/list/browser/listService.js';
 import { IOpenerService } from '../../../../platform/opener/common/opener.js';
-import { IQuickInputService, IQuickPickItem } from '../../../../platform/quickinput/common/quickInput.js';
+import { IQuickInputButton, IQuickInputService, IQuickPickItem } from '../../../../platform/quickinput/common/quickInput.js';
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
 import { ActiveGroupEditorsByMostRecentlyUsedQuickAccess } from './editorQuickAccess.js';
 import { SideBySideEditor } from './sideBySideEditor.js';
 import { TextDiffEditor } from './textDiffEditor.js';
 import { ActiveEditorCanSplitInGroupContext, ActiveEditorGroupEmptyContext, ActiveEditorGroupLockedContext, ActiveEditorStickyContext, ActiveEditorInTabGroupContext, EditorPartModalCanMoveToEditorAreaContext, EditorPartModalContext, EditorPartModalMaximizedContext, EditorPartModalNavigationContext, EditorPartModalSidebarContext, IsSessionsWindowContext, MultipleEditorGroupsContext, SideBySideEditorActiveContext, TextCompareEditorActiveContext } from '../../../common/contextkeys.js';
-import { CloseDirection, EditorInputCapabilities, EditorsOrder, IResourceDiffEditorInput, IUntitledTextResourceEditorInput, isDiffEditorInput, isEditorInputWithOptionsAndGroup } from '../../../common/editor.js';
+import { CloseDirection, EditorInputCapabilities, EditorsOrder, GroupIdentifier, IResourceDiffEditorInput, IUntitledTextResourceEditorInput, isDiffEditorInput, isEditorInputWithOptionsAndGroup, isResourceEditorInput } from '../../../common/editor.js';
 import { IMultiDiffEditorOptions } from '../../../../editor/common/multiDiffEditor.js';
 import { EditorInput } from '../../../common/editor/editorInput.js';
 import { SideBySideEditorInput } from '../../../common/editor/sideBySideEditorInput.js';
@@ -47,7 +47,12 @@ import { IResolvedEditorCommandsContext, resolveCommandsContext } from './editor
 import { IEditorGroupView, isEditorGroupView, prepareMoveCopyEditors } from './editor.js';
 import { EDITOR_TAB_GROUP_COLORS, getEditorTabGroupColor, IEditorTabGroup } from '../../../common/editor/editorTabGroup.js';
 import { IRange } from '../../../../editor/common/core/range.js';
-import { IHistoryService } from '../../../services/history/common/history.js';
+import { IHistoryService, ISavedEditorTabGroup } from '../../../services/history/common/history.js';
+import { WORKBENCH_COLOR_PALETTE } from '../../../common/workbenchColorPalette.js';
+import { coalesce } from '../../../../base/common/arrays.js';
+import { escapeIcons } from '../../../../base/common/iconLabels.js';
+import { DisposableStore } from '../../../../base/common/lifecycle.js';
+import { ThemeIcon } from '../../../../base/common/themables.js';
 
 export const CLOSE_SAVED_EDITORS_COMMAND_ID = 'workbench.action.closeUnmodifiedEditors';
 export const CLOSE_EDITORS_IN_GROUP_COMMAND_ID = 'workbench.action.closeEditorsInGroup';
@@ -86,6 +91,7 @@ export const SAVE_TAB_GROUP_COMMAND_ID = 'workbench.action.editor.saveTabGroup';
 export const UNSAVE_TAB_GROUP_COMMAND_ID = 'workbench.action.editor.unsaveTabGroup';
 export const LOCK_TAB_GROUP_COMMAND_ID = 'workbench.action.editor.lockTabGroup';
 export const UNLOCK_TAB_GROUP_COMMAND_ID = 'workbench.action.editor.unlockTabGroup';
+export const SHOW_SAVED_TAB_GROUPS_COMMAND_ID = 'workbench.action.editor.showSavedTabGroups';
 export const OPEN_SAVED_TAB_GROUP_COMMAND_ID = 'workbench.action.editor.openSavedTabGroup';
 export const DELETE_SAVED_TAB_GROUP_COMMAND_ID = 'workbench.action.editor.deleteSavedTabGroup';
 export const UNDO_TAB_GROUP_ACTION_COMMAND_ID = 'workbench.action.editor.undoTabGroupAction';
@@ -1581,6 +1587,128 @@ export async function pickTabGroupColor(quickInputService: IQuickInputService, c
 	return pick.id;
 }
 
+interface ISavedTabGroupPick extends IQuickPickItem {
+	readonly groupId: string;
+}
+
+interface ISavedTabGroupButtons {
+	readonly rename: IQuickInputButton;
+	readonly delete: IQuickInputButton;
+}
+
+function createSavedTabGroupButtons(): ISavedTabGroupButtons {
+	return {
+		rename: { iconClass: ThemeIcon.asClassName(Codicon.edit), tooltip: localize('savedTabGroup.rename', "Rename Saved Tab Group") },
+		delete: { iconClass: ThemeIcon.asClassName(Codicon.trash), tooltip: localize('savedTabGroup.delete', "Delete Saved Tab Group") }
+	};
+}
+
+/** A dot in the color of a tab group, which quick pick items can show as their icon. */
+function createTabGroupColorIcon(color: string): { dark: URI; light: URI } {
+	const fill = getEditorTabGroupColor(color).replace(/[^#%(),.\s\w/-]/g, '');
+	const icon = URI.parse(`data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5" fill="${fill}"/></svg>`)}`);
+	return { dark: icon, light: icon };
+}
+
+/** Creates the quick pick items for saved tab groups, the most recently closed one first. */
+export function createSavedTabGroupPicks(groups: readonly ISavedEditorTabGroup[], buttons: readonly IQuickInputButton[]): ISavedTabGroupPick[] {
+	const maxNames = 4;
+
+	return groups.map(group => {
+		const tabCount = group.editors.length === 1 ? localize('savedTabGroup.oneTab', "1 tab") : localize('savedTabGroup.tabCount', "{0} tabs", group.editors.length);
+		const colorName = WORKBENCH_COLOR_PALETTE.find(color => color.id === group.color)?.label ?? group.color;
+		const names = coalesce(group.editors.map(({ editor }) => isResourceEditorInput(editor) ? basename(editor.resource) : undefined));
+		const name = escapeIcons(group.name);
+		const detail = names.length > maxNames ? localize('savedTabGroup.moreEditors', "{0}, +{1} more", names.slice(0, maxNames).join(', '), names.length - maxNames) : names.join(', ');
+
+		return {
+			groupId: group.id,
+			label: group.icon ? `$(${group.icon}) ${name}` : name,
+			description: tabCount,
+			detail: detail || undefined,
+			ariaLabel: localize('savedTabGroup.ariaLabel', "{0}, {1}, {2}", group.name, tabCount, colorName),
+			iconPath: createTabGroupColorIcon(group.color),
+			buttons
+		};
+	}).reverse();
+}
+
+type SavedTabGroupSelection = { readonly action: 'open' | 'rename'; readonly groupId: string };
+
+/**
+ * Shows the saved tab groups until the user opens or renames one. Deleting a group
+ * updates the list in place.
+ */
+async function pickSavedTabGroup(quickInputService: IQuickInputService, historyService: IHistoryService, activeSavedGroupId?: string): Promise<SavedTabGroupSelection | undefined> {
+	const disposables = new DisposableStore();
+	const buttons = createSavedTabGroupButtons();
+	const picker = disposables.add(quickInputService.createQuickPick<ISavedTabGroupPick>());
+	picker.matchOnDescription = true;
+	picker.matchOnDetail = true;
+
+	const updatePicks = (activePick: (picks: readonly ISavedTabGroupPick[]) => ISavedTabGroupPick | undefined) => {
+		const picks = createSavedTabGroupPicks(historyService.getSavedTabGroups(), [buttons.rename, buttons.delete]);
+		picker.items = picks;
+		picker.placeholder = picks.length ? localize('savedTabGroups.placeholder', "Select a saved tab group to open") : localize('noSavedTabGroups', "There are no closed saved tab groups");
+		const active = activePick(picks);
+		if (active) {
+			picker.activeItems = [active];
+		}
+	};
+	updatePicks(picks => picks.find(pick => pick.groupId === activeSavedGroupId));
+
+	let selection: SavedTabGroupSelection | undefined;
+	disposables.add(picker.onDidAccept(() => {
+		const [pick] = picker.selectedItems;
+		if (pick) {
+			selection = { action: 'open', groupId: pick.groupId };
+			picker.hide();
+		}
+	}));
+	disposables.add(picker.onDidTriggerItemButton(({ button, item }) => {
+		if (button === buttons.rename) {
+			selection = { action: 'rename', groupId: item.groupId };
+			picker.hide();
+		} else if (button === buttons.delete) {
+
+			// Keep the focus in place, on the group that takes the place of the deleted one
+			const index = picker.items.indexOf(item);
+			historyService.deleteSavedTabGroup(item.groupId);
+			updatePicks(picks => picks.at(Math.min(Math.max(index, 0), picks.length - 1)));
+		}
+	}));
+
+	await new Promise<void>(resolve => {
+		disposables.add(picker.onDidHide(() => resolve()));
+		picker.show();
+	});
+	disposables.dispose();
+
+	return selection;
+}
+
+/**
+ * Lets the user open, rename and delete saved tab groups. A group that is opened is
+ * restored into the given editor group.
+ */
+export async function showSavedTabGroups(quickInputService: IQuickInputService, historyService: IHistoryService, targetGroupId: GroupIdentifier): Promise<void> {
+	let selection = await pickSavedTabGroup(quickInputService, historyService);
+	while (selection?.action === 'rename') {
+		const { groupId } = selection;
+		const savedGroup = historyService.getSavedTabGroups().find(group => group.id === groupId);
+		const name = savedGroup && await pickTabGroupName(quickInputService, savedGroup.name);
+		if (name) {
+			historyService.renameSavedTabGroup(groupId, name);
+		}
+
+		selection = await pickSavedTabGroup(quickInputService, historyService, groupId);
+	}
+
+	if (selection) {
+		await historyService.reopenSavedTabGroup(selection.groupId, targetGroupId);
+	}
+}
+
 type MoveTabGroupTarget =
 	| { kind: 'newGroup' }
 	| { kind: 'removeFromGroup' }
@@ -1693,28 +1821,24 @@ function registerTabGroupCommands(): void {
 		}
 	});
 
-	registerAction2(class extends Action2 {
-		constructor() {
-			super({ id: OPEN_SAVED_TAB_GROUP_COMMAND_ID, title: localize2('openSavedTabGroup', 'Open Saved Tab Group…'), category: Categories.View, f1: true, precondition: tabGroupsEnabled });
-		}
-		async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
-			const historyService = accessor.get(IHistoryService);
-
-			// Resolve the editor group before the picker takes focus away from it
-			const resolvedContext = resolveCommandsContext(args, accessor.get(IEditorService), accessor.get(IEditorGroupsService), accessor.get(IListService));
-			const targetGroup = resolvedContext.groupedEditors[0]?.group ?? accessor.get(IEditorGroupsService).activeGroup;
-
-			const groups = historyService.getSavedTabGroups();
-			const pick = await accessor.get(IQuickInputService).pick(groups.map(group => ({
-				label: group.name,
-				description: localize('savedTabGroupCount', '{0} tabs', group.editors.length),
-				groupId: group.id
-			})), { placeHolder: groups.length ? localize('openSavedTabGroupPlaceholder', 'Select a saved tab group to open') : localize('noSavedTabGroups', 'There are no closed saved tab groups') });
-			if (pick) {
-				await historyService.reopenSavedTabGroup(pick.groupId, targetGroup.id);
+	for (const action of [
+		{ id: SHOW_SAVED_TAB_GROUPS_COMMAND_ID, title: localize2('showSavedTabGroups', "Show Saved Tab Groups…"), f1: true },
+		{ id: OPEN_SAVED_TAB_GROUP_COMMAND_ID, title: localize2('openSavedTabGroup', "Open Saved Tab Group…"), f1: false } // same picker, kept for existing keybindings
+	]) {
+		registerAction2(class extends Action2 {
+			constructor() {
+				super({ id: action.id, title: action.title, category: Categories.View, f1: action.f1, precondition: tabGroupsEnabled });
 			}
-		}
-	});
+			async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
+
+				// Resolve the editor group before the picker takes focus away from it
+				const resolvedContext = resolveCommandsContext(args, accessor.get(IEditorService), accessor.get(IEditorGroupsService), accessor.get(IListService));
+				const targetGroup = resolvedContext.groupedEditors[0]?.group ?? accessor.get(IEditorGroupsService).activeGroup;
+
+				await showSavedTabGroups(accessor.get(IQuickInputService), accessor.get(IHistoryService), targetGroup.id);
+			}
+		});
+	}
 
 	registerAction2(class extends Action2 {
 		constructor() {
@@ -1724,7 +1848,7 @@ function registerTabGroupCommands(): void {
 			const historyService = accessor.get(IHistoryService);
 			const groups = historyService.getSavedTabGroups();
 			const pick = await accessor.get(IQuickInputService).pick(groups.map(group => ({ label: group.name, groupId: group.id })), {
-				placeHolder: groups.length ? localize('deleteSavedTabGroupPlaceholder', 'Select a saved tab group to delete') : localize('noSavedTabGroups', 'There are no closed saved tab groups')
+				placeHolder: groups.length ? localize('deleteSavedTabGroupPlaceholder', 'Select a saved tab group to delete') : localize('noSavedTabGroups', "There are no closed saved tab groups")
 			});
 			if (pick) {
 				historyService.deleteSavedTabGroup(pick.groupId);

@@ -996,6 +996,14 @@ export class HistoryService extends Disposable implements IHistoryService {
 		}
 	}
 
+	renameSavedTabGroup(id: string, name: string): void {
+		const newName = name.trim();
+		if (newName && this.savedTabGroups.some(group => group.id === id && group.name !== newName)) {
+			this.savedTabGroups = this.savedTabGroups.map(group => group.id === id ? { ...group, name: newName } : group);
+			this.persistSavedTabGroups();
+		}
+	}
+
 	deleteSavedTabGroup(id: string): void {
 		const remainingGroups = this.savedTabGroups.filter(group => group.id !== id);
 		if (remainingGroups.length !== this.savedTabGroups.length) {

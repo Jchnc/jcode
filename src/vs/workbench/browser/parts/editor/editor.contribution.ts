@@ -55,7 +55,7 @@ import {
 	SPLIT_EDITOR, TOGGLE_MAXIMIZE_EDITOR_GROUP, MOVE_EDITOR_INTO_NEW_WINDOW_COMMAND_ID, COPY_EDITOR_INTO_NEW_WINDOW_COMMAND_ID, MOVE_EDITOR_GROUP_INTO_NEW_WINDOW_COMMAND_ID, COPY_EDITOR_GROUP_INTO_NEW_WINDOW_COMMAND_ID,
 	NEW_EMPTY_EDITOR_WINDOW_COMMAND_ID, MOVE_EDITOR_INTO_RIGHT_GROUP, MOVE_EDITOR_INTO_LEFT_GROUP, MOVE_EDITOR_INTO_ABOVE_GROUP, MOVE_EDITOR_INTO_BELOW_GROUP,
 	ADD_TO_NEW_TAB_GROUP_COMMAND_ID, REMOVE_FROM_TAB_GROUP_COMMAND_ID, DISSOLVE_TAB_GROUP_COMMAND_ID, RENAME_TAB_GROUP_COMMAND_ID, RECOLOR_TAB_GROUP_COMMAND_ID,
-	MOVE_TO_TAB_GROUP_COMMAND_ID, CLOSE_TAB_GROUP_COMMAND_ID
+	MOVE_TO_TAB_GROUP_COMMAND_ID, CLOSE_TAB_GROUP_COMMAND_ID, SHOW_SAVED_TAB_GROUPS_COMMAND_ID
 } from './editorCommands.js';
 import { DIFF_SWAP_SIDES, DIFF_VIEW_MODE_INLINE_TEMPORARY, GOTO_NEXT_CHANGE, GOTO_PREVIOUS_CHANGE, SET_DIFF_VIEW_MODE_AUTOMATIC, SET_DIFF_VIEW_MODE_INLINE, SET_DIFF_VIEW_MODE_SIDE_BY_SIDE, TOGGLE_DIFF_IGNORE_TRIM_WHITESPACE, TOGGLE_DIFF_SIDE_BY_SIDE } from './diffEditorCommands.js';
 import { inQuickPickContext, getQuickNavigateHandler } from '../../quickaccess.js';
@@ -504,6 +504,7 @@ MenuRegistry.appendMenuItem(MenuId.DiffEditorViewSubmenu, {
 	when: EditorContextKeys.diffEditorTemporaryInlineMode,
 });
 MenuRegistry.appendMenuItem(MenuId.EditorTitle, { command: { id: SHOW_EDITORS_IN_GROUP, title: localize('showOpenedEditors', "Show Opened Editors") }, group: '3_open', order: 10, when: EditorPartModalContext.toNegated() /* not applicable to modal editor */ });
+MenuRegistry.appendMenuItem(MenuId.EditorTitle, { command: { id: SHOW_SAVED_TAB_GROUPS_COMMAND_ID, title: localize('savedTabGroups', "Saved Tab Groups...") }, group: '3_open', order: 20, when: ContextKeyExpr.and(tabGroupsEnabledContext, EditorPartModalContext.toNegated() /* not applicable to modal editor */) });
 MenuRegistry.appendMenuItem(MenuId.EditorTitle, { command: { id: CLOSE_EDITORS_IN_GROUP_COMMAND_ID, title: localize('closeAll', "Close All") }, group: '5_close', order: 10, when: EditorPartModalContext.toNegated() /* not applicable to modal editor */ });
 MenuRegistry.appendMenuItem(MenuId.EditorTitle, { command: { id: CLOSE_SAVED_EDITORS_COMMAND_ID, title: localize('closeAllSaved', "Close Saved") }, group: '5_close', order: 20, when: EditorPartModalContext.toNegated() /* not applicable to modal editor */ });
 MenuRegistry.appendMenuItem(MenuId.EditorTitle, { command: { id: TOGGLE_KEEP_EDITORS_COMMAND_ID, title: localize('togglePreviewMode', "Enable Preview Editors"), toggled: ContextKeyExpr.has('config.workbench.editor.enablePreview') }, group: '7_settings', order: 10, when: EditorPartModalContext.toNegated() /* not applicable to modal editor */ });

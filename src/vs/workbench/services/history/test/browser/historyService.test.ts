@@ -748,6 +748,23 @@ suite('HistoryService', function () {
 		return workbenchTeardown(instantiationService);
 	});
 
+	test('saved tab groups can be renamed and deleted', async () => {
+		const [part, historyService, , , instantiationService] = await createServices();
+		const { group } = await createTabGroupWithSavedFlag(part, true);
+		const savedGroupId = group.tabGroups[0].id;
+		await group.closeAllEditors();
+
+		historyService.renameSavedTabGroup(savedGroupId, '  Docs  ');
+		historyService.renameSavedTabGroup(savedGroupId, '   ');
+		const namesAfterRename = getSavedTabGroupSnapshots(historyService).map(({ name }) => name);
+
+		historyService.deleteSavedTabGroup(savedGroupId);
+
+		assert.deepStrictEqual({ namesAfterRename, namesAfterDelete: getSavedTabGroupSnapshots(historyService).map(({ name }) => name) }, { namesAfterRename: ['Docs'], namesAfterDelete: [] });
+
+		return workbenchTeardown(instantiationService);
+	});
+
 	for (const flow of [
 		{ name: 'the requested editor group', explicitTarget: true },
 		{ name: 'the active editor group', explicitTarget: false }
