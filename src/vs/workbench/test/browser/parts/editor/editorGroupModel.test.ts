@@ -10,7 +10,7 @@ import { URI } from '../../../../../base/common/uri.js';
 import { TestLifecycleService, workbenchInstantiationService } from '../../workbenchTestServices.js';
 import { TestConfigurationService } from '../../../../../platform/configuration/test/common/testConfigurationService.js';
 import { TestInstantiationService } from '../../../../../platform/instantiation/test/common/instantiationServiceMock.js';
-import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
+import { ConfigurationTarget, IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { ILifecycleService } from '../../../../services/lifecycle/common/lifecycle.js';
 import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
 import { Registry } from '../../../../../platform/registry/common/platform.js';
@@ -36,7 +36,14 @@ suite('EditorGroupModel', () => {
 		testInstService = undefined;
 	});
 
-	function inst(): IInstantiationService {
+	let latestConfig: TestConfigurationService | undefined;
+	const configs = new WeakMap<EditorGroupModel, TestConfigurationService>();
+
+	function configureEditor(config: TestConfigurationService, tabGroupsEnabled?: boolean): void {
+		config.setUserConfiguration('workbench', { editor: { openPositioning: 'right', focusRecentEditorAfterClose: true, tabGroups: tabGroupsEnabled === undefined ? undefined : { enabled: tabGroupsEnabled } } });
+	}
+
+	function inst(tabGroupsEnabled?: boolean): IInstantiationService {
 		if (!testInstService) {
 			testInstService = new TestInstantiationService();
 		}
@@ -47,14 +54,16 @@ suite('EditorGroupModel', () => {
 		inst.stub(ITelemetryService, NullTelemetryService);
 
 		const config = new TestConfigurationService();
-		config.setUserConfiguration('workbench', { editor: { openPositioning: 'right', focusRecentEditorAfterClose: true } });
+		configureEditor(config, tabGroupsEnabled);
 		inst.stub(IConfigurationService, config);
+		latestConfig = config;
 
 		return inst;
 	}
 
-	function createEditorGroupModel(serialized?: ISerializedEditorGroupModel): EditorGroupModel {
-		const group = disposables.add(inst().createInstance(EditorGroupModel, serialized));
+	function createEditorGroupModel(serialized?: ISerializedEditorGroupModel, tabGroupsEnabled?: boolean): EditorGroupModel {
+		const group = disposables.add(inst(tabGroupsEnabled).createInstance(EditorGroupModel, serialized));
+		configs.set(group, latestConfig!);
 
 		disposables.add(toDisposable(() => {
 			for (const editor of group.getEditors(EditorsOrder.MOST_RECENTLY_ACTIVE)) {
@@ -325,10 +334,10 @@ suite('EditorGroupModel', () => {
 	/** Serialized editor without a serializer: it cannot be restored. */
 	const unrestorableEditor: ISerializedEditorInput = { id: 'testEditorInputForGroups-unknown', value: '{}' };
 
-	function restoreEditorGroupModel(editors: ISerializedEditorInput[], extra?: { readonly mru?: number[]; readonly preview?: number; readonly sticky?: number; readonly tabGroups?: ISerializedEditorTabGroup[] }): EditorGroupModel {
+	function restoreEditorGroupModel(editors: ISerializedEditorInput[], extra?: { readonly mru?: number[]; readonly preview?: number; readonly sticky?: number; readonly tabGroups?: ISerializedEditorTabGroup[]; readonly tabGroupsEnabled?: boolean }): EditorGroupModel {
 		inst().invokeFunction(accessor => Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).start(accessor));
 
-		return createEditorGroupModel({ id: 0, editors, mru: extra?.mru ?? editors.map((_, i) => i), preview: extra?.preview, sticky: extra?.sticky, tabGroups: extra?.tabGroups });
+		return createEditorGroupModel({ id: 0, editors, mru: extra?.mru ?? editors.map((_, i) => i), preview: extra?.preview, sticky: extra?.sticky, tabGroups: extra?.tabGroups }, extra?.tabGroupsEnabled);
 	}
 
 	function describeEditorIds(editors: EditorInput[]): string[] {
@@ -1284,6 +1293,237 @@ suite('EditorGroupModel', () => {
 			}
 
 			assert.deepStrictEqual(violations, []);
+		});
+
+		suite('while tab groups are disabled', () => {
+
+			/** Changes the tab groups setting of the group, like a user would do. */
+			function setTabGroupsEnabled(group: EditorGroupModel, enabled: boolean): void {
+				const config = configs.get(group)!;
+				configureEditor(config, enabled);
+
+				const key = 'workbench.editor.tabGroups.enabled';
+				config.onDidChangeConfigurationEmitter.fire({
+					source: ConfigurationTarget.USER,
+					affectedKeys: new Set([key]),
+					change: { keys: [key], overrides: [] },
+					affectsConfiguration: candidate => key.startsWith(candidate)
+				});
+			}
+
+			test('moving editors is not limited by a locked tab group', () => {
+				const group = createEditorGroupModel();
+				const [, b, c] = openEditors(group, 5);
+				const tabGroup = group.createTabGroup(group.getEditors(EditorsOrder.SEQUENTIAL).slice(1, 4), 'G')!;
+				group.setTabGroupLocked(tabGroup.id, true);
+				setTabGroupsEnabled(group, false);
+				const events = recordEvents(group);
+
+				group.moveEditor(c, 0);
+				const afterMovingMember = describeLayout(group);
+				group.moveEditor(b, 4);
+
+				assert.deepStrictEqual({ afterMovingMember, afterMovingAgain: describeLayout(group), events }, {
+					afterMovingMember: ['c:G', 'a', 'b:G', 'd:G', 'e'],
+					afterMovingAgain: ['c:G', 'a', 'd:G', 'e', 'b:G'],
+					events: ['move', 'move']
+				});
+			});
+
+			test('moving an editor in between the members of a tab group does not make it join the group', () => {
+				const group = createEditorGroupModel();
+				const [a, , , , e] = openEditors(group, 5);
+				group.createTabGroup(group.getEditors(EditorsOrder.SEQUENTIAL).slice(1, 4), 'G');
+				setTabGroupsEnabled(group, false);
+				const events = recordEvents(group);
+
+				group.moveEditor(a, 2);
+				const afterMovingFirst = describeLayout(group);
+				group.moveEditor(e, 1);
+
+				assert.deepStrictEqual({ afterMovingFirst, afterMovingLast: describeLayout(group), events }, {
+					afterMovingFirst: ['b:G', 'c:G', 'a', 'd:G', 'e'],
+					afterMovingLast: ['b:G', 'e', 'c:G', 'a', 'd:G'],
+					events: ['move', 'move']
+				});
+			});
+
+			test('moving a grouped editor outside of its tab group does not remove it from the group', () => {
+				const group = createEditorGroupModel();
+				const [, b] = openEditors(group, 4);
+				group.createTabGroup([b], 'G');
+				setTabGroupsEnabled(group, false);
+				const events = recordEvents(group);
+
+				group.moveEditor(b, 3);
+
+				assert.deepStrictEqual({ layout: describeLayout(group), tabGroups: group.tabGroups.length, events }, {
+					layout: ['a', 'c', 'd', 'b:G'],
+					tabGroups: 1,
+					events: ['move']
+				});
+			});
+
+			test('moving a grouped editor into the sticky editors still removes it from its tab group', () => {
+				const group = createEditorGroupModel();
+				const [a, , c] = openEditors(group, 5);
+				group.stick(a);
+				group.createTabGroup(group.getEditors(EditorsOrder.SEQUENTIAL).slice(2, 4), 'G');
+				setTabGroupsEnabled(group, false);
+				const events = recordEvents(group);
+
+				group.moveEditor(c, 0);
+
+				assert.deepStrictEqual({ layout: describeLayout(group), sticky: group.isSticky(c), events }, {
+					layout: ['c', 'a', 'b', 'd:G', 'e'],
+					sticky: true,
+					events: ['move', 'sticky', 'changed:G']
+				});
+			});
+
+			test('dropping editors into or out of a tab group changes nothing', () => {
+				const group = createEditorGroupModel();
+				const [a, b, c] = openEditors(group, 4);
+				const tabGroup = group.createTabGroup([b, c], 'G')!;
+				setTabGroupsEnabled(group, false);
+				const events = recordEvents(group);
+
+				group.addToTabGroup(tabGroup.id, [a]);
+				group.removeFromTabGroup([b]);
+
+				assert.deepStrictEqual({ layout: describeLayout(group), events }, {
+					layout: ['a', 'b:G', 'c:G', 'd'],
+					events: []
+				});
+			});
+
+			test('a new editor opens next to the active editor even in between the members of a tab group', () => {
+				const group = createEditorGroupModel();
+				const [, b] = openEditors(group, 4);
+				group.createTabGroup(group.getEditors(EditorsOrder.SEQUENTIAL).slice(1, 3), 'G');
+				group.setActive(b);
+				setTabGroupsEnabled(group, false);
+
+				group.openEditor(input('x'), { pinned: true, active: true });
+				group.openEditor(input('y'), { pinned: true, index: 3 });
+
+				assert.deepStrictEqual(describeLayout(group), ['a', 'b:G', 'x', 'y', 'c:G', 'd']);
+			});
+
+			test('tab groups come back after enabling them again when their members are still next to each other', () => {
+				const group = createEditorGroupModel();
+				const [a, , , d] = openEditors(group, 5);
+				const tabGroup = group.createTabGroup(group.getEditors(EditorsOrder.SEQUENTIAL).slice(1, 4), 'G', 'red', { locked: true, saved: true })!;
+				setTabGroupsEnabled(group, false);
+
+				group.moveEditor(d, 1); // within the group
+				group.moveEditor(a, 4); // somewhere else
+				const events = recordEvents(group);
+				setTabGroupsEnabled(group, true);
+
+				assert.deepStrictEqual({ layout: describeLayout(group), sameTabGroup: group.tabGroups.length === 1 && group.tabGroups[0] === tabGroup, tabGroup: { ...group.tabGroups[0] }, events, violations: findTabGroupViolations(group) }, {
+					layout: ['d:G', 'b:G', 'c:G', 'e', 'a'],
+					sameTabGroup: true,
+					tabGroup: { id: tabGroup.id, name: 'G', color: 'red', collapsed: false, saved: true, locked: true, icon: undefined, metadata: undefined },
+					events: [],
+					violations: []
+				});
+			});
+
+			test('enabling tab groups again keeps the longest run of adjacent members of a split tab group', () => {
+				const group = createEditorGroupModel();
+				const [a, , , , , f] = openEditors(group, 6);
+				group.createTabGroup(group.getEditors(EditorsOrder.SEQUENTIAL).slice(1, 5), 'G');
+				setTabGroupsEnabled(group, false);
+
+				group.moveEditor(a, 1); // splits the group into [b] and [c, d, e]
+				const layoutWhileDisabled = describeLayout(group);
+				group.moveEditor(f, 0);
+				const events = recordEvents(group);
+				setTabGroupsEnabled(group, true);
+
+				assert.deepStrictEqual({ layoutWhileDisabled, layout: describeLayout(group), events, violations: findTabGroupViolations(group) }, {
+					layoutWhileDisabled: ['b:G', 'a', 'c:G', 'd:G', 'e:G', 'f'],
+					layout: ['f', 'b', 'a', 'c:G', 'd:G', 'e:G'],
+					events: ['changed:G'],
+					violations: []
+				});
+			});
+
+			test('enabling tab groups again keeps the first run when the runs of a split tab group are equally long', () => {
+				const group = createEditorGroupModel();
+				const [a, b, c, d] = openEditors(group, 4);
+				group.createTabGroup([a, c], 'G');
+				group.createTabGroup([b, d], 'H');
+				setTabGroupsEnabled(group, false);
+
+				group.moveEditor(a, 3);
+				const events = recordEvents(group);
+				setTabGroupsEnabled(group, true);
+
+				assert.deepStrictEqual({ layout: describeLayout(group), events, violations: findTabGroupViolations(group) }, {
+					layout: ['c:G', 'b:H', 'd:H', 'a'],
+					events: ['changed:G'],
+					violations: []
+				});
+			});
+
+			test('tab groups that are restored while disabled are not gathered', () => {
+				const group = restoreEditorGroupModel(
+					['a', 'b', 'c', 'd'].map(serializedEditor),
+					{
+						tabGroupsEnabled: false,
+						tabGroups: [{ id: 'g1', name: 'G', color: 'red', members: [0, 2] }]
+					});
+				const layoutWhileDisabled = describeLayout(group);
+
+				setTabGroupsEnabled(group, true);
+
+				assert.deepStrictEqual({ layoutWhileDisabled, layout: describeLayout(group), violations: findTabGroupViolations(group) }, {
+					layoutWhileDisabled: ['a:G', 'b', 'c:G', 'd'],
+					layout: ['a:G', 'b', 'c', 'd'],
+					violations: []
+				});
+			});
+
+			test('tab groups are valid again after random operations while they were disabled', () => {
+				const group = createEditorGroupModel();
+				const editors = openEditors(group, 8);
+				group.createTabGroup(editors.slice(0, 3), 'G');
+				group.createTabGroup(editors.slice(4, 6), 'H');
+				setTabGroupsEnabled(group, false);
+
+				let seed = 20240608;
+				const random = (max: number) => {
+					seed = (Math.imul(seed, 1103515245) + 12345) & 0x7fffffff;
+					return Math.floor(seed / 65536) % max;
+				};
+
+				const violations: string[] = [];
+				for (let round = 0; round < 50; round++) {
+					for (let step = 0; step < 10; step++) {
+						const editor = editors[random(editors.length)];
+						switch (random(4)) {
+							case 0:
+							case 1:
+								group.moveEditor(editor, random(editors.length));
+								break;
+							case 2:
+								group.stick(editor);
+								break;
+							case 3:
+								group.unstick(editor);
+								break;
+						}
+					}
+
+					setTabGroupsEnabled(group, true);
+					violations.push(...findTabGroupViolations(group).map(violation => `round ${round}: ${violation}`));
+					setTabGroupsEnabled(group, false);
+				}
+
+				assert.deepStrictEqual(violations, []);
+			});
 		});
 	});
 

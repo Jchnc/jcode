@@ -290,12 +290,20 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 	private editorOpenPositioning: ('left' | 'right' | 'first' | 'last') | undefined;
 	private focusRecentEditorAfterClose: boolean | undefined;
 
+	/**
+	 * While tab groups are disabled, they stay in the model but are hidden. They
+	 * are ignored then: editors move and open like in an editor without tab groups.
+	 */
+	private tabGroupsEnabled = true;
+
 	constructor(
 		labelOrSerializedGroup: ISerializedEditorGroupModel | undefined,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@IConfigurationService private readonly configurationService: IConfigurationService
 	) {
 		super();
+
+		this.tabGroupsEnabled = this.readTabGroupsEnabled();
 
 		if (isSerializedEditorGroupModel(labelOrSerializedGroup)) {
 			this._id = this.deserialize(labelOrSerializedGroup);
@@ -312,12 +320,26 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 	}
 
 	private onConfigurationUpdated(e?: IConfigurationChangeEvent): void {
-		if (e && !e.affectsConfiguration('workbench.editor.openPositioning') && !e.affectsConfiguration('workbench.editor.focusRecentEditorAfterClose')) {
+		if (e && !e.affectsConfiguration('workbench.editor.openPositioning') && !e.affectsConfiguration('workbench.editor.focusRecentEditorAfterClose') && !e.affectsConfiguration('workbench.editor.tabGroups.enabled')) {
 			return;
 		}
 
 		this.editorOpenPositioning = this.configurationService.getValue('workbench.editor.openPositioning');
 		this.focusRecentEditorAfterClose = this.configurationService.getValue('workbench.editor.focusRecentEditorAfterClose');
+
+		const tabGroupsEnabled = this.readTabGroupsEnabled();
+		if (tabGroupsEnabled !== this.tabGroupsEnabled) {
+			this.tabGroupsEnabled = tabGroupsEnabled;
+
+			// Editors could have moved around the hidden tab groups
+			if (tabGroupsEnabled) {
+				this.repairTabGroups();
+			}
+		}
+	}
+
+	private readTabGroupsEnabled(): boolean {
+		return this.configurationService.getValue('workbench.editor.tabGroups.enabled') !== false;
 	}
 
 	get count(): number {
@@ -433,7 +455,7 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 
 			// A newly opened editor does not belong to a tab group. Keep it after the
 			// whole group when its requested position would split group members.
-			if (!makeSticky && !replacedTabGroup && targetIndex > 0 && targetIndex < this.editors.length) {
+			if (this.tabGroupsEnabled && !makeSticky && !replacedTabGroup && targetIndex > 0 && targetIndex < this.editors.length) {
 				const precedingGroupId = this.editorTabGroups.get(this.editors[targetIndex - 1]);
 				if (precedingGroupId) {
 					for (let index = this.editors.length - 1; index >= targetIndex; index--) {
@@ -1378,6 +1400,10 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 	}
 
 	removeFromTabGroup(editors: EditorInput[]): void {
+		if (!this.tabGroupsEnabled) {
+			return; // hidden tab groups are left alone
+		}
+
 		const affectedGroups = new Set<IEditorTabGroup>();
 		const removableEditors = editors.filter(editor => {
 			const group = this.getTabGroupForEditor(editor);
@@ -1438,7 +1464,7 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 
 	addToTabGroup(groupId: string, editors: EditorInput[]): void {
 		const group = this.getTabGroup(groupId);
-		if (!group || group.locked) {
+		if (!group || group.locked || !this.tabGroupsEnabled) {
 			return;
 		}
 
@@ -1689,6 +1715,12 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 			return { toIndex };
 		}
 
+		// Hidden tab groups neither limit the move nor change because of it: only
+		// the sticky editors cannot stay a member of a group.
+		if (!this.tabGroupsEnabled) {
+			return { toIndex, leave: !this.isSticky(index) && toIndex <= this.sticky ? this.getTabGroupForEditor(editor) : undefined };
+		}
+
 		// Positions refer to the editors once the moved editor is taken out
 		const remainingEditors = this.editors.filter(candidate => candidate !== editor);
 
@@ -1760,6 +1792,45 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 			first: editors.findIndex(editor => this.editorTabGroups.get(editor) === groupId),
 			last: editors.findLastIndex(editor => this.editorTabGroups.get(editor) === groupId)
 		};
+	}
+
+	/**
+	 * Tab groups can end up with members that are not next to each other while they
+	 * are hidden, because editors move around them. A group like that is only
+	 * restored for its longest run of adjacent members (the first one if there are
+	 * several) and the other members leave the group, so no editor changes position.
+	 */
+	private repairTabGroups(): void {
+		const affectedGroups = new Set<IEditorTabGroup>();
+
+		for (const group of this._tabGroups) {
+			const runs: EditorInput[][] = [];
+			let previousMemberIndex = -2;
+			this.editors.forEach((editor, index) => {
+				if (this.editorTabGroups.get(editor) !== group.id) {
+					return;
+				}
+
+				if (index === previousMemberIndex + 1) {
+					runs[runs.length - 1].push(editor);
+				} else {
+					runs.push([editor]);
+				}
+				previousMemberIndex = index;
+			});
+
+			const keptRun = runs.reduce<EditorInput[]>((longest, run) => run.length > longest.length ? run : longest, []);
+			for (const run of runs) {
+				if (run !== keptRun) {
+					for (const editor of run) {
+						this.editorTabGroups.delete(editor);
+					}
+					affectedGroups.add(group);
+				}
+			}
+		}
+
+		this.notifyTabGroupMembershipChanged(affectedGroups);
 	}
 
 	/**
@@ -2015,8 +2086,11 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 		}
 		serializedTabGroupIds.add(serializedGroup.id);
 
-		// Members of a group must be contiguous (older versions could split a group)
-		this.gatherEditors(this.editors.filter(editor => members.has(editor)));
+		// Members of a group must be contiguous (older versions could split a group).
+		// Hidden tab groups are left alone and repaired once they show up again.
+		if (this.tabGroupsEnabled) {
+			this.gatherEditors(this.editors.filter(editor => members.has(editor)));
+		}
 
 		const group: IEditorTabGroup = {
 			id: LEGACY_TAB_GROUP_ID.test(serializedGroup.id) ? generateTabGroupId() : serializedGroup.id,

@@ -1087,7 +1087,7 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 				continue;
 			}
 
-			const group = this.tabsModel.getTabGroupForEditor(editor);
+			const group = this.groupsView.partOptions.tabGroups.enabled ? this.tabsModel.getTabGroupForEditor(editor) : undefined;
 			if (group) {
 				const members = this.tabsModel.getEditors(EditorsOrder.SEQUENTIAL).filter(candidate => this.tabsModel.getTabGroupForEditor(candidate)?.id === group.id);
 				const memberRows = members.map(member => this.tabs.get(member)?.element).filter((candidate): candidate is HTMLElement => !!candidate);
@@ -1227,14 +1227,18 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 			return;
 		}
 
-		const targetGroup = targetTabGroupId ? this.tabsModel.tabGroups.find(group => group.id === targetTabGroupId) : undefined;
-		const changesLockedGroup = data.some(item => {
-			const itemSourceGroup = this.editorPartsView.getGroup(item.identifier.groupId);
-			return !!itemSourceGroup && isEditorGroupView(itemSourceGroup) && itemSourceGroup.getTabGroupForEditor(item.identifier.editor)?.locked && itemSourceGroup.getTabGroupForEditor(item.identifier.editor)?.id !== targetTabGroupId;
-		});
-		if (changesLockedGroup || (targetGroup?.locked && data.some(item => this.tabsModel.getTabGroupForEditor(item.identifier.editor)?.id !== targetTabGroupId))) {
-			this.clearDraggedEditors();
-			return;
+		// Tab groups are hidden while they are disabled: they must not limit or change a drop
+		const tabGroupsEnabled = this.groupsView.partOptions.tabGroups.enabled;
+		if (tabGroupsEnabled) {
+			const targetGroup = targetTabGroupId ? this.tabsModel.tabGroups.find(group => group.id === targetTabGroupId) : undefined;
+			const changesLockedGroup = data.some(item => {
+				const itemSourceGroup = this.editorPartsView.getGroup(item.identifier.groupId);
+				return !!itemSourceGroup && isEditorGroupView(itemSourceGroup) && itemSourceGroup.getTabGroupForEditor(item.identifier.editor)?.locked && itemSourceGroup.getTabGroupForEditor(item.identifier.editor)?.id !== targetTabGroupId;
+			});
+			if (changesLockedGroup || (targetGroup?.locked && data.some(item => this.tabsModel.getTabGroupForEditor(item.identifier.editor)?.id !== targetTabGroupId))) {
+				this.clearDraggedEditors();
+				return;
+			}
 		}
 
 		const droppedEditors: EditorInput[] = [];
@@ -1261,10 +1265,12 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 			targetEditorIndex++;
 		}
 
-		if (targetTabGroupId) {
-			this.groupView.addToTabGroup(targetTabGroupId, droppedEditors);
-		} else {
-			this.groupView.removeFromTabGroup(droppedEditors);
+		if (tabGroupsEnabled) {
+			if (targetTabGroupId) {
+				this.groupView.addToTabGroup(targetTabGroupId, droppedEditors);
+			} else {
+				this.groupView.removeFromTabGroup(droppedEditors);
+			}
 		}
 		this.clearDraggedEditors();
 		this.groupView.focus();

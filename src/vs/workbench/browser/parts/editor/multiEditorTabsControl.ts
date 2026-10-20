@@ -3273,8 +3273,11 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		return !!findParentWithClass(element, 'action-item', 'tab');
 	}
 
-	private async onDrop(e: DragEvent, targetTabIndex: number, tabsContainer: HTMLElement, targetTabGroupId?: string | null): Promise<void> {
+	private async onDrop(e: DragEvent, targetTabIndex: number, tabsContainer: HTMLElement, droppedTabGroupId?: string | null): Promise<void> {
 		EventHelper.stop(e, true);
+
+		// Tab groups are hidden while they are disabled: they must not limit or change a drop
+		const targetTabGroupId = this.groupsView.partOptions.tabGroups.enabled ? droppedTabGroupId : undefined;
 
 		this.updateDropFeedback(tabsContainer, false, e, targetTabIndex);
 		tabsContainer.classList.remove('scroll');
