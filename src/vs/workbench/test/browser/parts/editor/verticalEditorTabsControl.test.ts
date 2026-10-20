@@ -23,6 +23,9 @@ import { IDecorationsService } from '../../../../services/decorations/common/dec
 import { INotebookDocumentService, NotebookDocumentWorkbenchService } from '../../../../services/notebook/common/notebookDocumentService.js';
 import { TestFileEditorInput, workbenchInstantiationService } from '../../workbenchTestServices.js';
 
+/** The `keyCode` of keyboard events as the browser reports it. */
+const domKeyCodes = { 'Enter': 13, ' ': 32, 'End': 35, 'Home': 36, 'ArrowLeft': 37, 'ArrowUp': 38, 'ArrowRight': 39, 'ArrowDown': 40 };
+
 class TestEditorInput extends TestFileEditorInput {
 
 	constructor(resource: URI, private name: string) {
@@ -72,6 +75,18 @@ suite('VerticalEditorTabsControl', () => {
 
 	function activeElement(): HTMLElement | null {
 		return mainWindow.document.activeElement as HTMLElement | null;
+	}
+
+	/** Names the item that holds focus: a tab by its file name, a tab group header by its name. */
+	function focusedItem(): string | undefined {
+		const element = activeElement();
+		return element?.dataset.tabGroupId ? `group:${element.querySelector('.vertical-tab-group-name')?.textContent}` : element?.dataset.resourceName;
+	}
+
+	function pressKey(key: keyof typeof domKeyCodes): boolean {
+		const event = new KeyboardEvent('keydown', { key, keyCode: domKeyCodes[key], bubbles: true, cancelable: true } as KeyboardEventInit);
+		activeElement()!.dispatchEvent(event);
+		return event.defaultPrevented;
 	}
 
 	function waitForAnimationFrame(): Promise<void> {
@@ -308,7 +323,7 @@ suite('VerticalEditorTabsControl', () => {
 		}, {
 			initial: 0,
 			dirty: 1,
-			ariaLabel: 'Work, expanded, 3 editors, 1 unsaved',
+			ariaLabel: 'Work, 3 editors, 1 unsaved',
 			headerKept: true,
 			focused: true
 		});
@@ -330,5 +345,119 @@ suite('VerticalEditorTabsControl', () => {
 			focusedGroup: true,
 			expanded: 'false'
 		});
+	});
+
+	test('the list is a valid tree with items positioned within their level, decorative section labels and a single Tab stop', () => {
+		partOptions = { ...partOptions, pinnedTabsOnSeparateRow: true };
+		model.stick(model.getEditorByIndex(0)!);
+		model.createTabGroup(model.getEditors(EditorsOrder.SEQUENTIAL).slice(2, 4), 'Work', 'blue');
+
+		const list = container.querySelector('.vertical-tabs-list')!;
+		const describe = (element: Element) => element.classList.contains('vertical-tabs-section-label')
+			? { section: element.textContent, hidden: element.getAttribute('aria-hidden') }
+			: {
+				role: element.getAttribute('role'),
+				level: element.getAttribute('aria-level'),
+				position: element.getAttribute('aria-posinset') ? `${element.getAttribute('aria-posinset')}/${element.getAttribute('aria-setsize')}` : undefined,
+				expanded: element.getAttribute('aria-expanded') ?? undefined,
+				label: element.getAttribute('aria-label')
+			};
+
+		assert.deepStrictEqual({
+			role: list.getAttribute('role'),
+			children: Array.from(list.children).slice(0, 8).map(describe),
+			tabStops: Array.from(list.children).filter(child => child.getAttribute('tabindex') === '0').map(child => (child as HTMLElement).dataset.resourceName),
+			focusableNestedControls: list.querySelectorAll('.vertical-tab-actions [tabindex="0"]').length,
+			childRoles: [...new Set(Array.from(list.children).map(element => element.getAttribute('role')))]
+		}, {
+			role: 'tree',
+			children: [
+				{ section: 'Pinned', hidden: 'true' },
+				{ role: 'treeitem', level: '1', position: '1/11', expanded: undefined, label: 'file0.txt, pinned' },
+				{ section: 'Editors', hidden: 'true' },
+				{ role: 'treeitem', level: '1', position: '2/11', expanded: undefined, label: 'file1.txt' },
+				{ role: 'treeitem', level: '1', position: '3/11', expanded: 'true', label: 'Work, 2 editors' },
+				{ role: 'treeitem', level: '2', position: '1/2', expanded: undefined, label: 'file2.txt' },
+				{ role: 'treeitem', level: '2', position: '2/2', expanded: undefined, label: 'file3.txt' },
+				{ role: 'treeitem', level: '1', position: '4/11', expanded: undefined, label: 'file4.txt' }
+			],
+			tabStops: ['file0.txt'],
+			focusableNestedControls: 0,
+			childRoles: [null, 'treeitem'] // the hidden section labels have no role, every other child is an item
+		});
+	});
+
+	test('arrow keys move across tabs and headers and Home and End jump to the first and last item', () => {
+		model.createTabGroup(model.getEditors(EditorsOrder.SEQUENTIAL).slice(2, 4), 'Work', 'blue');
+		const tabStops = () => Array.from(container.querySelectorAll<HTMLElement>('.vertical-tabs-list > [tabindex="0"]'));
+		const log: { key: string; focused: string | undefined; focusIsTheOnlyTabStop: boolean }[] = [];
+		const press = (key: keyof typeof domKeyCodes) => {
+			pressKey(key);
+			log.push({ key, focused: focusedItem(), focusIsTheOnlyTabStop: tabStops().length === 1 && tabStops()[0] === activeElement() });
+		};
+
+		rows()[1].focus();
+		press('ArrowDown');
+		press('ArrowDown');
+		press('ArrowUp');
+		press('ArrowUp');
+		press('Home');
+		press('ArrowUp');
+		press('End');
+		press('ArrowDown');
+
+		assert.deepStrictEqual({ log, opened: openedEditors.map(editor => editor.getName()) }, {
+			log: [
+				{ key: 'ArrowDown', focused: 'group:Work', focusIsTheOnlyTabStop: true },
+				{ key: 'ArrowDown', focused: 'file2.txt', focusIsTheOnlyTabStop: true },
+				{ key: 'ArrowUp', focused: 'group:Work', focusIsTheOnlyTabStop: true },
+				{ key: 'ArrowUp', focused: 'file1.txt', focusIsTheOnlyTabStop: true },
+				{ key: 'Home', focused: 'file0.txt', focusIsTheOnlyTabStop: true },
+				{ key: 'ArrowUp', focused: 'file0.txt', focusIsTheOnlyTabStop: true },
+				{ key: 'End', focused: 'file11.txt', focusIsTheOnlyTabStop: true },
+				{ key: 'ArrowDown', focused: 'file11.txt', focusIsTheOnlyTabStop: true }
+			],
+			opened: ['file2.txt', 'file1.txt', 'file0.txt', 'file11.txt']
+		});
+	});
+
+	test('Left and Right collapse and expand a tab group header and Enter and Space toggle it', () => {
+		const tabGroup = model.createTabGroup(model.getEditors(EditorsOrder.SEQUENTIAL).slice(2, 4), 'Work', 'blue')!;
+		container.querySelector<HTMLElement>('.vertical-tab-group-header')!.focus();
+		const log: { key: string; collapsed: boolean; focused: string | undefined }[] = [];
+		const press = (key: keyof typeof domKeyCodes) => {
+			pressKey(key);
+			log.push({ key, collapsed: tabGroup.collapsed, focused: focusedItem() });
+		};
+
+		press('ArrowRight'); // already expanded: moves into the group
+		press('ArrowLeft'); // back out to the header
+		press('ArrowLeft'); // collapses
+		press('ArrowLeft'); // stays collapsed
+		press('ArrowRight'); // expands
+		press('Enter');
+		press(' ');
+
+		assert.deepStrictEqual(log, [
+			{ key: 'ArrowRight', collapsed: false, focused: 'file2.txt' },
+			{ key: 'ArrowLeft', collapsed: false, focused: 'group:Work' },
+			{ key: 'ArrowLeft', collapsed: true, focused: 'group:Work' },
+			{ key: 'ArrowLeft', collapsed: true, focused: 'group:Work' },
+			{ key: 'ArrowRight', collapsed: false, focused: 'group:Work' },
+			{ key: 'Enter', collapsed: true, focused: 'group:Work' },
+			{ key: ' ', collapsed: false, focused: 'group:Work' }
+		]);
+	});
+
+	test('Enter opens the focused tab and keys typed into nested controls are left alone', () => {
+		const row = rows()[3];
+		row.focus();
+		pressKey('Enter');
+		const opened = openedEditors.map(editor => editor.getName());
+
+		openedEditors = [];
+		row.querySelector<HTMLElement>('.vertical-tab-actions .action-label')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: domKeyCodes.Enter, bubbles: true, cancelable: true } as KeyboardEventInit));
+
+		assert.deepStrictEqual({ opened, openedByNestedControl: openedEditors.map(editor => editor.getName()) }, { opened: ['file3.txt'], openedByNestedControl: [] });
 	});
 });

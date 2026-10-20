@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import './media/verticalEditorTabsControl.css';
-import { $, addDisposableListener, clearNode, Dimension, DragAndDropObserver, EventHelper, EventType, getWindow } from '../../../../base/browser/dom.js';
+import { $, addDisposableListener, clearNode, Dimension, DragAndDropObserver, EventHelper, EventType, getWindow, isHTMLElement } from '../../../../base/browser/dom.js';
 import { StandardKeyboardEvent } from '../../../../base/browser/keyboardEvent.js';
 import { StandardMouseEvent } from '../../../../base/browser/mouseEvent.js';
 import { ActionBar } from '../../../../base/browser/ui/actionbar/actionbar.js';
@@ -81,6 +81,7 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 	private readonly closeEditorAction = this._register(this.instantiationService.createInstance(CloseEditorTabAction, CloseEditorTabAction.ID, CloseEditorTabAction.LABEL));
 	private readonly unpinEditorAction = this._register(this.instantiationService.createInstance(UnpinEditorAction, UnpinEditorAction.ID, UnpinEditorAction.LABEL));
 	private lastSingleSelectSelectedEditor: EditorInput | undefined;
+	private tabStop: HTMLElement | undefined;
 	private dropTarget: HTMLElement | undefined;
 	private lastMouseWheelEventTime = 0;
 
@@ -150,8 +151,10 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		this._register(addDisposableListener(this.toolbar, EventType.DRAG, event => lastGroupDragEvent = event));
 		this._register(addDisposableListener(this.toolbar, EventType.DRAG_END, event => void this.onGroupDragEnd(event, lastGroupDragEvent, this.toolbar!, isNewWindowOperation)));
 
+		// The list mixes editor tabs with collapsible tab group headers, which a tablist
+		// cannot own. A tree can: headers are expandable items, tabs are selectable items.
 		this.tabsContainer = $('.vertical-tabs-list', {
-			role: 'tablist',
+			role: 'tree',
 			'aria-orientation': 'vertical',
 			'aria-multiselectable': 'true',
 			'aria-label': localize('verticalTabs.ariaLabel', "Editor tabs")
@@ -186,6 +189,13 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 			});
 		}));
 		this._register(addDisposableListener(this.tabsContainer, EventType.MOUSE_WHEEL, event => this.onTabsMouseWheel(event)));
+		this._register(addDisposableListener(this.tabsContainer, EventType.KEY_DOWN, event => this.onListKeyDown(event)));
+		this._register(addDisposableListener(this.tabsContainer, EventType.FOCUS_IN, event => {
+			const item = this.getItem(event.target);
+			if (item) {
+				this.setTabStop(item);
+			}
+		}));
 		this._register(addDisposableListener(this.tabsContainer, EventType.DRAG_OVER, event => {
 			if (event.target !== this.tabsContainer || !this.isSupportedDropTransfer(event)) {
 				return;
@@ -277,6 +287,8 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		this.layoutScrollbar();
 		this.revealActiveTab();
 		restoreFocus?.();
+		this.updateItemPositions();
+		this.updateTabStop();
 	}
 
 	/**
@@ -314,7 +326,7 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 	}
 
 	private createSectionLabel(label: string, targetEditorIndex: number, sticky: boolean): HTMLElement {
-		const element = $('.vertical-tabs-section-label');
+		const element = $('.vertical-tabs-section-label', { 'aria-hidden': 'true' });
 		const disposables = this.registerRow(element);
 		element.textContent = label;
 		disposables.add(addDisposableListener(element, EventType.DRAG_OVER, event => {
@@ -381,9 +393,10 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 	private createTabGroupHeader(group: IEditorTabGroup, editors: readonly EditorInput[]): HTMLElement {
 		const members = editors.filter(editor => this.tabsModel.getTabGroupForEditor(editor)?.id === group.id);
 		const header = $('.vertical-tab-group-header', {
-			role: 'button',
-			tabindex: 0,
+			role: 'treeitem',
+			tabindex: -1,
 			draggable: !group.locked,
+			'aria-level': 1,
 			'aria-expanded': String(!group.collapsed)
 		});
 		const disposables = this.registerRow(header);
@@ -448,7 +461,7 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 
 			const status = dirtyCount > 0 ? localize('verticalTabs.groupStatusDirty', "{0} editors, {1} unsaved", members.length, dirtyCount) : localize('verticalTabs.groupStatus', "{0} editors", members.length);
 			const accessibilityStatus = [status, group.saved ? localize('verticalTabs.groupSaved', "saved") : undefined, group.locked ? localize('verticalTabs.groupLocked', "locked") : undefined].filter(Boolean).join(', ');
-			header.setAttribute('aria-label', group.collapsed ? localize('verticalTabs.collapsedGroupAria', "{0}, collapsed, {1}", label, accessibilityStatus) : localize('verticalTabs.expandedGroupAria', "{0}, expanded, {1}", label, accessibilityStatus));
+			header.setAttribute('aria-label', localize('verticalTabs.groupAria', "{0}, {1}", label, accessibilityStatus)); // aria-expanded announces the state
 			header.title = localize('verticalTabs.groupTitle', "{0} ({1})", label, accessibilityStatus);
 		};
 		updateStatus();
@@ -458,23 +471,9 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 			EventHelper.stop(event, true);
 			this.toggleTabGroup(group);
 		}));
-		disposables.add(addDisposableListener(header, EventType.KEY_UP, event => {
-			const keyboardEvent = new StandardKeyboardEvent(event);
-			if (keyboardEvent.equals(KeyCode.Enter) || keyboardEvent.equals(KeyCode.Space)) {
-				EventHelper.stop(event, true);
-				this.toggleTabGroup(group);
-			}
-		}));
 		disposables.add(addDisposableListener(header, EventType.CONTEXT_MENU, event => {
 			EventHelper.stop(event, true);
 			this.showTabGroupContextMenu(group, header, event);
-		}));
-		disposables.add(addDisposableListener(header, EventType.KEY_DOWN, event => {
-			const keyboardEvent = new StandardKeyboardEvent(event);
-			if (keyboardEvent.shiftKey && keyboardEvent.keyCode === KeyCode.F10) {
-				EventHelper.stop(event, true);
-				this.showTabGroupContextMenu(group, header, event);
-			}
 		}));
 		disposables.add(addDisposableListener(header, EventType.DRAG_OVER, event => {
 			const draggedGroup = this.getDraggedTabGroup();
@@ -589,16 +588,20 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 	}
 
 	private createTab(editor: EditorInput): HTMLElement {
-		const row = $('.vertical-tab', { role: 'tab', draggable: true });
+		const row = $('.vertical-tab', { role: 'treeitem', tabindex: -1, draggable: true });
 		const disposables = this.registerRow(row);
 		const tabGroup = this.groupsView.partOptions.tabGroups.enabled ? this.tabsModel.getTabGroupForEditor(editor) : undefined;
+		row.setAttribute('aria-level', tabGroup ? '2' : '1');
 		if (tabGroup) {
 			row.classList.add('in-tab-group');
 			row.style.setProperty('--tab-group-color', getEditorTabGroupColor(tabGroup.color));
 		}
 
 		const label = disposables.add(this.tabResourceLabels.create(row, { hoverTargetOverride: row }));
-		const actionsContainer = $('.vertical-tab-actions');
+		// The row is the only Tab stop: its actions are reached with the keyboard through
+		// the Delete key and the context menu, so they stay out of the focus order and
+		// are not announced as nested controls.
+		const actionsContainer = $('.vertical-tab-actions', { 'aria-hidden': 'true' });
 		row.appendChild(actionsContainer);
 		const that = this;
 		const actionRunner = disposables.add(new EditorCommandsContextActionRunner({
@@ -609,6 +612,7 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 			ariaLabel: localize('verticalTabs.tabActions', "Tab actions"),
 			actionRunner
 		}));
+		actionBar.setFocusable(false);
 
 		const tab: IVerticalTab = { element: row, label, actionBar };
 		this.tabs.set(editor, tab);
@@ -680,7 +684,40 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		row.classList.toggle('actions-left', this.groupsView.partOptions.tabActionLocation === 'left');
 		row.setAttribute('aria-selected', String(selected));
 		row.setAttribute('aria-label', computeEditorAriaLabel(editor, this.groupView.getIndexOfEditor(editor), this.groupView, this.editorPartsView.count));
-		row.tabIndex = active ? 0 : -1;
+	}
+
+	/**
+	 * Gives every item its position within its level of the tree, which is the set screen
+	 * readers count in: tab group headers and the tabs outside of groups form the first level,
+	 * the tabs of a group form the second level below its header (including the tabs that a
+	 * collapsed group hides). Positions only change with the structure, i.e. on a redraw.
+	 */
+	private updateItemPositions(): void {
+		const tabGroupMembers = new Map<string, EditorInput[]>();
+		if (this.groupsView.partOptions.tabGroups.enabled) {
+			for (const editor of this.tabsModel.getEditors(EditorsOrder.SEQUENTIAL)) {
+				const tabGroup = this.tabsModel.getTabGroupForEditor(editor);
+				if (tabGroup) {
+					const members = tabGroupMembers.get(tabGroup.id) ?? [];
+					members.push(editor);
+					tabGroupMembers.set(tabGroup.id, members);
+				}
+			}
+		}
+
+		const topLevelItems = this.getItems().filter(item => !item.classList.contains('in-tab-group'));
+		for (let index = 0; index < topLevelItems.length; index++) {
+			topLevelItems[index].setAttribute('aria-posinset', String(index + 1));
+			topLevelItems[index].setAttribute('aria-setsize', String(topLevelItems.length));
+		}
+
+		for (const [editor, tab] of this.tabs) {
+			const members = tab.element.classList.contains('in-tab-group') ? tabGroupMembers.get(this.tabsModel.getTabGroupForEditor(editor)?.id ?? '') : undefined;
+			if (members) {
+				tab.element.setAttribute('aria-posinset', String(members.indexOf(editor) + 1));
+				tab.element.setAttribute('aria-setsize', String(members.length));
+			}
+		}
 	}
 
 	private refreshTabStates(): void {
@@ -693,6 +730,7 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		for (const [editor, tab] of this.tabs) {
 			this.updateTabState(editor, tab.element);
 		}
+		this.updateTabStop();
 		this.updateEditorActionsToolbar();
 		this.revealActiveTab();
 	}
@@ -765,7 +803,6 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 			EventHelper.stop(event, true);
 			this.onTabContextMenu(editor, event, row);
 		}));
-		disposables.add(addDisposableListener(row, EventType.KEY_DOWN, event => this.onTabKeyDown(editor, event)));
 		disposables.add(new DragAndDropObserver(row, {
 			onDragStart: event => {
 				openOnMouseUp = false;
@@ -1137,24 +1174,101 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		}
 	}
 
-	private onTabKeyDown(editor: EditorInput, event: KeyboardEvent): void {
+	/** The rows and headers of the list in visual order, i.e. everything keyboard navigation moves across. */
+	private getItems(): HTMLElement[] {
+		return Array.from(this.tabsContainer?.children ?? []).filter((child): child is HTMLElement => child.matches('.vertical-tab, .vertical-tab-group-header'));
+	}
+
+	private getItem(target: EventTarget | null): HTMLElement | undefined {
+		const item = isHTMLElement(target) ? target.closest<HTMLElement>('.vertical-tab, .vertical-tab-group-header') : null;
+		return item && item.parentElement === this.tabsContainer ? item : undefined;
+	}
+
+	/**
+	 * Keeps exactly one item in the Tab order (roving tabindex), so the list is a single
+	 * Tab stop and the arrow keys move within it. The item holding focus wins, otherwise
+	 * the active editor's row, otherwise the first item.
+	 */
+	private updateTabStop(): void {
+		const items = this.getItems();
+		const activeElement = this.tabsContainer ? getWindow(this.tabsContainer).document.activeElement : null;
+		const activeEditorRow = this.tabsModel.activeEditor ? this.tabs.get(this.tabsModel.activeEditor)?.element : undefined;
+		this.tabStop = undefined;
+		this.setTabStop(items.find(item => activeElement && item.contains(activeElement)) ?? activeEditorRow ?? items[0]);
+	}
+
+	private setTabStop(item: HTMLElement | undefined): void {
+		if (item === this.tabStop && item?.isConnected) {
+			return;
+		}
+
+		for (const candidate of this.getItems()) {
+			candidate.tabIndex = candidate === item ? 0 : -1;
+		}
+		this.tabStop = item;
+	}
+
+	private onListKeyDown(event: KeyboardEvent): void {
+		const item = this.getItem(event.target);
+		if (!item || item !== event.target) {
+			return; // keys pressed on nested controls are theirs
+		}
+
 		const keyboardEvent = new StandardKeyboardEvent(event);
+		const editor = this.getEditorOfRow(item);
+		const tabGroup = editor ? undefined : this.tabsModel.tabGroups.find(group => group.id === item.dataset.tabGroupId);
+
 		if (keyboardEvent.shiftKey && keyboardEvent.keyCode === KeyCode.F10) {
 			EventHelper.stop(event, true);
-			const row = this.tabs.get(editor)?.element;
-			if (row) {
-				this.onTabContextMenu(editor, event, row);
+			if (editor) {
+				this.onTabContextMenu(editor, event, item);
+			} else if (tabGroup) {
+				this.showTabGroupContextMenu(tabGroup, item, event);
 			}
 			return;
 		}
 
-		if (keyboardEvent.equals(KeyCode.Enter) || keyboardEvent.equals(KeyCode.Space)) {
+		const items = this.getItems();
+		const index = items.indexOf(item);
+		let target: HTMLElement | undefined;
+		if (keyboardEvent.equals(KeyCode.UpArrow)) {
+			target = items[index - 1];
+		} else if (keyboardEvent.equals(KeyCode.DownArrow)) {
+			target = items[index + 1];
+		} else if (keyboardEvent.equals(KeyCode.Home)) {
+			target = items[0];
+		} else if (keyboardEvent.equals(KeyCode.End)) {
+			target = items[items.length - 1];
+		} else if (tabGroup && keyboardEvent.equals(KeyCode.LeftArrow) && !tabGroup.collapsed) {
 			EventHelper.stop(event, true);
-			void this.groupView.openEditor(editor);
+			this.groupView.setTabGroupCollapsed(tabGroup.id, true);
 			return;
-		}
-
-		if (keyboardEvent.equals(KeyCode.Delete)) {
+		} else if (tabGroup && keyboardEvent.equals(KeyCode.RightArrow)) {
+			EventHelper.stop(event, true);
+			if (tabGroup.collapsed) {
+				this.groupView.setTabGroupCollapsed(tabGroup.id, false);
+			} else {
+				this.focusItem(items[index + 1]); // into the group, as in a tree
+			}
+			return;
+		} else if (editor && keyboardEvent.equals(KeyCode.LeftArrow) && this.groupsView.partOptions.tabGroups.enabled) {
+			const header = this.tabGroupHeaders.get(this.tabsModel.getTabGroupForEditor(editor)?.id ?? '')?.element;
+			if (header) {
+				EventHelper.stop(event, true);
+				header.focus(); // out to the parent, as in a tree
+			}
+			return;
+		} else if (keyboardEvent.equals(KeyCode.Enter) || keyboardEvent.equals(KeyCode.Space)) {
+			EventHelper.stop(event, true);
+			if (tabGroup) {
+				if (!event.repeat) {
+					this.toggleTabGroup(tabGroup);
+				}
+			} else if (editor) {
+				void this.groupView.openEditor(editor);
+			}
+			return;
+		} else if (editor && keyboardEvent.equals(KeyCode.Delete)) {
 			if (!editor.hasCapability(EditorInputCapabilities.CannotClose) && !preventEditorClose(this.tabsModel, editor, EditorCloseMethod.KEYBOARD, this.groupsView.partOptions)) {
 				EventHelper.stop(event, true);
 				void this.closeEditorAction.run({ groupId: this.groupView.id, editorIndex: this.groupView.getIndexOfEditor(editor) }).then(() => {
@@ -1164,27 +1278,39 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 				});
 			}
 			return;
-		}
-
-		const visibleEditors = this.getVisibleEditors();
-		let targetIndex = visibleEditors.indexOf(editor);
-		if (keyboardEvent.equals(KeyCode.UpArrow)) {
-			targetIndex--;
-		} else if (keyboardEvent.equals(KeyCode.DownArrow)) {
-			targetIndex++;
-		} else if (keyboardEvent.equals(KeyCode.Home)) {
-			targetIndex = 0;
-		} else if (keyboardEvent.equals(KeyCode.End)) {
-			targetIndex = visibleEditors.length - 1;
 		} else {
 			return;
 		}
 
-		const target = visibleEditors[targetIndex];
-		if (target) {
-			EventHelper.stop(event, true);
-			void this.groupView.openEditor(target, { preserveFocus: true }, { focusTabControl: true });
+		EventHelper.stop(event, true);
+		this.focusItem(target);
+	}
+
+	/**
+	 * Moves focus to a row or header. Moving onto a tab also opens its editor, keeping focus
+	 * in the list so that the arrow keys can continue.
+	 */
+	private focusItem(item: HTMLElement | undefined): void {
+		if (!item) {
+			return;
 		}
+
+		item.focus();
+		this.setTabStop(item);
+		const editor = this.getEditorOfRow(item);
+		if (editor) {
+			void this.groupView.openEditor(editor, { preserveFocus: true }, { focusTabControl: true });
+		}
+	}
+
+	private getEditorOfRow(row: HTMLElement): EditorInput | undefined {
+		for (const [editor, tab] of this.tabs) {
+			if (tab.element === row) {
+				return editor;
+			}
+		}
+
+		return undefined;
 	}
 
 	private getVisibleEditors(): EditorInput[] {
