@@ -486,6 +486,13 @@ export interface IInternalEditorOpenOptions extends IInternalEditorTitleControlO
 	 * is a member of a tab group, the opened editor takes over its place there.
 	 */
 	readonly replaces?: EditorInput;
+
+	/**
+	 * Whether the editor opens together with the active editor, right after it.
+	 * It can then join the tab group of the active editor like an editor that
+	 * opens without a requested index.
+	 */
+	readonly canJoinActiveTabGroup?: boolean;
 }
 
 export interface IInternalEditorCloseOptions extends IInternalEditorTitleControlOptions {

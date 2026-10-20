@@ -136,6 +136,11 @@ const registry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Con
 				'markdownDescription': localize('tabGroups.enabled', "Controls whether editor tabs can be grouped into named, colored tab groups."),
 				'default': true
 			},
+			'workbench.editor.tabGroups.openInActiveGroup': {
+				'type': 'boolean',
+				'markdownDescription': localize({ comment: ['{0} will be a setting name rendered as a link'], key: 'tabGroups.openInActiveGroup' }, "Controls whether an editor that opens while the active editor is in an unlocked tab group joins that group, right after the active editor. By default, new editors open after the tab group. Preview editors and tabs that are pinned to the start of the tab bar never join a group. This value is ignored when {0} is turned off.", '`#workbench.editor.tabGroups.enabled#`'),
+				'default': false
+			},
 			[CustomEditorLabelService.SETTING_ID_ENABLED]: {
 				'type': 'boolean',
 				'markdownDescription': localize('workbench.editor.label.enabled', "Controls whether the custom workbench editor labels should be applied."),

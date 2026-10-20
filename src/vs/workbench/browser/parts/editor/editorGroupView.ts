@@ -1335,7 +1335,8 @@ export class EditorGroupView extends Themable implements IEditorGroupView {
 			inactiveSelection: internalOptions?.inactiveSelection,
 			active: this.count === 0 || !options?.inactive,
 			supportSideBySide: internalOptions?.supportSideBySide,
-			replaces: internalOptions?.replaces
+			replaces: internalOptions?.replaces,
+			canJoinActiveTabGroup: internalOptions?.canJoinActiveTabGroup
 		};
 
 		if (!openEditorOptions.active && !openEditorOptions.pinned && this.model.activeEditor && !this.model.isPinned(this.model.activeEditor)) {
@@ -1490,7 +1491,9 @@ export class EditorGroupView extends Themable implements IEditorGroupView {
 				...openEditorsOptions,
 				// optimization: update the title control later
 				// https://github.com/microsoft/vscode/issues/130634
-				skipTitleUpdate: true
+				skipTitleUpdate: true,
+				// like the first editor, they can join the tab group of the active editor
+				canJoinActiveTabGroup: true
 			});
 		}));
 

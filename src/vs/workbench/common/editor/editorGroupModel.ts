@@ -37,6 +37,13 @@ export interface IEditorOpenOptions {
 	 * of a tab group, a new editor takes over its position and membership.
 	 */
 	readonly replaces?: EditorInput;
+
+	/**
+	 * Whether a new editor that opens at the requested index can still join the tab
+	 * group of the active editor when tab groups open new editors in the active group.
+	 * This is the case for the editors that open together with the active editor.
+	 */
+	readonly canJoinActiveTabGroup?: boolean;
 }
 
 export interface IEditorOpenResult {
@@ -296,6 +303,11 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 	 */
 	private tabGroupsEnabled = true;
 
+	/**
+	 * Whether an editor that opens next to the active editor of a tab group joins that group.
+	 */
+	private openInActiveTabGroup = false;
+
 	constructor(
 		labelOrSerializedGroup: ISerializedEditorGroupModel | undefined,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
@@ -320,12 +332,13 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 	}
 
 	private onConfigurationUpdated(e?: IConfigurationChangeEvent): void {
-		if (e && !e.affectsConfiguration('workbench.editor.openPositioning') && !e.affectsConfiguration('workbench.editor.focusRecentEditorAfterClose') && !e.affectsConfiguration('workbench.editor.tabGroups.enabled')) {
+		if (e && !e.affectsConfiguration('workbench.editor.openPositioning') && !e.affectsConfiguration('workbench.editor.focusRecentEditorAfterClose') && !e.affectsConfiguration('workbench.editor.tabGroups.enabled') && !e.affectsConfiguration('workbench.editor.tabGroups.openInActiveGroup')) {
 			return;
 		}
 
 		this.editorOpenPositioning = this.configurationService.getValue('workbench.editor.openPositioning');
 		this.focusRecentEditorAfterClose = this.configurationService.getValue('workbench.editor.focusRecentEditorAfterClose');
+		this.openInActiveTabGroup = this.configurationService.getValue('workbench.editor.tabGroups.openInActiveGroup') === true;
 
 		const tabGroupsEnabled = this.readTabGroupsEnabled();
 		if (tabGroupsEnabled !== this.tabGroupsEnabled) {
@@ -385,16 +398,22 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 
 	openEditor(candidate: EditorInput, options?: IEditorOpenOptions): IEditorOpenResult {
 		const makeSticky = options?.sticky || (typeof options?.index === 'number' && this.isSticky(options.index));
+		const existingEditorAndIndex = this.findEditor(candidate, options);
 
-		// A new editor that replaces a member of a tab group becomes a member itself
-		const replacedEditor = options?.replaces ? this.findEditor(options.replaces)?.[0] : undefined;
-		const replacedTabGroup = replacedEditor && !makeSticky ? this.getTabGroupForEditor(replacedEditor) : undefined;
+		// A new editor becomes a member of a tab group if it replaces a member, or if
+		// it opens next to the active member of a group that it is allowed to join
+		let replacedEditor: EditorInput | undefined;
+		let replacedTabGroup: IEditorTabGroup | undefined;
+		let joinedTabGroup: IEditorTabGroup | undefined;
+		if (!existingEditorAndIndex && !makeSticky) {
+			replacedEditor = options?.replaces ? this.findEditor(options.replaces)?.[0] : undefined;
+			replacedTabGroup = replacedEditor ? this.getTabGroupForEditor(replacedEditor) : undefined;
+			joinedTabGroup = !replacedTabGroup ? this.getTabGroupToJoinOnOpen(options) : undefined;
+		}
 
-		const makePinned = options?.pinned || options?.sticky || !!replacedTabGroup;
+		const makePinned = options?.pinned || options?.sticky || !!replacedTabGroup || !!joinedTabGroup;
 		const makeTransient = !!options?.transient;
 		const makeActive = options?.active || !this.activeEditor || (!makePinned && this.preview === this.activeEditor);
-
-		const existingEditorAndIndex = this.findEditor(candidate, options);
 
 		// New editor
 		if (!existingEditorAndIndex) {
@@ -406,6 +425,12 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 			let targetIndex: number;
 			if (replacedEditor && replacedTabGroup) {
 				targetIndex = this.indexOf(replacedEditor);
+			}
+
+			// Insert inside of the tab group of the active editor: right after the
+			// active editor, unless opening at a position that keeps the group together
+			else if (joinedTabGroup) {
+				targetIndex = typeof options?.index === 'number' ? options.index : indexOfActive + 1;
 			}
 
 			// Insert into specific position
@@ -455,7 +480,7 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 
 			// A newly opened editor does not belong to a tab group. Keep it after the
 			// whole group when its requested position would split group members.
-			if (this.tabGroupsEnabled && !makeSticky && !replacedTabGroup && targetIndex > 0 && targetIndex < this.editors.length) {
+			if (this.tabGroupsEnabled && !makeSticky && !replacedTabGroup && !joinedTabGroup && targetIndex > 0 && targetIndex < this.editors.length) {
 				const precedingGroupId = this.editorTabGroups.get(this.editors[targetIndex - 1]);
 				if (precedingGroupId) {
 					for (let index = this.editors.length - 1; index >= targetIndex; index--) {
@@ -482,8 +507,9 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 				this.splice(targetIndex, false, newEditor);
 
 				// Join the tab group before anyone gets notified of the new editor
-				if (replacedTabGroup) {
-					this.editorTabGroups.set(newEditor, replacedTabGroup.id);
+				const newTabGroup = replacedTabGroup ?? joinedTabGroup;
+				if (newTabGroup) {
+					this.editorTabGroups.set(newEditor, newTabGroup.id);
 				}
 			}
 
@@ -522,6 +548,11 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 			// Handle active editor / selected editors
 			this.setSelection(makeActive ? newEditor : this.activeEditor, options?.inactiveSelection ?? []);
 
+			// A group that gets a new member is a change to that group
+			if (joinedTabGroup) {
+				this._onDidModelChange.fire({ kind: GroupModelChangeKind.TAB_GROUP_CHANGED, tabGroup: joinedTabGroup });
+			}
+
 			return {
 				editor: newEditor,
 				isNew: true
@@ -559,6 +590,36 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 				isNew: false
 			};
 		}
+	}
+
+	/**
+	 * Returns the tab group that a new editor joins when it opens without a requested position
+	 * and the setting to open in the active tab group is on. It is the group of the active editor,
+	 * unless that is locked (it keeps its editors) or collapsed (the new editor would be hidden).
+	 * An editor that opens together with the active editor joins at its requested position, as
+	 * long as that position is right after a member of the group.
+	 *
+	 * Preview and transient editors never join: they are meant to be replaced or closed again
+	 * (for example while going through search results), but members of a group are pinned.
+	 */
+	private getTabGroupToJoinOnOpen(options?: IEditorOpenOptions): IEditorTabGroup | undefined {
+		if (!this.openInActiveTabGroup || !this.tabGroupsEnabled || !this.active || !options?.pinned || options.transient) {
+			return undefined;
+		}
+
+		const tabGroup = this.getTabGroupForEditor(this.active);
+		if (!tabGroup || tabGroup.locked || tabGroup.collapsed) {
+			return undefined;
+		}
+
+		if (typeof options?.index === 'number') {
+			const { first, last } = this.getTabGroupRange(this.editors, tabGroup.id);
+			if (!options.canJoinActiveTabGroup || options.index <= first || options.index > last + 1) {
+				return undefined;
+			}
+		}
+
+		return tabGroup;
 	}
 
 	private registerEditorListeners(editor: EditorInput): void {

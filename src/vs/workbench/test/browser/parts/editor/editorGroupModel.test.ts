@@ -26,6 +26,7 @@ import { SideBySideEditorInput } from '../../../../common/editor/sideBySideEdito
 import { isEqual } from '../../../../../base/common/resources.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { isUUID } from '../../../../../base/common/uuid.js';
+import { IEditorTabGroup } from '../../../../common/editor/editorTabGroup.js';
 
 suite('EditorGroupModel', () => {
 
@@ -39,11 +40,16 @@ suite('EditorGroupModel', () => {
 	let latestConfig: TestConfigurationService | undefined;
 	const configs = new WeakMap<EditorGroupModel, TestConfigurationService>();
 
-	function configureEditor(config: TestConfigurationService, tabGroupsEnabled?: boolean): void {
-		config.setUserConfiguration('workbench', { editor: { openPositioning: 'right', focusRecentEditorAfterClose: true, tabGroups: tabGroupsEnabled === undefined ? undefined : { enabled: tabGroupsEnabled } } });
+	interface ITabGroupsSettings {
+		readonly enabled?: boolean;
+		readonly openInActiveGroup?: boolean;
 	}
 
-	function inst(tabGroupsEnabled?: boolean): IInstantiationService {
+	function configureEditor(config: TestConfigurationService, tabGroups?: ITabGroupsSettings): void {
+		config.setUserConfiguration('workbench', { editor: { openPositioning: 'right', focusRecentEditorAfterClose: true, tabGroups } });
+	}
+
+	function inst(tabGroups?: ITabGroupsSettings): IInstantiationService {
 		if (!testInstService) {
 			testInstService = new TestInstantiationService();
 		}
@@ -54,15 +60,15 @@ suite('EditorGroupModel', () => {
 		inst.stub(ITelemetryService, NullTelemetryService);
 
 		const config = new TestConfigurationService();
-		configureEditor(config, tabGroupsEnabled);
+		configureEditor(config, tabGroups);
 		inst.stub(IConfigurationService, config);
 		latestConfig = config;
 
 		return inst;
 	}
 
-	function createEditorGroupModel(serialized?: ISerializedEditorGroupModel, tabGroupsEnabled?: boolean): EditorGroupModel {
-		const group = disposables.add(inst(tabGroupsEnabled).createInstance(EditorGroupModel, serialized));
+	function createEditorGroupModel(serialized?: ISerializedEditorGroupModel, tabGroups?: ITabGroupsSettings): EditorGroupModel {
+		const group = disposables.add(inst(tabGroups).createInstance(EditorGroupModel, serialized));
 		configs.set(group, latestConfig!);
 
 		disposables.add(toDisposable(() => {
@@ -337,7 +343,7 @@ suite('EditorGroupModel', () => {
 	function restoreEditorGroupModel(editors: ISerializedEditorInput[], extra?: { readonly mru?: number[]; readonly preview?: number; readonly sticky?: number; readonly tabGroups?: ISerializedEditorTabGroup[]; readonly tabGroupsEnabled?: boolean }): EditorGroupModel {
 		inst().invokeFunction(accessor => Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).start(accessor));
 
-		return createEditorGroupModel({ id: 0, editors, mru: extra?.mru ?? editors.map((_, i) => i), preview: extra?.preview, sticky: extra?.sticky, tabGroups: extra?.tabGroups }, extra?.tabGroupsEnabled);
+		return createEditorGroupModel({ id: 0, editors, mru: extra?.mru ?? editors.map((_, i) => i), preview: extra?.preview, sticky: extra?.sticky, tabGroups: extra?.tabGroups }, extra?.tabGroupsEnabled === undefined ? undefined : { enabled: extra.tabGroupsEnabled });
 	}
 
 	function describeEditorIds(editors: EditorInput[]): string[] {
@@ -547,6 +553,20 @@ suite('EditorGroupModel', () => {
 			}));
 
 			return events;
+		}
+
+		/** Changes the tab groups settings of the group, like a user would do. */
+		function setTabGroupsSettings(group: EditorGroupModel, settings: ITabGroupsSettings): void {
+			const config = configs.get(group)!;
+			configureEditor(config, settings);
+
+			const key = 'workbench.editor.tabGroups';
+			config.onDidChangeConfigurationEmitter.fire({
+				source: ConfigurationTarget.USER,
+				affectedKeys: new Set([key]),
+				change: { keys: [key], overrides: [] },
+				affectsConfiguration: candidate => key.startsWith(candidate) || candidate.startsWith(key)
+			});
 		}
 
 		/** Finds tab groups that are empty, not contiguous or contain sticky editors. */
@@ -1359,20 +1379,154 @@ suite('EditorGroupModel', () => {
 			assert.deepStrictEqual(violations, []);
 		});
 
+		suite('opening editors in the active tab group', () => {
+
+			/** Creates the editors a to e and the tab group G with b and c, with the active editor and the setting as requested. */
+			function createGroupWithSetting(openInActiveGroup: boolean, active = 'b'): { group: EditorGroupModel; editors: EditorInput[]; tabGroup: IEditorTabGroup } {
+				const group = createEditorGroupModel(undefined, { openInActiveGroup });
+				const editors = openEditors(group, 5);
+				const tabGroup = group.createTabGroup([editors[1], editors[2]], 'G')!;
+				group.setActive(editors[active.charCodeAt(0) - 'a'.charCodeAt(0)]);
+
+				return { group, editors, tabGroup };
+			}
+
+			test('a new editor opens after the tab group by default', () => {
+				const { group } = createGroupWithSetting(false);
+
+				group.openEditor(input('x'), { pinned: true });
+
+				assert.deepStrictEqual(describeLayout(group), ['a', 'b:G', 'c:G', 'x', 'd', 'e']);
+			});
+
+			test('a new editor joins the tab group right after the active editor when the setting is on', () => {
+				const { group } = createGroupWithSetting(true);
+				const events = recordEvents(group);
+				const tabGroupAtOpen: (string | undefined)[] = [];
+				disposables.add(group.onDidModelChange(e => {
+					if (e.kind === GroupModelChangeKind.EDITOR_OPEN) {
+						tabGroupAtOpen.push(group.getTabGroupForEditor(e.editor!)?.name);
+					}
+				}));
+
+				group.openEditor(input('x'), { pinned: true, active: true });
+				group.openEditor(input('y'), { pinned: true, active: false });
+
+				assert.deepStrictEqual({ layout: describeLayout(group), tabGroupAtOpen, events, violations: findTabGroupViolations(group) }, {
+					layout: ['a', 'b:G', 'x:G', 'y:G', 'c:G', 'd', 'e'],
+					tabGroupAtOpen: ['G', 'G'],
+					events: ['changed:G', 'changed:G'],
+					violations: []
+				});
+			});
+
+			test('a new editor joins at the end of the tab group when its last editor is active', () => {
+				const { group } = createGroupWithSetting(true, 'c');
+
+				group.openEditor(input('x'), { pinned: true, active: true });
+
+				assert.deepStrictEqual(describeLayout(group), ['a', 'b:G', 'c:G', 'x:G', 'd', 'e']);
+			});
+
+			test('preview and transient editors do not join the tab group', () => {
+				const { group } = createGroupWithSetting(true);
+				const preview = input('x');
+
+				group.openEditor(preview, { pinned: false, active: false });
+				group.openEditor(input('y'), { pinned: true, transient: true, active: false });
+
+				assert.deepStrictEqual({ layout: describeLayout(group), preview: group.previewEditor === preview }, {
+					layout: ['a', 'b:G', 'c:G', 'y', 'x', 'd', 'e'],
+					preview: true
+				});
+			});
+
+			test('a new editor does not join when the active editor is not in a tab group', () => {
+				const { group } = createGroupWithSetting(true, 'd');
+
+				group.openEditor(input('x'), { pinned: true, active: true });
+
+				assert.deepStrictEqual(describeLayout(group), ['a', 'b:G', 'c:G', 'd', 'x', 'e']);
+			});
+
+			test('a new editor does not join a locked or a collapsed tab group', () => {
+				const { group, tabGroup } = createGroupWithSetting(true);
+
+				group.setTabGroupLocked(tabGroup.id, true);
+				group.openEditor(input('x'), { pinned: true, active: false });
+				group.setTabGroupLocked(tabGroup.id, false);
+				group.setTabGroupCollapsed(tabGroup.id, true);
+				group.openEditor(input('y'), { pinned: true, active: false });
+
+				assert.deepStrictEqual(describeLayout(group), ['a', 'b:G', 'c:G', 'y', 'x', 'd', 'e']);
+			});
+
+			test('a sticky editor and an editor with a requested position do not join the tab group', () => {
+				const { group } = createGroupWithSetting(true);
+
+				group.openEditor(input('x'), { pinned: true, sticky: true });
+				group.openEditor(input('y'), { pinned: true, index: 5 });
+
+				assert.deepStrictEqual({ layout: describeLayout(group), stickyCount: group.stickyCount }, {
+					layout: ['x', 'a', 'b:G', 'c:G', 'd', 'y', 'e'],
+					stickyCount: 1
+				});
+			});
+
+			test('an editor that opens together with the active editor joins the tab group at its requested position right after a member', () => {
+				const { group } = createGroupWithSetting(true);
+
+				group.openEditor(input('x'), { pinned: true, index: 2, canJoinActiveTabGroup: true });
+				group.openEditor(input('y'), { pinned: true, index: 4, canJoinActiveTabGroup: true });
+				group.openEditor(input('z'), { pinned: true, index: 1, canJoinActiveTabGroup: true });
+
+				assert.deepStrictEqual({ layout: describeLayout(group), violations: findTabGroupViolations(group) }, {
+					layout: ['a', 'z', 'b:G', 'x:G', 'c:G', 'y:G', 'd', 'e'],
+					violations: []
+				});
+			});
+
+			test('an editor that is already open does not join the tab group or get pinned', () => {
+				const { group, editors } = createGroupWithSetting(true);
+				const preview = input('x');
+				group.openEditor(preview, { pinned: false, active: false, index: 5 });
+
+				group.openEditor(preview, { active: false });
+
+				assert.deepStrictEqual({ layout: describeLayout(group), pinned: group.isPinned(preview), active: group.activeEditor === editors[1] }, {
+					layout: ['a', 'b:G', 'c:G', 'd', 'e', 'x'],
+					pinned: false,
+					active: true
+				});
+			});
+
+			test('a new editor does not join the tab group while tab groups are disabled', () => {
+				const group = createEditorGroupModel(undefined, { enabled: false, openInActiveGroup: true });
+				const [, b, c] = openEditors(group, 4);
+				group.createTabGroup([b, c], 'G');
+				group.setActive(b);
+
+				group.openEditor(input('x'), { pinned: true, active: true });
+
+				assert.deepStrictEqual(describeLayout(group), ['a', 'b:G', 'x', 'c:G', 'd']);
+			});
+
+			test('turning the setting on and off applies to the editors that open afterwards', () => {
+				const { group } = createGroupWithSetting(false);
+
+				setTabGroupsSettings(group, { openInActiveGroup: true });
+				group.openEditor(input('x'), { pinned: true, active: false });
+				setTabGroupsSettings(group, { openInActiveGroup: false });
+				group.openEditor(input('y'), { pinned: true, active: false });
+
+				assert.deepStrictEqual(describeLayout(group), ['a', 'b:G', 'x:G', 'c:G', 'y', 'd', 'e']);
+			});
+		});
+
 		suite('while tab groups are disabled', () => {
 
-			/** Changes the tab groups setting of the group, like a user would do. */
 			function setTabGroupsEnabled(group: EditorGroupModel, enabled: boolean): void {
-				const config = configs.get(group)!;
-				configureEditor(config, enabled);
-
-				const key = 'workbench.editor.tabGroups.enabled';
-				config.onDidChangeConfigurationEmitter.fire({
-					source: ConfigurationTarget.USER,
-					affectedKeys: new Set([key]),
-					change: { keys: [key], overrides: [] },
-					affectsConfiguration: candidate => key.startsWith(candidate)
-				});
+				setTabGroupsSettings(group, { enabled });
 			}
 
 			test('moving editors is not limited by a locked tab group', () => {

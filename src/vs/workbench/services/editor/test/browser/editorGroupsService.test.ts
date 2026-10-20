@@ -651,6 +651,26 @@ suite('EditorGroupsService', () => {
 		assert.strictEqual(group.isEmpty, true);
 	});
 
+	test('openEditors - editors that open together join the active tab group in their order when opening in the active tab group', async () => {
+		const instantiationService = workbenchInstantiationService(undefined, disposables);
+		const configurationService = new TestConfigurationService();
+		await configurationService.setUserConfiguration('workbench', { editor: { tabGroups: { openInActiveGroup: true } } });
+		instantiationService.stub(IConfigurationService, configurationService);
+		const [part] = await createPart(instantiationService);
+		const group = part.activeGroup;
+
+		const [a, b, c, d] = ['a', 'b', 'c', 'd'].map(name => createTestFileEditorInput(URI.file(`foo/${name}`), TEST_EDITOR_INPUT_ID));
+		for (const input of [a, b, c, d]) {
+			await group.openEditor(input, { pinned: true });
+		}
+		group.createTabGroup([b, c], 'G');
+		await group.openEditor(b);
+
+		await group.openEditors(['x', 'y', 'z'].map(name => ({ editor: createTestFileEditorInput(URI.file(`foo/${name}`), TEST_EDITOR_INPUT_ID), options: { pinned: true } })));
+
+		assert.deepStrictEqual(group.getEditors(EditorsOrder.SEQUENTIAL).map(editor => `${editor.resource?.path.split('/').pop()}${group.getTabGroupForEditor(editor) ? ':G' : ''}`), ['a', 'b:G', 'x:G', 'y:G', 'z:G', 'c:G', 'd']);
+	});
+
 	test('closeEditor - dirty editor handling', async () => {
 		const [part, instantiationService] = await createPart();
 
