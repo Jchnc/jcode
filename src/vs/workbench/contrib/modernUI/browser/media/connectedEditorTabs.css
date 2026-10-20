@@ -799,10 +799,20 @@
 	background-image: none !important;
 }
 
+/* Stop the rail short of the active tab's shoulders so it ends square instead of tapering under their curve. */
+.modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab.in-tab-group:not(.last-in-row):has(+ .tab.active) {
+	background-size: calc(100% - var(--modern-ui-connected-tab-shoulder-radius) - var(--vscode-spacing-size20)) var(--vscode-spacing-size20) !important;
+}
+
+.modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab.active:not(.last-in-row) + .tab.in-tab-group {
+	background-position: right bottom !important;
+	background-size: calc(100% - var(--modern-ui-connected-tab-shoulder-radius) - var(--vscode-spacing-size20)) var(--vscode-spacing-size20) !important;
+}
+
 /* No separators inside a group or against its edges; the shared rail and header already group the tabs. */
 .modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab.in-tab-group > .tab-divider,
 .modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab.in-tab-group + .tab > .tab-divider {
-	display: none;
+	display: none !important;
 }
 
 /* The header pill shares the height and baseline of the tab fills. */
@@ -816,4 +826,9 @@
 /* The rail starts at the first member, so the header carries no underline. */
 .modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab-group-header::before {
 	display: none;
+}
+
+/* High contrast frames every tab fill, so the header pill takes a frame in its group color to match. */
+.modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench:is(.hc-black, .hc-light) .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab-group-header {
+	border: var(--vscode-strokeThickness) solid var(--tab-group-color);
 }

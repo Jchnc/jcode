@@ -248,6 +248,22 @@ function tabGroupEditorSpecs(): IEditorSpec[] {
 	];
 }
 
+/** Tab group editors with the active tab at the given position: a member, or an ungrouped tab. */
+function tabGroupActiveEditorSpecs(active: 'first' | 'middle' | 'last' | 'outside'): IEditorSpec[] {
+	const names = ['AuthButton.tsx', 'AuthProvider.tsx', 'FilterBar.tsx'];
+	const activeIndex = { first: 0, middle: 1, last: 2, outside: -1 }[active];
+	return [
+		{ resource: file('/project/package.json'), icon: ThemeIcon.fromId(Codicon.json.id), pinned: true, active: active === 'outside' },
+		...names.map((name, index) => ({ resource: file(`/project/src/components/${name}`), pinned: true, tabGroup: 'Components', active: index === activeIndex })),
+		{ resource: file('/project/src/index.ts'), pinned: true },
+	];
+}
+
+/** The single orange tab group of {@link tabGroupActiveEditorSpecs}. */
+function componentsTabGroup(collapsed = false): IFixtureTabGroup[] {
+	return [{ name: 'Components', color: 'orange', collapsed }];
+}
+
 /** Editors with very long names/paths to exercise tab-label truncation and ellipsis. */
 function longLabelEditorSpecs(): IEditorSpec[] {
 	return [
@@ -956,7 +972,7 @@ function createLayoutFixtures() {
 			Top: defineComponentFixture({
 				render: render(true, { editors: tabGroupEditorSpecs(), tabGroups: twoTabGroups(), width: 1000 }),
 				additionalThemes: ['darkHighContrast', 'lightHighContrast'],
-				expectedVisualDescriptions: ['Two tab groups share the strip: Frontend is expanded around the active tab and shows its three tabs under one colored underline, while the collapsed Docs group shows only its header with a count of three and a sideways chevron. The headers show the chevron, a code or book icon, a bookmark for the saved Frontend group, an unsaved dot for Frontend and a lock for the locked Docs group, all the same size and vertically centered. Ungrouped tabs sit before, between, and after the groups.'],
+				expectedVisualDescriptions: ['Two tab groups share the strip: Frontend is expanded around the active tab and shows its three tabs, with a thin colored rail under the inactive members that stops at the connected active tab, while the collapsed Docs group shows only its header with a count of three and a sideways chevron. The headers show the chevron, a code or book icon, a bookmark for the saved Frontend group, an unsaved dot for Frontend and a lock for the locked Docs group, all the same size and vertically centered. Ungrouped tabs sit before, between, and after the groups.'],
 			}),
 			Vertical: defineComponentFixture({
 				render: render(true, { editors: tabGroupEditorSpecs(), tabGroups: twoTabGroups(), verticalTabs: { width: 240 } }),
@@ -976,6 +992,33 @@ function createLayoutFixtures() {
 				fileIconTheme: 'none',
 				render: render(true, { editors: tabGroupEditorSpecs(), tabGroups: twoTabGroups(), verticalTabs: { width: 48 }, partOptions: { hasIcons: false } }),
 				expectedVisualDescriptions: ['Without a file icon theme the icon-only rail falls back to a codicon per tab instead of blank rows: the editor icon where it has one, a plain file otherwise.'],
+			}),
+		}),
+		ConnectedTabGroups: defineThemedFixtureGroup({
+			ActiveFirst: defineComponentFixture({
+				render: render(true, { editors: tabGroupActiveEditorSpecs('first'), tabGroups: componentsTabGroup(false), width: 900 }),
+				additionalThemes: ['darkHighContrast', 'lightHighContrast'],
+				expectedVisualDescriptions: ['Connected tabs: the first Components tab is active and opens into the editor with intact shoulders and no rail; the other two members carry a thin orange rail and no separators.'],
+			}),
+			ActiveMiddle: defineComponentFixture({
+				render: render(true, { editors: tabGroupActiveEditorSpecs('middle'), tabGroups: componentsTabGroup(false), width: 900 }),
+				expectedVisualDescriptions: ['The middle Components tab is active and merges into the editor; the rail stops cleanly on both sides of it.'],
+			}),
+			ActiveLast: defineComponentFixture({
+				render: render(true, { editors: tabGroupActiveEditorSpecs('last'), tabGroups: componentsTabGroup(false), width: 900 }),
+				expectedVisualDescriptions: ['The last Components tab is active and merges into the editor; the rail runs under the earlier members.'],
+			}),
+			ActiveOutside: defineComponentFixture({
+				render: render(true, { editors: tabGroupActiveEditorSpecs('outside'), tabGroups: componentsTabGroup(false), width: 900 }),
+				expectedVisualDescriptions: ['An ungrouped tab is active; all three Components members show the thin rail, with the header pill aligned to the tabs.'],
+			}),
+			Collapsed: defineComponentFixture({
+				render: render(true, { editors: tabGroupActiveEditorSpecs('outside'), tabGroups: componentsTabGroup(true), width: 900 }),
+				expectedVisualDescriptions: ['The collapsed Components header pill is aligned with the tabs and has no underline.'],
+			}),
+			Wrapped: defineComponentFixture({
+				render: render(true, { editors: tabGroupActiveEditorSpecs('middle'), tabGroups: componentsTabGroup(false), width: 360, partOptions: { wrapTabs: true, editorActionsLocation: 'hidden' } }),
+				expectedVisualDescriptions: ['Wrapped Connected tabs keep the group rail on each row and the active tab connected to the editor.'],
 			}),
 		}),
 		ShowBreadCrumbs: defineComponentFixture({
