@@ -6,7 +6,7 @@
 import assert from 'assert';
 import { Color } from '../../../base/common/color.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../base/test/common/utils.js';
-import { getWorkspaceColorPreset, getWorkspaceColorRamp, WORKSPACE_COLOR_PALETTE } from '../../common/workspaceColorPalette.js';
+import { ensureContrastOnSurfaces, getWorkspaceColorPreset, getWorkspaceColorRamp, WORKSPACE_COLOR_PALETTE } from '../../common/workspaceColorPalette.js';
 
 suite('Workspace color palette', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -41,5 +41,65 @@ suite('Workspace color palette', () => {
 				}
 			}
 		}
+	});
+
+	test('keeps markers and text readable on every title bar surface for light, dark and saturated colors', () => {
+		const colors = ['#fde047', '#f5f5f5', '#1e3a8a', '#111111', '#ff0000', '#00ff00', '#0000ff', '#ff00ff', '#ffff00', '#808080'];
+		const failures: string[] = [];
+		for (const color of colors) {
+			for (const dark of [true, false]) {
+				const workbenchBackground = Color.fromHex(dark ? '#1f1f1f' : '#ffffff');
+				const ramp = getWorkspaceColorRamp(color, dark);
+				for (const style of ['subtle', 'prominent'] as const) {
+					const surfaces = [Color.fromHex(ramp[style]), Color.fromHex(ramp.subtle).transparent(0.7).makeOpaque(workbenchBackground)];
+					for (const [name, foreground, ratio] of [['marker', ramp.marker, 3], ['text', ramp.foreground, 4.5]] as const) {
+						const adjusted = ensureContrastOnSurfaces(Color.fromHex(foreground), surfaces, ratio);
+						if (surfaces.some(surface => surface.getContrastRatio(adjusted) < ratio)) {
+							failures.push(`${color} ${dark ? 'dark' : 'light'} ${style} ${name}`);
+						}
+					}
+				}
+			}
+		}
+		assert.deepStrictEqual(failures, []);
+	});
+
+	test('resolves contrast against all surfaces at once instead of one pass after another', () => {
+		const marker = Color.fromHex('#a3a666');
+		const surfaces = [Color.fromHex('#f43384'), Color.fromHex('#e89c03')];
+		const meetsAll = (color: Color) => surfaces.every(surface => surface.getContrastRatio(color) >= 3);
+		const sequential = surfaces.reduce((color, surface) => surface.ensureConstrast(color, 3), marker);
+		const together = ensureContrastOnSurfaces(marker, surfaces, 3);
+
+		assert.deepStrictEqual({
+			sequentialMeetsAll: meetsAll(sequential),
+			togetherMeetsAll: meetsAll(together),
+			sameForAnyOrder: together.equals(ensureContrastOnSurfaces(marker, [...surfaces].reverse(), 3)),
+			stableWhenRepeated: together.equals(ensureContrastOnSurfaces(together, surfaces, 3)),
+		}, {
+			sequentialMeetsAll: false,
+			togetherMeetsAll: true,
+			sameForAnyOrder: true,
+			stableWhenRepeated: true,
+		});
+	});
+
+	test('leaves compliant colors alone and favors the first surface when none can serve them all', () => {
+		const compliant = Color.fromHex('#ffffff');
+		const surfaces = [Color.fromHex('#444444'), Color.fromHex('#dddddd')];
+		const marker = Color.fromHex('#888888');
+		const adjusted = ensureContrastOnSurfaces(marker, surfaces, 3);
+
+		assert.deepStrictEqual({
+			compliantUnchanged: ensureContrastOnSurfaces(compliant, [Color.fromHex('#222222')], 3) === compliant,
+			firstSurfaceMet: surfaces[0].getContrastRatio(adjusted) >= 3,
+			sameAsFirstAlone: adjusted.equals(ensureContrastOnSurfaces(marker, [surfaces[0]], 3)),
+			withoutSurfaces: ensureContrastOnSurfaces(marker, [], 3) === marker,
+		}, {
+			compliantUnchanged: true,
+			firstSurfaceMet: true,
+			sameAsFirstAlone: true,
+			withoutSurfaces: true,
+		});
 	});
 });

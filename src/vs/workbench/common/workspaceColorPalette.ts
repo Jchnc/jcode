@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Color, HSLA } from '../../base/common/color.js';
+import { Color, HSLA, RGBA } from '../../base/common/color.js';
 import { localize } from '../../nls.js';
 
 interface IWorkspaceColorSurface {
@@ -68,6 +68,53 @@ export const WORKSPACE_COLOR_PALETTE: readonly IWorkspaceColorPreset[] = [
 /** Recognize existing workspace selections without rewriting their stored appearance. */
 export function getWorkspaceColorPreset(color: string | undefined): IWorkspaceColorPreset | undefined {
 	return WORKSPACE_COLOR_PALETTE.find(preset => preset.value === color || (color !== undefined && preset.legacyColors.includes(color)));
+}
+
+const CONTRAST_STEPS = 100;
+
+/** Smallest shift of `foreground` toward white or black, in whole steps, that meets `ratio` on all `surfaces`. */
+function shiftForContrast(foreground: Color, surfaces: readonly Color[], ratio: number): Color | undefined {
+	const worstContrast = (color: Color) => Math.min(...surfaces.map(surface => surface.getContrastRatio(color)));
+	if (worstContrast(foreground) >= ratio) {
+		return foreground;
+	}
+	const { r, g, b } = foreground.rgba;
+	let best: { readonly color: Color; readonly step: number; readonly contrast: number } | undefined;
+	for (const target of [255, 0]) {
+		for (let step = 1; step <= CONTRAST_STEPS; step++) {
+			const amount = step / CONTRAST_STEPS;
+			const color = new Color(new RGBA(Math.round(r + (target - r) * amount), Math.round(g + (target - g) * amount), Math.round(b + (target - b) * amount)));
+			const contrast = worstContrast(color);
+			if (contrast >= ratio) {
+				if (!best || step < best.step || (step === best.step && contrast > best.contrast)) {
+					best = { color, step, contrast };
+				}
+				break;
+			}
+		}
+	}
+	return best?.color;
+}
+
+/**
+ * Adjust an opaque `foreground` once so that it meets `ratio` on every one of the opaque `surfaces`.
+ * Adjusting for one surface after another lets a later pass undo an earlier one, so all of them are
+ * solved together. Surfaces are listed by priority: if no color can satisfy all of them, the least
+ * important are dropped until one can, which always happens for the first surface alone at the
+ * contrast ratios used for text and markers.
+ */
+export function ensureContrastOnSurfaces(foreground: Color, surfaces: readonly Color[], ratio: number): Color {
+	for (let count = surfaces.length; count > 0; count--) {
+		const adjusted = shiftForContrast(foreground, surfaces.slice(0, count), ratio);
+		if (adjusted) {
+			return adjusted;
+		}
+	}
+	if (!surfaces.length) {
+		return foreground;
+	}
+	// The ratio cannot be met at all on the first surface: use whichever extreme comes closest.
+	return surfaces[0].getContrastRatio(Color.black) > surfaces[0].getContrastRatio(Color.white) ? Color.black : Color.white;
 }
 
 export function getWorkspaceColorRamp(color: string, dark: boolean): IWorkspaceColorSurface & { readonly foreground: string; readonly inactiveForeground: string } {

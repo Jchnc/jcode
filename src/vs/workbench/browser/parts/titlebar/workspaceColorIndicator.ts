@@ -14,7 +14,7 @@ import { IHoverService } from '../../../../platform/hover/browser/hover.js';
 import { isDark, isHighContrast } from '../../../../platform/theme/common/theme.js';
 import { IThemeService } from '../../../../platform/theme/common/themeService.js';
 import { TITLE_BAR_ACTIVE_BACKGROUND, TITLE_BAR_INACTIVE_BACKGROUND, WORKBENCH_BACKGROUND } from '../../../common/theme.js';
-import { getWorkspaceColorRamp } from '../../../common/workspaceColorPalette.js';
+import { ensureContrastOnSurfaces, getWorkspaceColorRamp } from '../../../common/workspaceColorPalette.js';
 import { IWorkspaceAppearanceService, WORKSPACE_COLOR_COMMAND_ID } from '../../../services/themes/common/workspaceAppearance.js';
 
 /** A separate color target beside the title, leaving Command Center search intact. */
@@ -39,12 +39,10 @@ export class WorkspaceColorIndicator extends Disposable {
 			this.element.hidden = !appearance;
 			titlebar.classList.toggle('workspace-colored', !!appearance && !isHighContrast(theme.type));
 			if (appearance) {
-				let marker = Color.fromHex(getWorkspaceColorRamp(appearance.color, isDark(theme.type)).marker);
-				for (const backgroundId of [TITLE_BAR_ACTIVE_BACKGROUND, TITLE_BAR_INACTIVE_BACKGROUND]) {
-					const background = theme.getColor(backgroundId)?.makeOpaque(WORKBENCH_BACKGROUND(theme)) ?? WORKBENCH_BACKGROUND(theme);
-					marker = background.ensureConstrast(marker, 3);
-				}
-				this.element.style.color = marker.toString();
+				const marker = Color.fromHex(getWorkspaceColorRamp(appearance.color, isDark(theme.type)).marker);
+				// Resolved once against both title bar surfaces, so the inactive one can never undo what the active one needs.
+				const surfaces = [TITLE_BAR_ACTIVE_BACKGROUND, TITLE_BAR_INACTIVE_BACKGROUND].map(backgroundId => theme.getColor(backgroundId)?.makeOpaque(WORKBENCH_BACKGROUND(theme)) ?? WORKBENCH_BACKGROUND(theme));
+				this.element.style.color = ensureContrastOnSurfaces(marker, surfaces, 3).toString();
 			} else {
 				this.element.style.color = '';
 			}

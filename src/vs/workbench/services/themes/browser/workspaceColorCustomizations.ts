@@ -6,7 +6,7 @@
 import { Color } from '../../../../base/common/color.js';
 import { isDark, isHighContrast } from '../../../../platform/theme/common/theme.js';
 import { COMMAND_CENTER_ACTIVEBACKGROUND, COMMAND_CENTER_ACTIVEBORDER, COMMAND_CENTER_ACTIVEFOREGROUND, COMMAND_CENTER_BACKGROUND, COMMAND_CENTER_BORDER, COMMAND_CENTER_FOREGROUND, COMMAND_CENTER_INACTIVEBORDER, COMMAND_CENTER_INACTIVEFOREGROUND, MENUBAR_SELECTION_BACKGROUND, MENUBAR_SELECTION_FOREGROUND, MODERN_UI_INACTIVE_SHELL_BACKGROUND, MODERN_UI_SHELL_BACKGROUND, STATUS_BAR_BACKGROUND, STATUS_BAR_FOREGROUND, STATUS_BAR_INACTIVE_BACKGROUND, STATUS_BAR_ITEM_ACTIVE_BACKGROUND, STATUS_BAR_ITEM_COMPACT_HOVER_BACKGROUND, STATUS_BAR_ITEM_HOVER_BACKGROUND, STATUS_BAR_ITEM_HOVER_FOREGROUND, STATUS_BAR_NO_FOLDER_BACKGROUND, STATUS_BAR_NO_FOLDER_FOREGROUND, TITLE_BAR_ACTIVE_BACKGROUND, TITLE_BAR_ACTIVE_FOREGROUND, TITLE_BAR_INACTIVE_BACKGROUND, TITLE_BAR_INACTIVE_FOREGROUND, WORKBENCH_BACKGROUND } from '../../../common/theme.js';
-import { getWorkspaceColorRamp } from '../../../common/workspaceColorPalette.js';
+import { ensureContrastOnSurfaces, getWorkspaceColorRamp } from '../../../common/workspaceColorPalette.js';
 import { ColorThemeData } from '../common/colorThemeData.js';
 import { IColorMap } from '../common/workbenchThemeService.js';
 import { IWorkspaceAppearance } from '../common/workspaceAppearance.js';
@@ -87,9 +87,8 @@ export function updateWorkspaceColors(theme: ColorThemeData, appearance: IWorksp
 			if (foregroundId === STATUS_BAR_ITEM_HOVER_FOREGROUND) {
 				colors[foregroundId] = theme.getColor(STATUS_BAR_FOREGROUND)!;
 			}
-			for (const surface of surfaces) {
-				colors[foregroundId] = surface.ensureConstrast(colors[foregroundId].makeOpaque(surface), 4.5);
-			}
+			// One adjustment against every surface the ink sits on, never one pass per surface.
+			colors[foregroundId] = ensureContrastOnSurfaces(colors[foregroundId].makeOpaque(surfaces[0]), surfaces, 4.5);
 		}
 	}
 	theme.setWorkspaceColors(colors);
