@@ -15,15 +15,16 @@
 
 .jcode-personalization .personalization-shell {
 	display: grid;
-	grid-template-columns: 220px minmax(0, 1fr);
+	grid-template-columns: 224px minmax(0, 1fr);
 	height: 100%;
 }
 
 .jcode-personalization .personalization-sidebar {
 	box-sizing: border-box;
 	overflow: auto;
-	padding: var(--vscode-spacing-size280) var(--vscode-spacing-size200);
+	padding: var(--vscode-spacing-size280) var(--vscode-spacing-size160);
 	background: var(--vscode-editor-background);
+	border-right: var(--vscode-strokeThickness) solid var(--vscode-widget-border, var(--vscode-contrastBorder, transparent));
 }
 
 .jcode-personalization .personalization-brand {
@@ -97,7 +98,7 @@
 .jcode-personalization button:focus-visible,
 .jcode-personalization input:focus-visible {
 	outline: var(--vscode-strokeThickness) solid var(--vscode-focusBorder);
-	outline-offset: 1px;
+	outline-offset: -1px;
 }
 
 .jcode-personalization .personalization-nav {
@@ -111,10 +112,10 @@
 	align-items: center;
 	gap: var(--vscode-spacing-size100);
 	width: 100%;
-	padding: var(--vscode-spacing-size80) var(--vscode-spacing-size100);
+	padding: var(--vscode-spacing-size60) var(--vscode-spacing-size100);
 	text-align: left;
 	white-space: nowrap;
-	color: var(--vscode-foreground);
+	color: var(--vscode-descriptionForeground);
 }
 
 .jcode-personalization .personalization-nav-icon {
@@ -130,6 +131,7 @@
 .jcode-personalization .personalization-nav-item[aria-current='page'] {
 	background: var(--vscode-list-inactiveSelectionBackground);
 	color: var(--vscode-list-inactiveSelectionForeground);
+	border-color: var(--vscode-contrastActiveBorder, transparent);
 }
 
 .jcode-personalization .personalization-nav-item[aria-current='page'] .personalization-nav-icon {
@@ -186,7 +188,7 @@
 .jcode-personalization .personalization-page-header,
 .jcode-personalization .personalization-section,
 .jcode-personalization .personalization-footer {
-	max-width: 800px;
+	max-width: 720px;
 	margin-right: auto;
 	margin-left: auto;
 }
@@ -207,7 +209,7 @@
 }
 
 .jcode-personalization .personalization-section {
-	margin-top: var(--vscode-spacing-size280);
+	margin-top: var(--vscode-spacing-size320);
 	scroll-margin-top: var(--vscode-spacing-size320);
 }
 
@@ -217,7 +219,7 @@
 	align-items: flex-start;
 	justify-content: space-between;
 	gap: var(--vscode-spacing-size80) var(--vscode-spacing-size160);
-	padding: 0 0 var(--vscode-spacing-size120);
+	padding: 0 var(--vscode-spacing-size40) var(--vscode-spacing-size120);
 }
 
 .jcode-personalization .personalization-section-heading {
@@ -227,9 +229,17 @@
 
 .jcode-personalization .personalization-section-reset {
 	flex: 0 0 auto;
-	color: var(--vscode-textLink-foreground);
+	color: var(--vscode-descriptionForeground);
 	font-size: var(--vscode-fontSize-label1);
 	white-space: nowrap;
+}
+
+.jcode-personalization .personalization-section-reset:hover:not([aria-disabled='true']) {
+	color: var(--vscode-textLink-foreground);
+}
+
+.jcode-personalization .personalization-section-reset:focus-visible {
+	outline-offset: 1px;
 }
 
 .jcode-personalization .personalization-section-reset[aria-disabled='true'] {
@@ -406,12 +416,22 @@
 }
 
 .jcode-personalization .personalization-setting {
-	display: grid;
-	grid-template-columns: minmax(240px, 1fr) auto 44px;
-	gap: var(--vscode-spacing-size160);
+	display: flex;
+	flex-wrap: wrap;
 	align-items: center;
-	min-height: 68px;
-	padding: var(--vscode-spacing-size120) var(--vscode-spacing-size160);
+	gap: var(--vscode-spacing-size80) var(--vscode-spacing-size160);
+	min-height: var(--vscode-spacing-size400);
+	padding: var(--vscode-spacing-size160);
+}
+
+.jcode-personalization .personalization-setting > .personalization-setting-text {
+	flex: 1 1 240px;
+	min-width: 0;
+}
+
+.jcode-personalization .personalization-setting > .personalization-field {
+	flex: 0 0 auto;
+	max-width: 100%;
 }
 
 .jcode-personalization .personalization-setting + .personalization-setting {
@@ -454,9 +474,9 @@
 }
 
 .jcode-personalization .personalization-field button[aria-pressed='true'] {
-	border-color: var(--vscode-inputOption-activeBorder, var(--vscode-focusBorder));
-	background: var(--vscode-button-background);
-	color: var(--vscode-button-foreground);
+	border-color: var(--vscode-contrastActiveBorder, var(--vscode-inputOption-activeBorder, transparent));
+	background: var(--vscode-inputOption-activeBackground, var(--vscode-list-activeSelectionBackground));
+	color: var(--vscode-inputOption-activeForeground, var(--vscode-foreground));
 	font-weight: var(--vscode-fontWeight-semiBold);
 }
 
@@ -473,19 +493,30 @@
 
 .jcode-personalization .personalization-toggle {
 	min-width: 52px;
+	border-radius: var(--vscode-cornerRadius-circle);
+	/* An Off switch keeps its outline in themes whose secondary buttons have no fill. */
+	border-color: var(--vscode-contrastBorder, var(--vscode-checkbox-border, transparent));
 	color: var(--vscode-button-secondaryForeground);
 	background: var(--vscode-button-secondaryBackground);
 }
 
 .jcode-personalization .personalization-toggle[aria-checked='true'] {
+	border-color: var(--vscode-contrastActiveBorder, var(--vscode-button-background));
 	color: var(--vscode-button-foreground);
 	background: var(--vscode-button-background);
 }
 
 .jcode-personalization .personalization-reset {
+	flex: 0 0 auto;
+	min-width: 44px;
 	color: var(--vscode-descriptionForeground);
 	padding: var(--vscode-spacing-size40);
 	font-size: var(--vscode-fontSize-label2);
+}
+
+/* A reset that has nothing to do stays out of sight. */
+.jcode-personalization .personalization-reset:disabled {
+	visibility: hidden;
 }
 
 .jcode-personalization .personalization-placement button {
@@ -520,6 +551,7 @@
 	flex-wrap: wrap;
 	gap: var(--vscode-spacing-size80);
 	margin-top: var(--vscode-spacing-size320);
+	padding-bottom: var(--vscode-spacing-size160);
 	color: var(--vscode-descriptionForeground);
 }
 
@@ -542,6 +574,7 @@
 	overflow: visible;
 	min-width: 0;
 	padding: var(--vscode-spacing-size120) var(--vscode-spacing-size240);
+	border-right: none;
 	border-bottom: var(--vscode-strokeThickness) solid var(--vscode-widget-border, var(--vscode-contrastBorder, transparent));
 }
 
@@ -599,12 +632,7 @@
 }
 
 .jcode-personalization.narrow .personalization-setting {
-	grid-template-columns: minmax(0, 1fr) 44px;
-	gap: var(--vscode-spacing-size100);
-}
-
-.jcode-personalization.narrow .personalization-setting-text {
-	grid-column: 1 / -1;
+	gap: var(--vscode-spacing-size100) var(--vscode-spacing-size120);
 }
 
 .jcode-personalization.narrow .personalization-color-custom,
@@ -707,17 +735,12 @@
 	padding-left: var(--vscode-spacing-size120);
 }
 
-.jcode-personalization.compact .personalization-setting {
-	grid-template-columns: minmax(0, 1fr) auto;
+.jcode-personalization.narrow .personalization-reset:disabled {
+	display: none;
 }
 
-.jcode-personalization.compact .personalization-setting .personalization-field {
-	grid-column: 1;
-	justify-self: stretch;
-}
-
-.jcode-personalization.compact .personalization-setting .personalization-reset {
-	grid-column: 2;
+.jcode-personalization.compact .personalization-setting > .personalization-field {
+	flex: 1 1 100%;
 }
 
 .jcode-personalization.compact .personalization-choices,
