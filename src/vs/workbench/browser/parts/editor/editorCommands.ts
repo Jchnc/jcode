@@ -89,6 +89,9 @@ export const UNLOCK_TAB_GROUP_COMMAND_ID = 'workbench.action.editor.unlockTabGro
 export const OPEN_SAVED_TAB_GROUP_COMMAND_ID = 'workbench.action.editor.openSavedTabGroup';
 export const DELETE_SAVED_TAB_GROUP_COMMAND_ID = 'workbench.action.editor.deleteSavedTabGroup';
 export const UNDO_TAB_GROUP_ACTION_COMMAND_ID = 'workbench.action.editor.undoTabGroupAction';
+export const TOGGLE_COLLAPSE_TAB_GROUP_COMMAND_ID = 'workbench.action.editor.toggleCollapseTabGroup';
+export const FOCUS_NEXT_TAB_GROUP_COMMAND_ID = 'workbench.action.editor.focusNextTabGroup';
+export const FOCUS_PREVIOUS_TAB_GROUP_COMMAND_ID = 'workbench.action.editor.focusPreviousTabGroup';
 
 export const SPLIT_EDITOR = 'workbench.action.splitEditor';
 export const SPLIT_EDITOR_UP = 'workbench.action.splitEditorUp';
@@ -1471,6 +1474,59 @@ export function getTabGroupMembers(groupView: IEditorGroupView, groupId: string)
 }
 
 /**
+ * Returns the tab groups of an editor group in the order they appear in the tab bar,
+ * each with its editors.
+ */
+function getTabGroupsInDisplayOrder(groupView: IEditorGroupView): { readonly tabGroup: IEditorTabGroup; readonly editors: readonly EditorInput[] }[] {
+	const tabGroups = new Map<string, { tabGroup: IEditorTabGroup; editors: EditorInput[] }>();
+	for (const editor of groupView.getEditors(EditorsOrder.SEQUENTIAL)) {
+		const tabGroup = groupView.getTabGroupForEditor(editor);
+		if (!tabGroup) {
+			continue;
+		}
+
+		const entry = tabGroups.get(tabGroup.id);
+		if (entry) {
+			entry.editors.push(editor);
+		} else {
+			tabGroups.set(tabGroup.id, { tabGroup, editors: [editor] });
+		}
+	}
+
+	return [...tabGroups.values()];
+}
+
+/**
+ * Activates the first editor of the tab group after or before the active editor,
+ * wrapping around at the ends of the tab bar. A collapsed target group is expanded
+ * first so that the editor that gets activated is visible.
+ */
+export async function focusAdjacentTabGroup(groupView: IEditorGroupView, editorService: IEditorService, direction: 'next' | 'previous'): Promise<void> {
+	const tabGroups = getTabGroupsInDisplayOrder(groupView);
+	if (tabGroups.length === 0) {
+		return;
+	}
+
+	const activeEditor = groupView.activeEditor;
+	const activeIndex = activeEditor ? groupView.getIndexOfEditor(activeEditor) : -1;
+	const indexOfFirstEditor = (editors: readonly EditorInput[]) => groupView.getIndexOfEditor(editors[0]);
+	const indexOfLastEditor = (editors: readonly EditorInput[]) => groupView.getIndexOfEditor(editors[editors.length - 1]);
+
+	const target = direction === 'next'
+		? tabGroups.find(({ editors }) => indexOfFirstEditor(editors) > activeIndex) ?? tabGroups[0]
+		: tabGroups.findLast(({ editors }) => indexOfLastEditor(editors) < activeIndex) ?? tabGroups[tabGroups.length - 1];
+	if (activeEditor && target.editors.includes(activeEditor)) {
+		return; // already in the only tab group
+	}
+
+	if (target.tabGroup.collapsed) {
+		groupView.setTabGroupCollapsed(target.tabGroup.id, false);
+	}
+
+	await editorService.openEditor(target.editors[0], undefined, groupView);
+}
+
+/**
  * Closes all editors of a tab group, which are the tabs of that group only. A group
  * that is saved is recorded in the saved groups history so that it can be reopened.
  * Locked groups are left untouched.
@@ -1571,10 +1627,14 @@ function registerTabGroupCommands(): void {
 		constructor() {
 			super({
 				id: ADD_TO_NEW_TAB_GROUP_COMMAND_ID,
-				title: localize2('addToNewTabGroup', 'Add to New Tab Group'),
+				title: localize2('addToNewTabGroup', "New Tab Group from Selected Editors"),
 				category: Categories.View,
 				f1: true,
-				precondition: ContextKeyExpr.and(tabGroupsEnabled, ActiveEditorStickyContext.toNegated())
+				precondition: ContextKeyExpr.and(tabGroupsEnabled, ActiveEditorStickyContext.toNegated()),
+				keybinding: {
+					weight: KeybindingWeight.WorkbenchContrib,
+					primary: KeyChord(KeyMod.CtrlCmd | KeyCode.KeyK, KeyCode.KeyG)
+				}
 			});
 		}
 		async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
@@ -1764,11 +1824,65 @@ function registerTabGroupCommands(): void {
 	registerAction2(class extends Action2 {
 		constructor() {
 			super({
-				id: RENAME_TAB_GROUP_COMMAND_ID,
-				title: localize2('renameTabGroup', 'Rename Tab Group'),
+				id: TOGGLE_COLLAPSE_TAB_GROUP_COMMAND_ID,
+				title: localize2('toggleCollapseTabGroup', "Toggle Collapse Active Tab Group"),
 				category: Categories.View,
 				f1: true,
-				precondition: activeEditorInEnabledTabGroup
+				precondition: activeEditorInEnabledTabGroup,
+				keybinding: {
+					weight: KeybindingWeight.WorkbenchContrib,
+					primary: KeyChord(KeyMod.CtrlCmd | KeyCode.KeyK, KeyMod.CtrlCmd | KeyCode.KeyG)
+				}
+			});
+		}
+		run(accessor: ServicesAccessor, ...args: unknown[]): void {
+			const active = getActiveTabGroup(accessor, args);
+			if (active) {
+				active.group.setTabGroupCollapsed(active.tabGroup.id, !active.tabGroup.collapsed);
+			}
+		}
+	});
+
+	for (const action of [
+		{ id: FOCUS_NEXT_TAB_GROUP_COMMAND_ID, title: localize2('focusNextTabGroup', "Focus Next Tab Group"), direction: 'next' as const, key: KeyCode.BracketRight },
+		{ id: FOCUS_PREVIOUS_TAB_GROUP_COMMAND_ID, title: localize2('focusPreviousTabGroup', "Focus Previous Tab Group"), direction: 'previous' as const, key: KeyCode.BracketLeft }
+	]) {
+		registerAction2(class extends Action2 {
+			constructor() {
+				super({
+					id: action.id,
+					title: action.title,
+					category: Categories.View,
+					f1: true,
+					precondition: tabGroupsEnabled,
+					keybinding: {
+						weight: KeybindingWeight.WorkbenchContrib,
+						primary: KeyChord(KeyMod.CtrlCmd | KeyCode.KeyK, action.key)
+					}
+				});
+			}
+			async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
+				const resolvedContext = resolveCommandsContext(args, accessor.get(IEditorService), accessor.get(IEditorGroupsService), accessor.get(IListService));
+				const group = resolvedContext.groupedEditors[0]?.group;
+				if (isEditorGroupView(group)) {
+					await focusAdjacentTabGroup(group, accessor.get(IEditorService), action.direction);
+				}
+			}
+		});
+	}
+
+	registerAction2(class extends Action2 {
+		constructor() {
+			super({
+				id: RENAME_TAB_GROUP_COMMAND_ID,
+				title: localize2('renameTabGroup', "Rename Active Tab Group"),
+				category: Categories.View,
+				f1: true,
+				precondition: activeEditorInEnabledTabGroup,
+				keybinding: {
+					weight: KeybindingWeight.WorkbenchContrib,
+					primary: KeyChord(KeyMod.CtrlCmd | KeyCode.KeyK, KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyG)
+				}
 			});
 		}
 		async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
@@ -1861,10 +1975,14 @@ function registerTabGroupCommands(): void {
 		constructor() {
 			super({
 				id: CLOSE_TAB_GROUP_COMMAND_ID,
-				title: localize2('closeTabGroup', 'Close Group'),
+				title: localize2('closeTabGroup', "Close Tab Group"),
 				category: Categories.View,
 				f1: true,
-				precondition: activeEditorInEnabledTabGroup
+				precondition: activeEditorInEnabledTabGroup,
+				keybinding: {
+					weight: KeybindingWeight.WorkbenchContrib,
+					primary: KeyChord(KeyMod.CtrlCmd | KeyCode.KeyK, KeyCode.KeyX)
+				}
 			});
 		}
 		async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {

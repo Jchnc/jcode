@@ -9,10 +9,13 @@ import { URI } from '../../../../../base/common/uri.js';
 import { mock } from '../../../../../base/test/common/mock.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { SyncDescriptor } from '../../../../../platform/instantiation/common/descriptors.js';
-import { closeTabGroup } from '../../../../browser/parts/editor/editorCommands.js';
+import { closeTabGroup, focusAdjacentTabGroup } from '../../../../browser/parts/editor/editorCommands.js';
 import { IEditorGroupView } from '../../../../browser/parts/editor/editor.js';
 import { EditorInput } from '../../../../common/editor/editorInput.js';
 import { IEditorTabGroup } from '../../../../common/editor/editorTabGroup.js';
+import { IEditorGroupsService } from '../../../../services/editor/common/editorGroupsService.js';
+import { EditorService } from '../../../../services/editor/browser/editorService.js';
+import { IEditorService } from '../../../../services/editor/common/editorService.js';
 import { IHistoryService } from '../../../../services/history/common/history.js';
 import { createEditorPart, registerTestEditor, registerTestFileEditor, TestFileEditorInput, workbenchInstantiationService, workbenchTeardown } from '../../workbenchTestServices.js';
 
@@ -71,6 +74,44 @@ suite('Tab Group Commands', () => {
 			return workbenchTeardown(instantiationService);
 		});
 	}
+
+	test('focus next and previous tab group activate the first editor of the group and wrap around', async () => {
+		const instantiationService = workbenchInstantiationService(undefined, disposables);
+		const part = await createEditorPart(instantiationService, disposables);
+		instantiationService.stub(IEditorGroupsService, part);
+		const editorService = disposables.add(instantiationService.createInstance(EditorService, undefined));
+		instantiationService.stub(IEditorService, editorService);
+
+		// [a1 a2] b [c1 c2] with the last group collapsed
+		const group = part.activeGroup;
+		const editors = new Map<string, EditorInput>();
+		for (const name of ['a1', 'a2', 'b', 'c1', 'c2']) {
+			const editor = disposables.add(new TestFileEditorInput(URI.parse(`foo://${name}`), TEST_EDITOR_INPUT_ID));
+			await group.openEditor(editor, { pinned: true });
+			editors.set(name, editor);
+		}
+		group.createTabGroup([editors.get('a1')!, editors.get('a2')!], 'A', 'blue');
+		const collapsedGroup = group.createTabGroup([editors.get('c1')!, editors.get('c2')!], 'C', 'red', { collapsed: true });
+		assert.ok(collapsedGroup);
+
+		const results: { from: string; direction: 'next' | 'previous'; active: string | undefined; collapsed: boolean }[] = [];
+		for (const [from, direction] of [['b', 'next'], ['c2', 'next'], ['a2', 'previous'], ['b', 'previous'], ['a1', 'next'], ['c1', 'previous']] as const) {
+			await group.openEditor(editors.get(from)!);
+			await focusAdjacentTabGroup(group, editorService, direction);
+			results.push({ from, direction, active: group.activeEditor?.resource?.authority, collapsed: collapsedGroup.collapsed });
+		}
+
+		assert.deepStrictEqual(results, [
+			{ from: 'b', direction: 'next', active: 'c1', collapsed: false },
+			{ from: 'c2', direction: 'next', active: 'a1', collapsed: false },
+			{ from: 'a2', direction: 'previous', active: 'c1', collapsed: false },
+			{ from: 'b', direction: 'previous', active: 'a1', collapsed: false },
+			{ from: 'a1', direction: 'next', active: 'c1', collapsed: false },
+			{ from: 'c1', direction: 'previous', active: 'a1', collapsed: false }
+		]);
+
+		return workbenchTeardown(instantiationService);
+	});
 
 	ensureNoDisposablesAreLeakedInTestSuite();
 });
