@@ -16,7 +16,8 @@ cd "$(git rev-parse --show-toplevel)"
 removed=0
 remove() {
 	if [ -e "$1" ] || git ls-files --error-unmatch -- "$1" >/dev/null 2>&1 || git ls-files --unmerged -- "$1" | grep -q .; then
-		git rm -rq --ignore-unmatch -- "$1" 2>/dev/null || true
+		# --force also drops entries a merge has just staged, which a plain git rm refuses to remove.
+		git rm -r -q -f --ignore-unmatch -- "$1" >/dev/null
 		rm -rf -- "$1"
 		echo "Removed $1"
 		removed=$((removed + 1))
