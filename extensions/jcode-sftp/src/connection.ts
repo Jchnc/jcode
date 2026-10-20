@@ -7,9 +7,12 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import type { Duplex } from 'node:stream';
 import { Client, type ClientChannel, type ClientErrorExtensions, type ConnectConfig, type SFTPWrapper } from 'ssh2';
 import { EventEmitter, l10n, window, type Memento, type SecretStorage } from 'vscode';
 import { classifyAuthFailure } from './authFailure';
+import { hopEndpoint, JumpHopError, openJumpChain, type JumpHop } from './jumpChain';
+import { parseJumpHosts } from './jumpHosts';
 import { LinkCounter, type ExecResult, type LinkCountFailure } from './linkCounter';
 import { PausableTimeout } from './pausableTimeout';
 import { ReconnectBackoff } from './reconnectBackoff';
@@ -23,6 +26,8 @@ export interface RemoteProfile {
 	root: string;
 	authentication: 'password' | 'privateKey' | 'agent';
 	privateKeyPath?: string;
+	/** Hosts to connect through, in order, as an OpenSSH `ProxyJump`: `[user@]host[:port]` separated by commas. */
+	proxyJump?: string;
 }
 
 /** The name shown for a profile: its name, or the user and host when it has none. */
@@ -48,7 +53,22 @@ export interface SshClient {
 	once(event: 'ready' | 'close', listener: () => void): void;
 	sftp(callback: (error: Error | undefined, sftp: SFTPWrapper) => void): void;
 	exec(command: string, callback: (error: Error | undefined, channel: ClientChannel) => void): void;
+	forwardOut(sourceIP: string, sourcePort: number, destinationIP: string, destinationPort: number, callback: (error: Error | undefined, channel: Duplex) => void): void;
 	destroy(): void;
+}
+
+/** The SSH clients behind one connection: the jump hosts it goes through, in order, and the client of the server itself. */
+interface Link {
+	client: SshClient;
+	jumps: SshClient[];
+}
+
+/** Closes a link from the server back to the first jump host. */
+function destroyLink(link: Link): void {
+	link.client.destroy();
+	for (const jump of [...link.jumps].reverse()) {
+		jump.destroy();
+	}
 }
 
 /** What connections need from the extension context: saved profiles and trusted host keys, and secrets. */
@@ -57,15 +77,13 @@ export interface ConnectionStorage {
 	readonly secrets: Pick<SecretStorage, 'get' | 'store' | 'delete'>;
 }
 
-interface Connection {
-	client: SshClient;
+interface Connection extends Link {
 	sftp: SFTPWrapper;
 	/** Reads hard link counts for saves. It lives and dies with the connection, so a new connection asks the server again. */
 	links: LinkCounter;
 }
 
-interface PendingConnection {
-	client: SshClient;
+interface PendingConnection extends Link {
 	controller: AbortController;
 	promise: Promise<Connection>;
 	/** Set for a background retry after earlier failures, which stays out of the connection state until someone waits for it. */
@@ -185,9 +203,10 @@ export class SftpConnections {
 		if (!pending) {
 			const profile = this.getProfile(id);
 			const client = this.createClient();
+			const jumps: SshClient[] = [];
 			const controller = new AbortController();
 			const quiet = request.background === true && this.backoff.failures(id) > 0;
-			pending = { client, controller, quiet, promise: this.connect(profile, client, controller.signal) };
+			pending = { client, jumps, controller, quiet, promise: this.connect(profile, client, jumps, controller.signal) };
 			this.pending.set(id, pending);
 			const attempt = pending;
 			void attempt.promise.then(() => this.failures.delete(id), error => {
@@ -351,10 +370,10 @@ export class SftpConnections {
 		const pending = this.pending.get(id);
 		this.pending.delete(id);
 		pending?.controller.abort(new Error(l10n.t('SSH connection attempt cancelled.')));
-		pending?.client.destroy();
+		if (pending) { destroyLink(pending); }
 		const active = this.active.get(id);
 		this.active.delete(id);
-		active?.client.destroy();
+		if (active) { destroyLink(active); }
 		this.changed(id);
 	}
 
@@ -367,56 +386,80 @@ export class SftpConnections {
 		this.failureEmitter.dispose();
 	}
 
-	private async connect(profile: RemoteProfile, client: SshClient, signal: AbortSignal): Promise<Connection> {
+	/** Checks the host key of a server against the ones the user trusted, and asks about a new or changed one. */
+	private hostVerifier(endpoint: string, signal: AbortSignal, handshake: () => { pause(): void; resume(): void } | undefined): (key: Buffer, verify: (valid: boolean) => void) => void {
+		return (key, verify) => {
+			if (signal.aborted) {
+				verify(false);
+				return;
+			}
+			const trustedKeys = this.context.globalState.get<Record<string, string>>(trustedKeysKey, {});
+			const fingerprint = createHash('sha256').update(key).digest('base64');
+			if (trustedKeys[endpoint] === fingerprint) {
+				verify(true);
+				return;
+			}
+			handshake()?.pause();
+			void window.showWarningMessage(
+				trustedKeys[endpoint]
+					? l10n.t('The SSH host key for {0} has changed. New SHA256 fingerprint: {1}. Only trust it if you verified this change.', endpoint, fingerprint)
+					: l10n.t('Trust SSH host {0}? SHA256 fingerprint: {1}', endpoint, fingerprint),
+				{ modal: true }, l10n.t('Trust Once'), l10n.t('Trust and Remember')
+			).then(async choice => {
+				handshake()?.resume();
+				try {
+					signal.throwIfAborted();
+					if (choice === l10n.t('Trust and Remember')) {
+						await this.context.globalState.update(trustedKeysKey, { ...this.context.globalState.get<Record<string, string>>(trustedKeysKey, {}), [endpoint]: fingerprint });
+					}
+					verify(!signal.aborted && (choice === l10n.t('Trust Once') || choice === l10n.t('Trust and Remember')));
+				} catch {
+					verify(false);
+				}
+			}, () => {
+				handshake()?.resume();
+				verify(false);
+			});
+		};
+	}
+
+	/** Prepares the credentials of a connection. Jump hosts sign in the same way, so this is done once for all of them. */
+	private async authenticationSettings(profile: RemoteProfile, endpoint: string, credential: string | undefined, signal: AbortSignal): Promise<Pick<ConnectConfig, 'password' | 'privateKey' | 'passphrase' | 'agent'>> {
+		if (profile.authentication === 'password') {
+			if (!credential) {
+				throw new CredentialError(l10n.t('No password is saved for {0}. Enter it to connect.', endpoint), false);
+			}
+			return { password: credential };
+		}
+		if (profile.authentication === 'privateKey') {
+			if (!profile.privateKeyPath) {
+				throw new Error(l10n.t('No private key configured for {0}.', endpoint));
+			}
+			const keyPath = /^~[/\\]/.test(profile.privateKeyPath) ? join(homedir(), profile.privateKeyPath.slice(2)) : profile.privateKeyPath;
+			const privateKey = await readFile(keyPath);
+			signal.throwIfAborted();
+			return credential ? { privateKey, passphrase: credential } : { privateKey };
+		}
+		if (!process.env.SSH_AUTH_SOCK) {
+			throw new Error(l10n.t('SSH_AUTH_SOCK is not set. Start an SSH agent or choose another authentication method.'));
+		}
+		return { agent: process.env.SSH_AUTH_SOCK };
+	}
+
+	/** The jump hosts of a profile, each with the port and user it connects as. */
+	private jumpHops(profile: RemoteProfile): JumpHop[] {
+		return parseJumpHosts(profile.proxyJump ?? '').map(hop => ({ host: hop.host, port: hop.port ?? 22, username: hop.username ?? profile.username }));
+	}
+
+	private async connect(profile: RemoteProfile, client: SshClient, jumps: SshClient[], signal: AbortSignal): Promise<Connection> {
 		// Where the credential in use came from, so only a failing saved one is cleared and only an accepted typed one is saved.
 		let credential: string | undefined;
 		let credentialSource: 'saved' | 'typed' | undefined;
 		// The handshake limit stops running while the user answers the host key prompt.
 		let timeout: PausableTimeout | undefined;
+		const endpoint = `${profile.host}:${profile.port}`;
 		try {
 			signal.throwIfAborted();
-			const endpoint = `${profile.host}:${profile.port}`;
-			const trustedKeys = this.context.globalState.get<Record<string, string>>(trustedKeysKey, {});
-			const config: ConnectConfig = {
-				host: profile.host,
-				port: profile.port,
-				username: profile.username,
-				readyTimeout: 0,
-				keepaliveInterval: 10_000,
-				keepaliveCountMax: 3,
-				hostVerifier: (key: Buffer, verify: (valid: boolean) => void) => {
-					if (signal.aborted) {
-						verify(false);
-						return;
-					}
-					const fingerprint = createHash('sha256').update(key).digest('base64');
-					if (trustedKeys[endpoint] === fingerprint) {
-						verify(true);
-						return;
-					}
-					timeout?.pause();
-					void window.showWarningMessage(
-						trustedKeys[endpoint]
-							? l10n.t('The SSH host key for {0} has changed. New SHA256 fingerprint: {1}. Only trust it if you verified this change.', endpoint, fingerprint)
-							: l10n.t('Trust SSH host {0}? SHA256 fingerprint: {1}', endpoint, fingerprint),
-						{ modal: true }, l10n.t('Trust Once'), l10n.t('Trust and Remember')
-					).then(async choice => {
-						timeout?.resume();
-						try {
-							signal.throwIfAborted();
-							if (choice === l10n.t('Trust and Remember')) {
-								await this.context.globalState.update(trustedKeysKey, { ...this.context.globalState.get<Record<string, string>>(trustedKeysKey, {}), [endpoint]: fingerprint });
-							}
-							verify(!signal.aborted && (choice === l10n.t('Trust Once') || choice === l10n.t('Trust and Remember')));
-						} catch {
-							verify(false);
-						}
-					}, () => {
-						timeout?.resume();
-						verify(false);
-					});
-				}
-			};
 			credential = this.candidates.get(profile.id);
 			credentialSource = credential === undefined ? undefined : 'typed';
 			if (credential === undefined) {
@@ -424,26 +467,27 @@ export class SftpConnections {
 				credentialSource = credential === undefined ? undefined : 'saved';
 			}
 			signal.throwIfAborted();
-			if (profile.authentication === 'password') {
-				if (!credential) {
-					throw new CredentialError(l10n.t('No password is saved for {0}. Enter it to connect.', endpoint), false);
-				}
-				config.password = credential;
-			} else if (profile.authentication === 'privateKey') {
-				if (!profile.privateKeyPath) {
-					throw new Error(l10n.t('No private key configured for {0}.', endpoint));
-				}
-				const keyPath = /^~[/\\]/.test(profile.privateKeyPath) ? join(homedir(), profile.privateKeyPath.slice(2)) : profile.privateKeyPath;
-				config.privateKey = await readFile(keyPath);
-				signal.throwIfAborted();
-				if (credential) {
-					config.passphrase = credential;
-				}
-			} else {
-				if (!process.env.SSH_AUTH_SOCK) {
-					throw new Error(l10n.t('SSH_AUTH_SOCK is not set. Start an SSH agent or choose another authentication method.'));
-				}
-				config.agent = process.env.SSH_AUTH_SOCK;
+			const authentication = await this.authenticationSettings(profile, endpoint, credential, signal);
+			const config: ConnectConfig = {
+				host: profile.host,
+				port: profile.port,
+				username: profile.username,
+				readyTimeout: 0,
+				keepaliveInterval: 10_000,
+				keepaliveCountMax: 3,
+				...authentication,
+				hostVerifier: this.hostVerifier(endpoint, signal, () => timeout)
+			};
+			if (profile.proxyJump) {
+				// Every jump host is trusted and signed in to like the server itself, and the server is reached through the last one.
+				config.sock = await openJumpChain({
+					hops: this.jumpHops(profile),
+					target: { host: profile.host, port: profile.port },
+					createClient: this.createClient,
+					configure: (hop, handshake) => ({ ...authentication, hostVerifier: this.hostVerifier(hopEndpoint(hop), signal, () => handshake) }),
+					register: jump => jumps.push(jump),
+					signal
+				});
 			}
 
 			let cancel: (() => void) | undefined;
@@ -458,7 +502,7 @@ export class SftpConnections {
 					closed = true;
 					if (this.active.get(profile.id)?.client === client) {
 						this.active.delete(profile.id);
-						client.destroy();
+						destroyLink({ client, jumps });
 						this.changed(profile.id);
 					}
 				};
@@ -473,7 +517,7 @@ export class SftpConnections {
 						} else {
 							sftp.once('close', invalidate);
 							settled = true;
-							resolve({ client, sftp, links: new LinkCounter(command => this.execute(client, command), failure => this.log?.info(this.describeLinkFailure(endpoint, failure))) });
+							resolve({ client, jumps, sftp, links: new LinkCounter(command => this.execute(client, command), failure => this.log?.info(this.describeLinkFailure(endpoint, failure))) });
 						}
 					});
 				});
@@ -513,22 +557,28 @@ export class SftpConnections {
 			return connection;
 		} catch (error) {
 			timeout?.dispose();
-			client.destroy();
+			destroyLink({ client, jumps });
 			throw await this.interpretFailure(profile, error, credentialSource, signal);
 		}
 	}
 
-	/** Turns authentication failures the user can fix into {@link CredentialError}, clearing a saved credential the server refused. */
-	private async interpretFailure(profile: RemoteProfile, error: Error & ClientErrorExtensions, source: 'saved' | 'typed' | undefined, signal: AbortSignal): Promise<Error> {
-		if (signal.aborted || !(error instanceof Error) || error instanceof CredentialError) {
-			return error;
+	/**
+	 * Turns authentication failures the user can fix into {@link CredentialError}, clearing a saved
+	 * credential the server refused. A failure while signing in to a jump host names that host. The
+	 * saved credential is kept then, because it may be right for the server and only wrong for the jump host.
+	 */
+	private async interpretFailure(profile: RemoteProfile, failure: Error & ClientErrorExtensions, source: 'saved' | 'typed' | undefined, signal: AbortSignal): Promise<Error> {
+		if (signal.aborted || !(failure instanceof Error) || failure instanceof CredentialError) {
+			return failure;
 		}
-		const endpoint = `${profile.host}:${profile.port}`;
-		const failure = classifyAuthFailure(profile.authentication, error, source !== undefined);
-		if ((failure === 'password-rejected' || failure === 'passphrase-rejected') && source === 'saved') {
+		const hop = failure instanceof JumpHopError ? failure : undefined;
+		const error = hop?.cause ?? failure;
+		const endpoint = hop?.endpoint ?? `${profile.host}:${profile.port}`;
+		const classification = classifyAuthFailure(profile.authentication, error, source !== undefined);
+		if ((classification === 'password-rejected' || classification === 'passphrase-rejected') && source === 'saved' && !hop) {
 			await this.context.secrets.delete(`jcodeSftp.credential.${profile.id}`);
 		}
-		switch (failure) {
+		switch (classification) {
 			case 'password-rejected':
 				return new CredentialError(l10n.t('The password for {0} was not accepted.', endpoint), true, { cause: error });
 			case 'passphrase-rejected':
@@ -538,7 +588,7 @@ export class SftpConnections {
 			case 'key-rejected':
 				return new Error(l10n.t('{0} did not accept the private key.', endpoint), { cause: error });
 			default:
-				return error;
+				return failure;
 		}
 	}
 }

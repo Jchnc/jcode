@@ -67,4 +67,18 @@ describe('profile export', () => {
 			restoredIncluded: ['p@ss w0rd', 'key passphrase', undefined]
 		});
 	});
+
+	test('keeps the jump hosts of a connection in both formats, and rejects jump hosts that cannot be read', async () => {
+		const withJumps: RemoteProfile[] = [{ ...profiles[0], proxyJump: 'ops@bastion.example.com:2200,gateway' }, profiles[1]];
+		const jumps = async (json: string, passphrase?: string) => (await importProfiles(json, passphrase)).map(({ profile }) => profile.proxyJump);
+		const invalid = JSON.stringify({ version: 3, connections: [{ ...JSON.parse(exportProfiles([profiles[0]], new Map())).connections[0], proxyJump: 'bad host!' }] });
+		await assert.rejects(() => importProfiles(invalid), { message: 'Connection 1 has invalid fields.' });
+		assert.deepStrictEqual({
+			plain: await jumps(exportProfiles(withJumps, new Map())),
+			encrypted: await jumps(await exportEncryptedProfiles(withJumps, new Map(), 'correct horse'), 'correct horse')
+		}, {
+			plain: ['ops@bastion.example.com:2200,gateway', undefined],
+			encrypted: ['ops@bastion.example.com:2200,gateway', undefined]
+		});
+	});
 });

@@ -6,6 +6,7 @@
 import { randomUUID } from 'node:crypto';
 import { ExtensionContext, l10n, Uri, ViewColumn, WebviewPanel, window } from 'vscode';
 import { RemoteProfile, SftpConnections } from './connection';
+import { FormFieldError, validateProfile } from './profileValidation';
 
 export interface ConnectionFormResult {
 	profile: RemoteProfile;
@@ -24,26 +25,6 @@ interface FormMessage {
 function escapeHtml(value: string): string {
 	return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
 		.replaceAll(String.fromCharCode(34), '&quot;').replaceAll(String.fromCharCode(39), '&#39;');
-}
-
-function validateProfile(value: unknown, id: string): RemoteProfile {
-	if (!value || typeof value !== 'object') {
-		throw new Error(l10n.t('Enter the connection details.'));
-	}
-	const input = value as Record<string, unknown>;
-	const name = typeof input.name === 'string' ? input.name.trim().slice(0, 80) : '';
-	const host = typeof input.host === 'string' ? input.host.trim() : '';
-	const username = typeof input.username === 'string' ? input.username.trim() : '';
-	const root = typeof input.root === 'string' ? input.root.trim() : '';
-	const port = Number(input.port);
-	const authentication = input.authentication;
-	const privateKeyPath = typeof input.privateKeyPath === 'string' ? input.privateKeyPath.trim() : undefined;
-	if (!host || !username || !root.startsWith('/') || !Number.isInteger(port) || port < 1 || port > 65535 ||
-		(authentication !== 'password' && authentication !== 'privateKey' && authentication !== 'agent') ||
-		(authentication === 'privateKey' && !privateKeyPath)) {
-		throw new Error(l10n.t('Enter a host, user, valid port, absolute remote folder, and private key path when required.'));
-	}
-	return { id, name, host, port, username, root: root.replace(/\/+$/, '') || '/', authentication, privateKeyPath: authentication === 'privateKey' ? privateKeyPath : undefined };
 }
 
 export class ConnectionForm {
@@ -91,7 +72,7 @@ export class ConnectionForm {
 					await this.connections.saveProfile(profile, connect ? undefined : credential);
 					finish({ profile, connect, credential: connect ? credential : undefined });
 				} catch (error) {
-					void panel.webview.postMessage({ type: 'error', message: String(error) });
+					void panel.webview.postMessage({ type: 'error', message: error instanceof Error ? error.message : String(error), field: error instanceof FormFieldError ? error.field : undefined });
 				} finally {
 					saving = false;
 				}
@@ -110,7 +91,8 @@ export class ConnectionForm {
 			<main><header><h1>${label(editing ? l10n.t('Edit Connection') : l10n.t('New Connection'))}</h1><p>${label(l10n.t('Open a remote folder in JCode using SSH/SFTP.'))}</p></header>
 			<form id="connection-form"><section><h2>${label(l10n.t('Server'))}</h2><div class="fields"><label class="full" for="name">${label(l10n.t('Connection Name'))}<span>${label(l10n.t('Optional'))}</span><input id="name" maxlength="80" placeholder="${label(l10n.t('Production'))}"></label>
 			<label for="host">${label(l10n.t('Host'))}<input id="host" required placeholder="server.example.com" autocomplete="off"></label><label for="port">${label(l10n.t('Port'))}<input id="port" type="number" min="1" max="65535" required value="22"></label>
-			<label class="full" for="username">${label(l10n.t('User'))}<input id="username" required autocomplete="username"></label></div></section>
+			<label class="full" for="username">${label(l10n.t('User'))}<input id="username" required autocomplete="username"></label>
+			<label class="full" for="proxyJump">${label(l10n.t('Jump Hosts'))}<span>${label(l10n.t('Optional'))}</span><input id="proxyJump" placeholder="bastion.example.com, deploy@gateway:2222" autocomplete="off" spellcheck="false" aria-describedby="proxy-hint" aria-errormessage="error"><small id="proxy-hint">${label(l10n.t('Connect through these hosts in order, as ssh -J does. Use [user@]host[:port], separated by commas. They sign in the same way as this connection.'))}</small></label></div></section>
 			<section><h2>${label(l10n.t('Workspace'))}</h2><div class="fields"><label class="full" for="root">${label(l10n.t('Remote Folder'))}<input id="root" required value="/" placeholder="/srv/project"><small>${label(l10n.t('Enter an absolute path on the server.'))}</small></label></div></section>
 			<section><h2>${label(l10n.t('Authentication'))}</h2><div class="fields"><label class="full" for="authentication">${label(l10n.t('Method'))}<select id="authentication"><option value="password">${label(l10n.t('Password'))}</option><option value="privateKey">${label(l10n.t('Private Key'))}</option><option value="agent">${label(l10n.t('SSH Agent'))}</option></select></label>
 			<label class="full" for="privateKeyPath" id="key-field" hidden>${label(l10n.t('Local Private Key Path'))}<input id="privateKeyPath" placeholder="~/.ssh/id_ed25519"></label>

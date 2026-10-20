@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import './registerVscodeStub';
 import assert from 'node:assert';
 import { posix, win32, type PlatformPath } from 'node:path';
 import { describe, test } from 'node:test';
@@ -33,7 +34,7 @@ async function readHosts(text: string, others: Record<string, string> = {}): Pro
 
 /** Describes a host in one line, which keeps the expectations readable. */
 function describeHost(host: SshConfigHost): string {
-	const extras = [host.identityFile && `key=${host.identityFile}`, host.proxyJump && `jump=${host.proxyJump}`, host.usesProxyCommand && 'proxycommand'];
+	const extras = [host.identityFile && `key=${host.identityFile}`, host.proxyJump && `jump=${host.proxyJump}`, host.unsupportedProxy && `unsupported=${host.unsupportedProxy}`];
 	return [`${host.alias} -> ${host.user}@${host.hostName}:${host.port}`, ...extras.filter(extra => extra)].join(' ');
 }
 
@@ -158,7 +159,7 @@ describe('readSshConfig', () => {
 
 	test('accepts keywords in any case', async () => {
 		const hosts = await readHosts(['HOST Upper', 'HOSTNAME up.example.com', 'USER Admin', 'PORT 2200', 'IDENTITYFILE ~/k', 'PROXYJUMP gate'].join('\n'));
-		assert.deepStrictEqual(hosts.map(describeHost), ['Upper -> Admin@up.example.com:2200 key=/home/jean/k jump=gate']);
+		assert.deepStrictEqual(hosts.map(describeHost), ['Upper -> Admin@up.example.com:2200 key=/home/jean/k jump=jean@gate']);
 	});
 
 	test('expands tokens in the host name and the key path', async () => {
@@ -171,7 +172,7 @@ describe('readSshConfig', () => {
 		assert.deepStrictEqual(hosts.map(describeHost), ['a -> jean@a:22', 'b -> jean@b:22', 'c -> jean@c:22']);
 	});
 
-	test('reports jump hosts, which none turns off, and flags hosts that need a proxy command', async () => {
+	test('spells out jump hosts, which none turns off, and flags hosts that need a proxy command', async () => {
 		const hosts = await readHosts([
 			'Host inner',
 			'\tProxyJump jump1,deploy@jump2:2200',
@@ -186,11 +187,80 @@ describe('readSshConfig', () => {
 			'Host app.corp'
 		].join('\n'));
 		assert.deepStrictEqual(hosts.map(describeHost), [
-			'inner -> jean@inner:22 jump=jump1,deploy@jump2:2200',
-			'spaced -> jean@spaced:22 jump=jump1,jump2',
+			'inner -> jean@inner:22 jump=jean@jump1,deploy@jump2:2200',
+			'spaced -> jean@spaced:22 jump=jean@jump1,jean@jump2',
 			'direct.corp -> jean@direct.corp:22',
-			'command -> jean@command:22 proxycommand',
-			'app.corp -> jean@app.corp:22 jump=gateway'
+			'command -> jean@command:22 unsupported=ProxyCommand',
+			'app.corp -> jean@app.corp:22 jump=jean@gateway'
+		]);
+	});
+
+	test('resolves jump host names through the config, unless the jump host gives its own user and port', async () => {
+		const hosts = await readHosts([
+			'Host bastion',
+			'\tHostName bastion.example.com',
+			'\tUser admin',
+			'\tPort 2200',
+			'Host inner',
+			'\tHostName 10.0.0.5',
+			'\tProxyJump bastion',
+			'Host other',
+			'\tProxyJump other-user@bastion:2022',
+			'Host url',
+			'\tProxyJump ssh://gate@gate.example.com:2222',
+			'Host six',
+			'\tProxyJump [::1]:2200',
+			'Host *.lab',
+			'\tUser lab-user',
+			'Host unlisted',
+			'\tProxyJump gate.lab'
+		].join('\n'));
+		assert.deepStrictEqual(hosts.map(describeHost), [
+			'bastion -> admin@bastion.example.com:2200',
+			'inner -> jean@10.0.0.5:22 jump=admin@bastion.example.com:2200',
+			'other -> jean@other:22 jump=other-user@bastion.example.com:2022',
+			'url -> jean@url:22 jump=gate@gate.example.com:2222',
+			'six -> jean@six:22 jump=jean@[::1]:2200',
+			'unlisted -> jean@unlisted:22 jump=lab-user@gate.lab'
+		]);
+	});
+
+	test('puts the jump hosts of a jump host first', async () => {
+		const hosts = await readHosts([
+			'Host target',
+			'\tProxyJump middle',
+			'Host middle',
+			'\tProxyJump first',
+			'Host first',
+			'\tHostName first.example.com',
+			'\tUser first-user'
+		].join('\n'));
+		assert.deepStrictEqual(hosts.map(describeHost), [
+			'target -> jean@target:22 jump=first-user@first.example.com,jean@middle',
+			'middle -> jean@middle:22 jump=first-user@first.example.com',
+			'first -> first-user@first.example.com:22'
+		]);
+	});
+
+	test('does not import jump hosts that loop back or cannot be read', async () => {
+		const hosts = await readHosts([
+			'Host a',
+			'\tProxyJump b',
+			'Host b',
+			'\tProxyJump a',
+			'Host self',
+			'\tProxyJump self',
+			'Host broken',
+			'\tProxyJump bad host!',
+			'Host far',
+			'\tProxyJump user@host:99999'
+		].join('\n'));
+		assert.deepStrictEqual(hosts.map(describeHost), [
+			'a -> jean@a:22 unsupported=ProxyJump',
+			'b -> jean@b:22 unsupported=ProxyJump',
+			'self -> jean@self:22 unsupported=ProxyJump',
+			'broken -> jean@broken:22 unsupported=ProxyJump',
+			'far -> jean@far:22 unsupported=ProxyJump'
 		]);
 	});
 
@@ -264,7 +334,7 @@ describe('readSshConfig includes', () => {
 
 describe('hostsToImport', () => {
 	test('leaves out hosts that are already connections, and keeps the ones that differ in any detail', () => {
-		const host = (alias: string, port = 22): SshConfigHost => ({ alias, hostName: `${alias}.example.com`, user: 'deploy', port, usesProxyCommand: false });
+		const host = (alias: string, port = 22): SshConfigHost => ({ alias, hostName: `${alias}.example.com`, user: 'deploy', port });
 		const saved: RemoteProfile = { id: 'x', name: 'web', host: 'web.example.com', port: 22, username: 'deploy', root: '/srv', authentication: 'agent' };
 		assert.deepStrictEqual(hostsToImport([host('web'), host('web', 2222), host('db')], [saved]).map(describeHost), [
 			'web -> deploy@web.example.com:2222',
@@ -274,14 +344,18 @@ describe('hostsToImport', () => {
 });
 
 describe('profileFromHost', () => {
-	const host: SshConfigHost = { alias: 'web', hostName: 'web.example.com', user: 'deploy', port: 2222, usesProxyCommand: false };
+	const host: SshConfigHost = { alias: 'web', hostName: 'web.example.com', user: 'deploy', port: 2222 };
 
 	test('chooses the authentication from the key and the agent, and never carries a secret', () => {
 		const profile = (candidate: SshConfigHost, agentAvailable: boolean) => profileFromHost(candidate, { id: 'id', agentAvailable });
 		assert.deepStrictEqual([profile({ ...host, identityFile: '/k' }, true), profile(host, true), profile(host, false)], [
-			{ id: 'id', name: 'web', host: 'web.example.com', port: 2222, username: 'deploy', root: '/', authentication: 'privateKey', privateKeyPath: '/k' },
-			{ id: 'id', name: 'web', host: 'web.example.com', port: 2222, username: 'deploy', root: '/', authentication: 'agent', privateKeyPath: undefined },
-			{ id: 'id', name: 'web', host: 'web.example.com', port: 2222, username: 'deploy', root: '/', authentication: 'password', privateKeyPath: undefined }
+			{ id: 'id', name: 'web', host: 'web.example.com', port: 2222, username: 'deploy', root: '/', authentication: 'privateKey', privateKeyPath: '/k', proxyJump: undefined },
+			{ id: 'id', name: 'web', host: 'web.example.com', port: 2222, username: 'deploy', root: '/', authentication: 'agent', privateKeyPath: undefined, proxyJump: undefined },
+			{ id: 'id', name: 'web', host: 'web.example.com', port: 2222, username: 'deploy', root: '/', authentication: 'password', privateKeyPath: undefined, proxyJump: undefined }
 		]);
+	});
+
+	test('carries the jump hosts of the host', () => {
+		assert.strictEqual(profileFromHost({ ...host, proxyJump: 'ops@bastion:2200' }, { id: 'id', agentAvailable: false }).proxyJump, 'ops@bastion:2200');
 	});
 });

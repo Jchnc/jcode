@@ -64,7 +64,7 @@ describe('ConnectionStatus', () => {
 			dialogs: [],
 			shown: {
 				text: '$(debug-disconnect) Production (Offline)',
-				tooltip: `Production (deploy@prod.example.com:22): Offline. Retrying after ${retryTime}\nconnect ECONNREFUSED 127.0.0.1:22`,
+				tooltip: `Production (deploy@prod.example.com:22): Offline. Retrying after ${retryTime}\nconnect ECONNREFUSED prod.example.com:22`,
 				background: 'statusBarItem.errorBackground'
 			}
 		});
@@ -77,7 +77,7 @@ describe('ConnectionStatus', () => {
 		await assert.rejects(status.attempt('a', () => connections.sftp('a')), /ECONNREFUSED/);
 		await settle();
 		assert.deepStrictEqual({ dialogs, requests }, {
-			dialogs: [{ message: 'Could not connect to Production.', options: { modal: true, detail: 'connect ECONNREFUSED 127.0.0.1:22' }, items: ['Retry', 'Edit Connection'] }],
+			dialogs: [{ message: 'Could not connect to Production.', options: { modal: true, detail: 'connect ECONNREFUSED prod.example.com:22' }, items: ['Retry', 'Edit Connection'] }],
 			requests: ['reconnect a']
 		});
 	});

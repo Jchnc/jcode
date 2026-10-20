@@ -6,6 +6,7 @@
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID, scrypt } from 'node:crypto';
 import { l10n } from 'vscode';
 import { RemoteProfile } from './connection';
+import { parseJumpHosts } from './jumpHosts';
 
 interface ExportedConnection extends Omit<RemoteProfile, 'id'> {
 	credential?: string;
@@ -45,6 +46,15 @@ function decodeBase64(value: unknown, length?: number): Buffer {
 	return decoded;
 }
 
+/** Whether a value is a list of jump hosts that can be read. */
+function isJumpHostList(value: unknown): boolean {
+	try {
+		return typeof value === 'string' && parseJumpHosts(value) !== undefined;
+	} catch {
+		return false;
+	}
+}
+
 function parseConnections(data: Record<string, unknown>, version: 1 | 2 | 3): ImportedConnection[] {
 	if (!Array.isArray(data.connections) || data.connections.length > 500) {
 		throw new Error(l10n.t('Expected a connection export with at most 500 connections.'));
@@ -58,6 +68,7 @@ function parseConnections(data: Record<string, unknown>, version: 1 | 2 | 3): Im
 			typeof value.username !== 'string' || !value.username.trim() || typeof value.root !== 'string' || !value.root.startsWith('/') ||
 			!['password', 'privateKey', 'agent'].includes(String(value.authentication)) ||
 			(value.name !== undefined && typeof value.name !== 'string') ||
+			(value.proxyJump !== undefined && !isJumpHostList(value.proxyJump)) ||
 			(value.authentication === 'privateKey' && (typeof value.privateKeyPath !== 'string' || !value.privateKeyPath)) ||
 			(version === 2 && value.credential !== undefined && typeof value.credential !== 'string') ||
 			(version === 3 && ((value.credential !== undefined && typeof value.credential !== 'string') ||
@@ -79,7 +90,8 @@ function parseConnections(data: Record<string, unknown>, version: 1 | 2 | 3): Im
 				username: value.username.trim(),
 				root: value.root.replace(/\/+$/, '') || '/',
 				authentication: value.authentication as RemoteProfile['authentication'],
-				privateKeyPath: value.authentication === 'privateKey' && typeof value.privateKeyPath === 'string' ? value.privateKeyPath : undefined
+				privateKeyPath: value.authentication === 'privateKey' && typeof value.privateKeyPath === 'string' ? value.privateKeyPath : undefined,
+				proxyJump: typeof value.proxyJump === 'string' && value.proxyJump.trim() ? value.proxyJump.trim() : undefined
 			},
 			credential: value.authentication === 'agent' ? undefined : version === 2 && typeof value.credential === 'string' && value.credential
 				? value.credential
@@ -124,9 +136,9 @@ export async function exportEncryptedProfiles(profiles: readonly RemoteProfile[]
 }
 
 function toExportedConnections(profiles: readonly RemoteProfile[], credentials: ReadonlyMap<string, string>, encode: (credential: string) => string): ExportedConnection[] {
-	return profiles.map(({ id, name, host, port, username, root, authentication, privateKeyPath }) => {
+	return profiles.map(({ id, name, host, port, username, root, authentication, privateKeyPath, proxyJump }) => {
 		const credential = authentication === 'agent' ? undefined : credentials.get(id);
-		return { name, host, port, username, root, authentication, privateKeyPath, credential: credential === undefined ? undefined : encode(credential) };
+		return { name, host, port, username, root, authentication, privateKeyPath, proxyJump, credential: credential === undefined ? undefined : encode(credential) };
 	});
 }
 

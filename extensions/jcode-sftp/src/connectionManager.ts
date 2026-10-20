@@ -62,7 +62,7 @@ export class ConnectionManager implements TreeDataProvider<RemoteProfile> {
 		item.description = active
 			? l10n.t('Current · {0}', profile.root)
 			: profile.root;
-		item.tooltip = `${profile.username}@${profile.host}:${profile.port}\n${profile.root}\n${this.authenticationLabel(profile.authentication)}`;
+		item.tooltip = [`${profile.username}@${profile.host}:${profile.port}`, profile.root, this.authenticationLabel(profile.authentication), ...(profile.proxyJump ? [l10n.t('Via {0}', profile.proxyJump)] : [])].join('\n');
 		item.iconPath = new ThemeIcon('remote');
 		item.contextValue = active ? 'activeConnection' : 'connection';
 		item.command = { command: 'jcodeSftp.open', title: l10n.t('Open Connection'), arguments: [profile.id] };
@@ -229,7 +229,7 @@ export class ConnectionManager implements TreeDataProvider<RemoteProfile> {
 		const passphrase = encrypted ? await window.showInputBox({ title: l10n.t('Import Connections'), prompt: l10n.t('Enter the export passphrase to restore connections and saved credentials.'), password: true, ignoreFocusOut: true }) : undefined;
 		if (encrypted && passphrase === undefined) { return; }
 		const imported = await importProfiles(json, passphrase);
-		const keyFor = (profile: RemoteProfile): string => `${profile.name ?? ''}\0${profile.username}\0${profile.host}\0${profile.port}\0${profile.root}\0${profile.authentication}\0${profile.privateKeyPath ?? ''}`;
+		const keyFor = (profile: RemoteProfile): string => `${profile.name ?? ''}\0${profile.username}\0${profile.host}\0${profile.port}\0${profile.root}\0${profile.authentication}\0${profile.privateKeyPath ?? ''}\0${profile.proxyJump ?? ''}`;
 		const existing = new Map(this.connections.profiles.map(profile => [keyFor(profile), profile]));
 		let count = 0;
 		let restored = 0;
@@ -259,8 +259,9 @@ export class ConnectionManager implements TreeDataProvider<RemoteProfile> {
 	private describeSshHost(host: SshConfigHost): string {
 		const parts: string[] = [];
 		if (host.identityFile) { parts.push(l10n.t('Key: {0}', host.identityFile)); }
-		if (host.proxyJump) { parts.push(l10n.t('Via {0} (the jump host is not imported)', host.proxyJump)); }
-		if (host.usesProxyCommand) { parts.push(l10n.t('Uses ProxyCommand, which is not supported')); }
+		if (host.proxyJump) { parts.push(l10n.t('Via {0}', host.proxyJump)); }
+		if (host.unsupportedProxy === 'ProxyCommand') { parts.push(l10n.t('Uses ProxyCommand, which is not supported')); }
+		if (host.unsupportedProxy === 'ProxyJump') { parts.push(l10n.t('Its ProxyJump is not valid, so no jump hosts are imported')); }
 		return parts.join(' · ');
 	}
 

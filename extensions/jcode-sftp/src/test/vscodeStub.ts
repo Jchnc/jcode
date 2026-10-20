@@ -107,7 +107,7 @@ export interface FakeMessageOptions {
  */
 export const window = {
 	statusBarItems: [] as FakeStatusBarItem[],
-	showWarningMessage: async (): Promise<undefined> => undefined,
+	showWarningMessage: async (_message: string, _options: FakeMessageOptions, ..._items: string[]): Promise<string | undefined> => undefined,
 	showErrorMessage: async (_message: string, _options: FakeMessageOptions, ..._items: string[]): Promise<string | undefined> => undefined,
 	createStatusBarItem(): FakeStatusBarItem {
 		const item = new FakeStatusBarItem();

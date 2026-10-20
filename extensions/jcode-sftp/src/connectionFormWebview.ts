@@ -13,6 +13,7 @@ interface FormProfile {
 	root: string;
 	authentication: 'password' | 'privateKey' | 'agent';
 	privateKeyPath?: string;
+	proxyJump?: string;
 }
 
 interface FormLabels {
@@ -45,6 +46,7 @@ interface FormLabels {
 	function clearError(): void {
 		error.hidden = true;
 		error.textContent = '';
+		input('proxyJump').removeAttribute('aria-invalid');
 	}
 
 	authentication.addEventListener('change', () => {
@@ -75,7 +77,8 @@ interface FormLabels {
 				username: input('username').value,
 				root: root.value,
 				authentication: authentication.value,
-				privateKeyPath: input('privateKeyPath').value
+				privateKeyPath: input('privateKeyPath').value,
+				proxyJump: input('proxyJump').value
 			},
 			credential: input('credential').value
 		});
@@ -93,11 +96,17 @@ interface FormLabels {
 			input('root').value = profile?.root ?? '/';
 			authentication.value = profile?.authentication ?? 'password';
 			input('privateKeyPath').value = profile?.privateKeyPath ?? '';
+			input('proxyJump').value = profile?.proxyJump ?? '';
 			updateMethod();
 			input('host').focus();
 		} else if (message.type === 'error') {
 			error.textContent = message.message;
 			error.hidden = false;
+			if (message.field === 'proxyJump') {
+				// Mark the field and move to it, so the user lands where the problem is.
+				input('proxyJump').setAttribute('aria-invalid', 'true');
+				input('proxyJump').focus();
+			}
 		}
 	});
 	vscode.postMessage({ type: 'ready' });

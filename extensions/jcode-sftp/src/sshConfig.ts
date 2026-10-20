@@ -5,6 +5,7 @@
 
 import type { PlatformPath } from 'node:path';
 import type { RemoteProfile } from './connection';
+import { formatJumpHosts, parseJumpHosts, type JumpHost } from './jumpHosts';
 
 /** A host that an SSH config file defines under a name that can be connected to, with every setting resolved. */
 export interface SshConfigHost {
@@ -17,10 +18,14 @@ export interface SshConfigHost {
 	port: number;
 	/** The first `IdentityFile`, with `~` expanded. */
 	identityFile?: string;
-	/** The `ProxyJump` value, in the comma separated form `ssh` accepts. Undefined when there is none or it is `none`. */
+	/**
+	 * The hosts to connect through, written as an OpenSSH `ProxyJump`. Each one is spelled out with
+	 * the user, host name and port that `ssh` would use for it, so the names of other hosts in the
+	 * config are resolved, and the jump hosts of a jump host come first. Undefined when there are none.
+	 */
 	proxyJump?: string;
-	/** Whether the host connects through a `ProxyCommand`, which cannot be reproduced. */
-	usesProxyCommand: boolean;
+	/** Set when the host reaches the server in a way that cannot be reproduced: a `ProxyCommand`, or a `ProxyJump` that cannot be read. */
+	unsupportedProxy?: 'ProxyCommand' | 'ProxyJump';
 }
 
 /** How the files an SSH config refers to are found, so that tests can use an in-memory file system. */
@@ -229,25 +234,72 @@ function expandTokens(value: string, tokens: Readonly<Record<string, string>>): 
 	return value.replace(/%(?<token>.)/g, (match, token: string) => token === '%' ? '%' : tokens[token] ?? match);
 }
 
+/** What the config says about one name, before jump hosts are resolved. */
+interface HostSettings {
+	hostName: string;
+	user: string;
+	port: number;
+	identityFile?: string;
+	/** The `ProxyJump` value, with its list cleaned up. */
+	jump?: string;
+	proxyCommand: boolean;
+}
+
+/** Collects the settings that apply to a name, whether or not a `Host` line names it exactly: the first value for each setting wins. */
+function resolveSettings(name: string, blocks: readonly ConfigBlock[], env: SshConfigEnvironment): HostSettings {
+	const applicable = blocks.filter(block => !block.patterns || appliesTo(name, block.patterns));
+	const first = (keyword: string): string | undefined => applicable.find(block => block.options.get(keyword)?.length)?.options.get(keyword)?.[0];
+	const hostName = expandTokens(first('hostname') ?? name, { h: name });
+	const user = first('user') ?? env.user;
+	const configuredPort = Number(first('port'));
+	const port = Number.isInteger(configuredPort) && configuredPort >= 1 && configuredPort <= 65535 ? configuredPort : 22;
+	const identity = first('identityfile');
+	const identityFile = identity && identity.toLowerCase() !== 'none'
+		? expandHome(expandTokens(identity, { d: env.home, u: env.user, r: user, h: hostName, n: name, p: String(port) }), env)
+		: undefined;
+	const jump = applicable.find(block => block.options.get('proxyjump')?.length)?.options.get('proxyjump');
+	const hops = (jump ?? []).join(',').split(',').map(hop => hop.trim()).filter(hop => hop).join(',');
+	const command = first('proxycommand');
+	return { hostName, user, port, identityFile, jump: hops || undefined, proxyCommand: command !== undefined && command.toLowerCase() !== 'none' };
+}
+
+/**
+ * Spells out the jump hosts of a host the way `ssh` would reach them: a name from the config is
+ * replaced by its `HostName`, and takes its `User` and `Port` unless the jump host gives its own.
+ * The jump hosts of a jump host come first. Returns undefined when the list cannot be read or loops back.
+ */
+function resolveJumpHosts(jump: string | undefined, blocks: readonly ConfigBlock[], env: SshConfigEnvironment, visiting: ReadonlySet<string>): JumpHost[] | undefined {
+	let hops: JumpHost[];
+	try {
+		hops = parseJumpHosts(jump ?? '');
+	} catch {
+		return undefined;
+	}
+	const resolved: JumpHost[] = [];
+	for (const hop of hops) {
+		const name = hop.host.toLowerCase();
+		if (visiting.has(name) || visiting.size >= maxIncludeDepth) {
+			return undefined;
+		}
+		const settings = resolveSettings(hop.host, blocks, env);
+		const earlier = settings.jump ? resolveJumpHosts(settings.jump, blocks, env, new Set(visiting).add(name)) : [];
+		if (!earlier) {
+			return undefined;
+		}
+		resolved.push(...earlier, { host: settings.hostName, port: hop.port ?? settings.port, username: hop.username ?? settings.user });
+	}
+	return resolved;
+}
+
 /** Resolves the settings of every host with a name of its own, in the order the names first appear. */
 function resolveHosts(blocks: readonly ConfigBlock[], env: SshConfigEnvironment): SshConfigHost[] {
 	const aliases = new Set(blocks.flatMap(block => block.patterns ?? []).filter(pattern => pattern && !pattern.startsWith('!') && !hasWildcard(pattern)));
 	return Array.from(aliases, alias => {
-		const applicable = blocks.filter(block => !block.patterns || appliesTo(alias, block.patterns));
-		const first = (keyword: string): string | undefined => applicable.find(block => block.options.get(keyword)?.length)?.options.get(keyword)?.[0];
-		const hostName = expandTokens(first('hostname') ?? alias, { h: alias });
-		const user = first('user') ?? env.user;
-		const configuredPort = Number(first('port'));
-		const port = Number.isInteger(configuredPort) && configuredPort >= 1 && configuredPort <= 65535 ? configuredPort : 22;
-		const identity = first('identityfile');
-		const identityFile = identity && identity.toLowerCase() !== 'none'
-			? expandHome(expandTokens(identity, { d: env.home, u: env.user, r: user, h: hostName, n: alias, p: String(port) }), env)
-			: undefined;
-		const jump = applicable.find(block => block.options.get('proxyjump')?.length)?.options.get('proxyjump');
-		const hops = (jump ?? []).join(',').split(',').map(hop => hop.trim()).filter(hop => hop).join(',');
-		const proxyJump = hops && hops.toLowerCase() !== 'none' ? hops : undefined;
-		const command = first('proxycommand');
-		return { alias, hostName, user, port, identityFile, proxyJump, usesProxyCommand: !proxyJump && command !== undefined && command.toLowerCase() !== 'none' };
+		const { hostName, user, port, identityFile, jump, proxyCommand } = resolveSettings(alias, blocks, env);
+		const hops = jump ? resolveJumpHosts(jump, blocks, env, new Set([alias.toLowerCase()])) : [];
+		const proxyJump = hops?.length ? formatJumpHosts(hops) : undefined;
+		const unsupportedProxy = !hops ? 'ProxyJump' : !proxyJump && proxyCommand ? 'ProxyCommand' : undefined;
+		return { alias, hostName, user, port, identityFile, proxyJump, unsupportedProxy };
 	});
 }
 
@@ -281,6 +333,7 @@ export function profileFromHost(host: SshConfigHost, options: { id: string; agen
 		username: host.user,
 		root: '/',
 		authentication: host.identityFile ? 'privateKey' : options.agentAvailable ? 'agent' : 'password',
-		privateKeyPath: host.identityFile
+		privateKeyPath: host.identityFile,
+		proxyJump: host.proxyJump
 	};
 }
