@@ -236,6 +236,26 @@ suite('Personalization editor', () => {
 		});
 	});
 
+	test('names the hex input after its visible label and has room for a padded paste', () => {
+		const { appearanceService, control, parent, savedColor } = createEditor();
+		const input = control<HTMLInputElement>('color:hex');
+		const padded = ' #3b82f6 ';
+		const labelId = input.getAttribute('aria-labelledby');
+
+		type(input, padded);
+		press(input, 'Enter');
+
+		assert.deepStrictEqual({
+			label: { text: labelId ? parent.querySelector(`#${labelId}`)?.textContent : undefined, ariaLabel: input.getAttribute('aria-label') },
+			fitsPaddedPaste: input.maxLength >= padded.length,
+			applied: { shown: appearanceService.appearance, saved: savedColor(), input: input.value },
+		}, {
+			label: { text: 'Custom color', ariaLabel: null },
+			fitsPaddedPaste: true,
+			applied: { shown: { color: '#3b82f6', style: 'subtle' }, saved: { color: '#3b82f6', style: 'subtle' }, input: '#3b82f6' },
+		});
+	});
+
 	test('explains an invalid hex color only when it is applied', () => {
 		const { appearanceService, control, parent } = createEditor();
 		const input = control<HTMLInputElement>('color:hex');

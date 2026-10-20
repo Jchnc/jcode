@@ -65,6 +65,12 @@ export function normalizeWorkspaceColor(value: string): string | undefined {
 	return (value.length === 4 ? `#${value[1]}${value[1]}${value[2]}${value[2]}${value[3]}${value[3]}` : value).toLowerCase();
 }
 
+/**
+ * The most a hex color field accepts. `#rrggbb` is 7 characters, and the rest leaves room for the
+ * surrounding space a pasted color often carries, which {@link parseWorkspaceColorInput} ignores.
+ */
+export const WORKSPACE_COLOR_INPUT_MAX_LENGTH = 16;
+
 /** Read a typed or pasted color: surrounding space and a missing leading `#` are tolerated. */
 export function parseWorkspaceColorInput(value: string): string | undefined {
 	const trimmed = value.trim();

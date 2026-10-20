@@ -24,7 +24,7 @@ import { EditorPane } from '../../../browser/parts/editor/editorPane.js';
 import { WORKSPACE_COLOR_PALETTE, getWorkspaceColorPreset } from '../../../common/workspaceColorPalette.js';
 import { IEditorGroup } from '../../../services/editor/common/editorGroupsService.js';
 import { IWorkbenchThemeService } from '../../../services/themes/common/workbenchThemeService.js';
-import { IWorkspaceAppearance, IWorkspaceAppearancePreview, IWorkspaceAppearanceService, parseWorkspaceColorInput, WorkspaceAppearancePreviewEnd } from '../../../services/themes/common/workspaceAppearance.js';
+import { IWorkspaceAppearance, IWorkspaceAppearancePreview, IWorkspaceAppearanceService, parseWorkspaceColorInput, WORKSPACE_COLOR_INPUT_MAX_LENGTH, WorkspaceAppearancePreviewEnd } from '../../../services/themes/common/workspaceAppearance.js';
 import { getPersonalizationValue, PersonalizationValue } from '../common/personalizationSettings.js';
 
 interface SettingChoice {
@@ -260,11 +260,11 @@ export class PersonalizationEditor extends EditorPane {
 		const field = append(row, $('.personalization-field'));
 		const input = this.pageDisposables.add(new InputBox(field, undefined, {
 			inputBoxStyles: defaultInputBoxStyles,
-			ariaLabel: localize('personalization.customColorHex', "Custom workspace color in hexadecimal"),
 			placeholder: '#RRGGBB'
 		}));
-		input.inputElement.maxLength = 7;
+		input.inputElement.maxLength = WORKSPACE_COLOR_INPUT_MAX_LENGTH;
 		input.inputElement.spellcheck = false;
+		input.inputElement.setAttribute('aria-labelledby', `${id}-label`);
 		input.inputElement.setAttribute('aria-describedby', `${id}-description ${id}-error`);
 		this.registerFocusTarget('color:hex', input.inputElement);
 		const apply = this.button(field, localize('personalization.applyColor', "Apply"), () => commit(), 'color:apply');

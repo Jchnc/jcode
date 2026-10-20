@@ -27,7 +27,7 @@ import { WorkbenchStateContext } from '../../../common/contextkeys.js';
 import { IWorkspaceColorSwatch, renderWorkspaceColorSwatch } from '../../../browser/workspaceColorSwatch.js';
 import { getWorkspaceColorPreset, getWorkspaceColorSwatch, WORKSPACE_COLOR_PALETTE } from '../../../common/workspaceColorPalette.js';
 import { IWorkbenchLayoutService } from '../../../services/layout/browser/layoutService.js';
-import { IWorkspaceAppearance, IWorkspaceAppearancePreview, IWorkspaceAppearanceService, parseWorkspaceColorInput, WORKSPACE_COLOR_COMMAND_ID, WorkspaceAppearancePreviewEnd } from '../../../services/themes/common/workspaceAppearance.js';
+import { IWorkspaceAppearance, IWorkspaceAppearancePreview, IWorkspaceAppearanceService, parseWorkspaceColorInput, WORKSPACE_COLOR_COMMAND_ID, WORKSPACE_COLOR_INPUT_MAX_LENGTH, WorkspaceAppearancePreviewEnd } from '../../../services/themes/common/workspaceAppearance.js';
 
 /** Native workspace identity picker with a disposable live preview. */
 class WorkspaceColorPicker {
@@ -144,7 +144,7 @@ class WorkspaceColorPicker {
 				}));
 				input.inputElement.id = 'workspace-color-hex';
 				customLabel.setAttribute('for', input.inputElement.id);
-				input.inputElement.maxLength = 7;
+				input.inputElement.maxLength = WORKSPACE_COLOR_INPUT_MAX_LENGTH;
 				input.inputElement.spellcheck = false;
 				input.value = selected?.color ?? '';
 				// Showing a value is not the user typing it, so it must not publish a preview of its own.
