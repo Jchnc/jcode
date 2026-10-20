@@ -998,17 +998,17 @@ function createLayoutFixtures() {
 			ActiveFirst: defineComponentFixture({
 				render: render(true, { editors: tabGroupActiveEditorSpecs('first'), tabGroups: componentsTabGroup(false), width: 900 }),
 				additionalThemes: ['darkHighContrast', 'lightHighContrast'],
-				expectedVisualDescriptions: ['Connected tabs: the first Components tab is active and outlined by the orange group stroke (rounded top, straight sides); the header and the other two members carry the same stroke along the bottom, meeting its sides in clean corners, with no separators.'],
+				expectedVisualDescriptions: ['Connected tabs: the first Components tab is active and outlined by the orange group stroke, whose sides flow through curved shoulders into the same stroke under the header and the other two members, with no separators.'],
 			}),
 			ActiveMiddle: defineComponentFixture({
 				render: render(true, { editors: tabGroupActiveEditorSpecs('middle'), tabGroups: componentsTabGroup(false), width: 900 }),
 				additionalThemes: ['darkHighContrast', 'lightHighContrast'],
-				expectedVisualDescriptions: ['The middle Components tab is active and outlined by the orange group stroke; the stroke under the header and both neighbours meets its sides in clean corners with no gap or seam.'],
+				expectedVisualDescriptions: ['The middle Components tab is active and outlined by the orange group stroke; its sides flow through curved shoulders into the stroke under the header and both neighbours, with no gap or seam.'],
 			}),
 			ActiveLast: defineComponentFixture({
 				render: render(true, { editors: tabGroupActiveEditorSpecs('last'), tabGroups: componentsTabGroup(false), width: 900 }),
 				additionalThemes: ['darkHighContrast', 'lightHighContrast'],
-				expectedVisualDescriptions: ['The last Components tab is active and outlined by the orange group stroke; the stroke under the header and earlier members meets its left side in a clean corner.'],
+				expectedVisualDescriptions: ['The last Components tab is active and outlined by the orange group stroke; its left side flows through a curved shoulder into the stroke under the header and earlier members.'],
 			}),
 			ActiveOutside: defineComponentFixture({
 				render: render(true, { editors: tabGroupActiveEditorSpecs('outside'), tabGroups: componentsTabGroup(false), width: 900 }),
@@ -1022,7 +1022,7 @@ function createLayoutFixtures() {
 			CollapsedActive: defineComponentFixture({
 				render: render(true, { editors: tabGroupActiveEditorSpecs('middle'), tabGroups: componentsTabGroup(true), width: 900 }),
 				additionalThemes: ['darkHighContrast', 'lightHighContrast'],
-				expectedVisualDescriptions: ['The active Components member is the only visible member of the collapsed group: it is outlined by the orange group stroke, which meets the header stroke in a clean corner.'],
+				expectedVisualDescriptions: ['The active Components member is the only visible member of the collapsed group: it is outlined by the orange group stroke, whose left shoulder flows into the header stroke.'],
 			}),
 			Wrapped: defineComponentFixture({
 				render: render(true, { editors: tabGroupActiveEditorSpecs('middle'), tabGroups: componentsTabGroup(false), width: 360, partOptions: { wrapTabs: true, editorActionsLocation: 'hidden' } }),
