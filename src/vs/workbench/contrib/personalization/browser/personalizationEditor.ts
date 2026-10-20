@@ -24,6 +24,7 @@ import { getRadioNavigationTarget, IWorkspaceColorSwatch, renderWorkspaceColorSw
 import { EditorPane } from '../../../browser/parts/editor/editorPane.js';
 import { WORKSPACE_COLOR_PALETTE, getWorkspaceColorPreset } from '../../../common/workspaceColorPalette.js';
 import { IEditorGroup } from '../../../services/editor/common/editorGroupsService.js';
+import { LayoutSettings, ModernUIEditorTabStyle } from '../../../services/layout/browser/layoutService.js';
 import { IWorkbenchThemeService } from '../../../services/themes/common/workbenchThemeService.js';
 import { IWorkspaceAppearance, IWorkspaceAppearancePreview, IWorkspaceAppearanceService, parseWorkspaceColorInput, WORKSPACE_COLOR_AUTO_REMOTE_SETTING, WORKSPACE_COLOR_INPUT_MAX_LENGTH, WorkspaceAppearancePreviewEnd } from '../../../services/themes/common/workspaceAppearance.js';
 import { getPersonalizationValue, PersonalizationValue } from '../common/personalizationSettings.js';
@@ -73,6 +74,8 @@ interface SettingControl {
 	readonly primary: () => HTMLElement;
 	readonly refresh: (value: PersonalizationValue | undefined, disabled: boolean) => void;
 	readonly isRelevant?: () => boolean;
+	/** Whether something the control depends on is off, which disables it. */
+	readonly isUnavailable?: () => boolean;
 }
 
 export class PersonalizationEditor extends EditorPane {
@@ -145,6 +148,7 @@ export class PersonalizationEditor extends EditorPane {
 			{ value: 'top', label: localize('personalization.top', "Top") }, { value: 'left', label: localize('personalization.left', "Left") }, { value: 'right', label: localize('personalization.right', "Right") }
 		], 'placement');
 		this.setting(tabs, 'workbench.editor.verticalTabsWidth', localize('personalization.tabsWidth', "Vertical tab width"), localize('personalization.tabsWidthDescription', "Adjust the width of the file list."), undefined, 'range', [140, 500, 10], () => this.configurationService.getValue('workbench.editor.tabPosition') !== 'top');
+		this.tabStylePicker(tabs);
 		this.setting(tabs, 'workbench.editor.tabGroups.enabled', localize('personalization.tabGroups', "Tab groups"), localize('personalization.tabGroupsDescription', "Organize related files into named, colored groups."), undefined, undefined, undefined, () => this.configurationService.getValue('workbench.editor.showTabs') === 'multiple');
 		this.setting(tabs, 'breadcrumbs.enabled', localize('personalization.breadcrumbs', "Breadcrumbs"), localize('personalization.breadcrumbsDescription', "Navigate the current file's folders and symbols above the editor."));
 		const layout = this.section(nav, 'layout', Codicon.layout, localize('personalization.layout', "Workbench layout"), localize('personalization.layoutDescription', "Place the main navigation and choose how much information fits on screen."));
@@ -506,6 +510,70 @@ export class PersonalizationEditor extends EditorPane {
 		return control;
 	}
 
+	/**
+	 * Two cards that show what each modern tab style looks like. They are radios with one tab stop that follows the
+	 * checked card, arrow keys that move focus, and a click that applies the style at the selected scope.
+	 */
+	private tabStylePicker(section: PersonalizationSection): void {
+		const key = LayoutSettings.MODERN_UI_EDITOR_TAB_STYLE;
+		section.keys.push(key);
+		const row = append(section.body, $('.personalization-setting.personalization-setting-stacked'));
+		row.dataset.setting = key;
+		const text = append(row, $('.personalization-setting-text'));
+		const id = `personalization-control-${this.group.id}-${this.nextControlId++}`;
+		append(text, $('span.personalization-control-label', { id: `${id}-label` }, localize('personalization.tabStyle', "Editor tab style")));
+		append(text, $('p', { id: `${id}-description` }, localize('personalization.tabStyleDescription', "Choose how the tabs of open files look.")));
+		const hint = append(text, $('span.personalization-setting-hint'));
+		const field = append(row, $('.personalization-field.personalization-style-cards', { role: 'radiogroup', 'aria-labelledby': `${id}-label`, 'aria-describedby': `${id}-description ${id}-note` }));
+		const cards: { button: HTMLButtonElement; value: ModernUIEditorTabStyle }[] = [];
+		for (const [value, label, description] of [
+			[ModernUIEditorTabStyle.Connected, localize('personalization.tabStyleConnected', "Connected"), localize('personalization.tabStyleConnectedDescription', "The active tab joins the editor.")],
+			[ModernUIEditorTabStyle.Pill, localize('personalization.tabStylePill', "Pill"), localize('personalization.tabStylePillDescription', "Each tab is a rounded pill.")]
+		] as const) {
+			const button = this.button(field, '', () => { void this.updateSetting(key, value); }, `${key}:${value}`);
+			button.className = 'personalization-style-card';
+			button.setAttribute('role', 'radio');
+			const preview = append(button, $(`span.personalization-style-preview.style-${value}`, { 'aria-hidden': 'true' }));
+			const strip = append(preview, $('span.personalization-style-strip'));
+			for (let index = 0; index < 3; index++) {
+				append(strip, $(index === 0 ? 'span.personalization-style-tab.active' : 'span.personalization-style-tab'));
+			}
+			append(preview, $('span.personalization-style-surface'));
+			append(button, $('span.personalization-style-name', undefined, label));
+			append(button, $('span.personalization-style-description', undefined, description));
+			cards.push({ button, value });
+		}
+		const setFocusable = (focusable: number) => cards.forEach(({ button }, index) => { button.tabIndex = index === focusable ? 0 : -1; });
+		this.pageDisposables.add(addDisposableListener(field, EventType.KEY_DOWN, (event: KeyboardEvent) => {
+			const index = cards.findIndex(({ button }) => button === event.target);
+			const next = index < 0 ? undefined : getRadioNavigationTarget(event.key, index, cards.length, cards.length);
+			if (next !== undefined) {
+				EventHelper.stop(event);
+				setFocusable(next);
+				cards[next].button.focus();
+			}
+		}));
+		const note = append(row, $('.personalization-style-note', { id: `${id}-note` }));
+		append(note, $('span.personalization-setting-hint', undefined, localize('personalization.tabStyleOff', "Tab styles apply when Modern UI is on.")));
+		const turnOn = this.button(note, localize('personalization.turnOnModernUI', "Turn On Modern UI"), () => { void this.updateSetting(LayoutSettings.MODERN_UI, true); }, LayoutSettings.MODERN_UI);
+		turnOn.className = 'personalization-primary';
+		const reset = this.button(row, localize('personalization.reset', "Reset"), () => { void this.updateSetting(key, undefined); }, `${key}:reset`);
+		reset.className = 'personalization-reset'; reset.setAttribute('aria-label', localize('personalization.resetSetting', "Reset {0}", localize('personalization.tabStyle', "Editor tab style")));
+		const modernUIOn = () => this.configurationService.getValue(LayoutSettings.MODERN_UI) === true;
+		this.controls.push({
+			key, row, hint, reset,
+			elements: [...cards.map(({ button }) => button), turnOn, reset],
+			primary: () => cards.find(({ button }) => button.getAttribute('aria-checked') === 'true')?.button ?? cards[0].button,
+			isUnavailable: () => !modernUIOn(),
+			refresh: (value, disabled) => {
+				const checked = Math.max(cards.findIndex(({ value: card }) => card === (value ?? ModernUIEditorTabStyle.Connected)), 0);
+				setFocusable(checked);
+				cards.forEach(({ button }, index) => { button.disabled = disabled; button.setAttribute('aria-checked', String(index === checked)); });
+				note.hidden = modernUIOn();
+			}
+		});
+	}
+
 	private refresh(): void {
 		if (!this.root) { return; }
 		const focus = this.captureFocus();
@@ -515,7 +583,8 @@ export class PersonalizationEditor extends EditorPane {
 		this.targetButtons.forEach((button, index) => button.setAttribute('aria-pressed', String(index === (this.target === ConfigurationTarget.USER ? 0 : 1))));
 		this.scopeDescription.textContent = this.target === ConfigurationTarget.USER ? localize('personalization.userScopeDescription', "Use these choices in every workspace.") : localize('personalization.workspaceScopeDescription', "Override your choices in this workspace.");
 		for (const control of this.controls) {
-			const { config, policy, userOnly, disabled, ownValue } = this.inspectSetting(control.key);
+			const { config, policy, userOnly, disabled: unavailable, ownValue } = this.inspectSetting(control.key);
+			const disabled = unavailable || control.isUnavailable?.() === true;
 			const unsaved = this.unsavedRangeValues.get(control.key);
 			control.refresh(unsaved?.target === this.target ? unsaved.value : getPersonalizationValue(config, this.target), disabled);
 			this.setBusy(control, this.pendingSettings.has(control.key));

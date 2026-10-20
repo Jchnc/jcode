@@ -35,6 +35,8 @@ suite('Personalization editor', () => {
 	const tabPosition = 'workbench.editor.tabPosition';
 	const sideBarLocation = 'workbench.sideBar.location';
 	const verticalTabsWidth = 'workbench.editor.verticalTabsWidth';
+	const modernUI = 'workbench.experimental.modernUI';
+	const tabStyle = 'workbench.experimental.modernUIEditorTabStyle';
 
 	/** A configuration whose writes stay pending until the test completes them. */
 	class PendingConfigurationService extends TestConfigurationService {
@@ -43,10 +45,15 @@ suite('Personalization editor', () => {
 		/** When set, every write waits for its own entry here instead of for {@link saved}, so a test can finish them one at a time. */
 		readonly writes: DeferredPromise<void>[] | undefined;
 		readonly userValues = new Map<string, string | number>();
+		modernUIEnabled = true;
 
 		constructor(oneWriteAtATime = false) {
 			super();
 			this.writes = oneWriteAtATime ? [] : undefined;
+		}
+
+		override getValue<T>(key?: string | IConfigurationOverrides, overrides?: IConfigurationOverrides): T | undefined {
+			return (key === modernUI ? this.modernUIEnabled : super.getValue<T>(key, overrides)) as T | undefined;
 		}
 
 		override inspect<T>(key: string): IConfigurationValue<T> {
@@ -88,6 +95,14 @@ suite('Personalization editor', () => {
 			if (!registry.getConfigurationProperties()[key]) {
 				properties[key] = { type: 'string', default: 'top', enum: ['top', 'left', 'right'], scope: ConfigurationScope.WINDOW };
 			}
+		}
+		for (const key of [tabStyle]) {
+			if (!registry.getConfigurationProperties()[key]) {
+				properties[key] = { type: 'string', default: 'connected', enum: ['connected', 'pill'], scope: ConfigurationScope.WINDOW };
+			}
+		}
+		if (!registry.getConfigurationProperties()[modernUI]) {
+			properties[modernUI] = { type: 'boolean', default: true, scope: ConfigurationScope.WINDOW };
 		}
 		if (!registry.getConfigurationProperties()[verticalTabsWidth]) {
 			properties[verticalTabsWidth] = { type: 'number', default: 240, minimum: 140, maximum: 500, scope: ConfigurationScope.WINDOW };
@@ -212,6 +227,40 @@ suite('Personalization editor', () => {
 			whileFirstSaves: { updates: [300], shown: '400', busy: 'true' },
 			whileLastSaves: { updates: [300, 400], shown: '400', busy: 'true' },
 			afterwards: { updates: [300, 400], shown: '400', busy: null, saved: 400, status: 'Saved to User settings.' },
+		});
+	});
+
+	test('offers the editor tab styles as radios that apply at once, and asks for Modern UI when it is off', async () => {
+		const { configurationService, control, parent } = createEditor({ [tabStyle]: 'pill' });
+		const connected = control(`${tabStyle}:connected`);
+		const pill = control(`${tabStyle}:pill`);
+		const state = () => ({
+			checked: [connected, pill].map(card => card.getAttribute('aria-checked')),
+			tabStops: [connected, pill].map(card => card.tabIndex),
+			disabled: [connected, pill].map(card => card.disabled),
+			noteHidden: parent.querySelector<HTMLElement>('.personalization-style-note')!.hidden,
+		});
+		const initial = state();
+
+		pill.focus();
+		press(pill, 'ArrowLeft');
+		const focusedAfterArrow = (mainWindow.document.activeElement as HTMLElement).dataset.focusKey;
+		connected.click();
+		configurationService.saved.complete();
+		await timeout(0);
+		const afterChoosing = { ...state(), saved: configurationService.userValues.get(tabStyle) };
+
+		configurationService.modernUIEnabled = false;
+		configurationService.onDidChangeConfigurationEmitter.fire({ source: ConfigurationTarget.USER, affectedKeys: new Set([modernUI]), change: { keys: [modernUI], overrides: [] }, affectsConfiguration: () => true });
+		const whenOff = state();
+		control(modernUI).click();
+
+		assert.deepStrictEqual({ initial, focusedAfterArrow, afterChoosing, whenOff, turnedOn: configurationService.updates.at(-1) }, {
+			initial: { checked: ['false', 'true'], tabStops: [-1, 0], disabled: [false, false], noteHidden: true },
+			focusedAfterArrow: `${tabStyle}:connected`,
+			afterChoosing: { checked: ['true', 'false'], tabStops: [0, -1], disabled: [false, false], noteHidden: true, saved: 'connected' },
+			whenOff: { checked: ['true', 'false'], tabStops: [0, -1], disabled: [true, true], noteHidden: false },
+			turnedOn: { key: modernUI, value: true, target: ConfigurationTarget.USER },
 		});
 	});
 

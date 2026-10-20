@@ -63,7 +63,7 @@ const defaults: Record<string, unknown> = {
 	'workbench.sideBar.location': 'left',
 	'workbench.activityBar.location': 'default',
 	'window.density.layout': 'default',
-	'workbench.experimental.modernUI': false,
+	'workbench.experimental.modernUI': true,
 	'workbench.experimental.modernUIEditorTabStyle': 'connected',
 	'workbench.editor.tabGroups.autoGroupRules': []
 };
@@ -123,7 +123,11 @@ export default defineThemedFixtureGroup({ path: 'workbench/personalization/' }, 
 	Wide: defineComponentFixture({
 		labels: { kind: 'screenshot' },
 		additionalThemes: ['darkHighContrast', 'lightHighContrast'],
-		render: context => renderPersonalization(context, 960),
+		render: context => renderPersonalization(context, 960, { 'workbench.experimental.modernUIEditorTabStyle': 'pill' }),
+	}),
+	ModernUIOff: defineComponentFixture({
+		labels: { kind: 'screenshot' },
+		render: context => renderPersonalization(context, 960, { 'workbench.experimental.modernUI': false }),
 	}),
 	Narrow: defineComponentFixture({
 		labels: { kind: 'screenshot' },

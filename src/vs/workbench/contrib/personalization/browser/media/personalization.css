@@ -545,6 +545,133 @@
 .jcode-personalization .placement-left::before { inset: 0 auto 0 0; width: var(--vscode-spacing-size60); }
 .jcode-personalization .placement-right::before { inset: 0 0 0 auto; width: var(--vscode-spacing-size60); }
 
+.jcode-personalization .personalization-setting-stacked > .personalization-reset {
+	order: 2;
+	align-self: flex-start;
+}
+
+.jcode-personalization .personalization-setting-stacked > .personalization-field {
+	flex: 1 1 100%;
+	order: 3;
+}
+
+.jcode-personalization .personalization-setting-stacked > .personalization-style-note {
+	order: 4;
+}
+
+.jcode-personalization .personalization-style-cards {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: var(--vscode-spacing-size120);
+	align-items: stretch;
+}
+
+.jcode-personalization .personalization-style-card {
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+	gap: var(--vscode-spacing-size20);
+	padding: var(--vscode-spacing-size100);
+	text-align: left;
+	border-color: var(--vscode-widget-border, var(--vscode-contrastBorder, transparent));
+	border-radius: var(--vscode-cornerRadius-large);
+	background: var(--vscode-editor-background);
+}
+
+.jcode-personalization .personalization-style-card[aria-checked='true'] {
+	border-color: var(--vscode-contrastActiveBorder, var(--vscode-focusBorder));
+	box-shadow: inset 0 0 0 var(--vscode-strokeThickness) var(--vscode-contrastActiveBorder, var(--vscode-focusBorder));
+}
+
+.jcode-personalization .personalization-style-name {
+	font-weight: var(--vscode-fontWeight-semiBold);
+}
+
+.jcode-personalization .personalization-style-description {
+	font-size: var(--vscode-fontSize-label2);
+	color: var(--vscode-descriptionForeground);
+}
+
+/* A small drawing of the tabs above an editor, made of the same colors the real tabs use. */
+.jcode-personalization .personalization-style-preview {
+	display: flex;
+	flex-direction: column;
+	height: var(--vscode-spacing-size400);
+	margin-bottom: var(--vscode-spacing-size60);
+	overflow: hidden;
+	border-radius: var(--vscode-cornerRadius-medium);
+	background: color-mix(in srgb, var(--vscode-foreground) 6%, var(--vscode-editor-background));
+	border: var(--vscode-strokeThickness) solid var(--vscode-widget-border, var(--vscode-contrastBorder, transparent));
+}
+
+.jcode-personalization .personalization-style-strip {
+	display: flex;
+	gap: var(--vscode-spacing-size20);
+	height: var(--vscode-spacing-size160);
+	padding: var(--vscode-spacing-size60) var(--vscode-spacing-size60) 0;
+	flex: 0 0 auto;
+}
+
+.jcode-personalization .personalization-style-tab {
+	flex: 0 0 28%;
+	background: color-mix(in srgb, var(--vscode-foreground) 14%, transparent);
+	border-radius: var(--vscode-cornerRadius-xSmall) var(--vscode-cornerRadius-xSmall) 0 0;
+}
+
+.jcode-personalization .personalization-style-tab.active {
+	background: var(--vscode-editor-background);
+	border: var(--vscode-strokeThickness) solid color-mix(in srgb, var(--vscode-foreground) 28%, transparent);
+	border-bottom: none;
+}
+
+.jcode-personalization .personalization-style-surface {
+	flex: 1 1 auto;
+	background: var(--vscode-editor-background);
+	border-top: var(--vscode-strokeThickness) solid color-mix(in srgb, var(--vscode-foreground) 28%, transparent);
+}
+
+/* Connected: the active tab is open at the bottom and flows into the editor. */
+.jcode-personalization .style-connected .personalization-style-tab.active {
+	margin-bottom: calc(-1 * var(--vscode-strokeThickness));
+	position: relative;
+	border-radius: var(--vscode-cornerRadius-small) var(--vscode-cornerRadius-small) 0 0;
+}
+
+/* Pill: every tab is a separate rounded shape that floats above the editor. */
+.jcode-personalization .style-pill .personalization-style-strip {
+	align-items: center;
+	height: var(--vscode-spacing-size200);
+	padding: var(--vscode-spacing-size40) var(--vscode-spacing-size60);
+	gap: var(--vscode-spacing-size40);
+}
+
+.jcode-personalization .style-pill .personalization-style-tab {
+	height: var(--vscode-spacing-size120);
+	flex-basis: 26%;
+	border-radius: var(--vscode-cornerRadius-circle);
+}
+
+.jcode-personalization .style-pill .personalization-style-tab.active {
+	border: none;
+	background: color-mix(in srgb, var(--vscode-foreground) 30%, transparent);
+}
+
+.jcode-personalization .style-pill .personalization-style-surface {
+	border-top: none;
+}
+
+.jcode-personalization .personalization-style-note {
+	display: flex;
+	flex: 1 1 100%;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--vscode-spacing-size80) var(--vscode-spacing-size120);
+}
+
+.jcode-personalization .personalization-style-note .personalization-setting-hint {
+	color: var(--vscode-descriptionForeground);
+}
+
 .jcode-personalization .personalization-footer {
 	display: flex;
 	align-items: center;
@@ -737,6 +864,10 @@
 
 .jcode-personalization.narrow .personalization-reset:disabled {
 	display: none;
+}
+
+.jcode-personalization.compact .personalization-style-cards {
+	grid-template-columns: minmax(0, 1fr);
 }
 
 .jcode-personalization.compact .personalization-setting > .personalization-field {
