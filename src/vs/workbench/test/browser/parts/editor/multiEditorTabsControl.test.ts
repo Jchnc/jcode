@@ -235,6 +235,63 @@ suite('MultiEditorTabsControl', () => {
 		outside.remove();
 	});
 
+	function tabGroupHeaders(): HTMLElement[] {
+		return Array.from(container.querySelectorAll<HTMLElement>('.tabs-container > .tab-group-header'));
+	}
+
+	function describeTabGroupHeaders() {
+		return tabGroupHeaders().map(header => ({
+			name: header.querySelector('.tab-group-name')?.textContent,
+			count: header.querySelector('.tab-group-count')?.textContent,
+			unsaved: header.querySelector('.tab-group-dirty-indicator')?.getAttribute('title') ?? null,
+			label: header.getAttribute('aria-label')
+		}));
+	}
+
+	test('tab group headers reflect unsaved changes live without touching other headers', () => {
+		const [first, second, third, fourth] = openNamedEditors(['a.ts', 'b.ts', 'c.ts', 'd.ts']);
+		model.createTabGroup([first, second], 'First', 'blue');
+		model.createTabGroup([third, fourth], 'Second', 'red');
+
+		const otherHeader = tabGroupHeaders()[1];
+		const otherHeaderCount = otherHeader.querySelector('.tab-group-count');
+		const initial = describeTabGroupHeaders();
+
+		first.setDirty();
+		control.updateEditorDirty(first);
+		const unsaved = describeTabGroupHeaders();
+
+		second.setDirty();
+		control.updateEditorDirty(second);
+		const manyUnsaved = describeTabGroupHeaders();
+
+		first.dirty = false;
+		second.dirty = false;
+		control.updateEditorDirty(first);
+		control.updateEditorDirty(second);
+		const saved = describeTabGroupHeaders();
+
+		assert.deepStrictEqual({ initial, unsaved, manyUnsaved, saved, otherHeaderReused: tabGroupHeaders()[1] === otherHeader && otherHeader.querySelector('.tab-group-count') === otherHeaderCount }, {
+			initial: [
+				{ name: 'First', count: '2', unsaved: null, label: 'First, 2 tabs' },
+				{ name: 'Second', count: '2', unsaved: null, label: 'Second, 2 tabs' }
+			],
+			unsaved: [
+				{ name: 'First', count: '2', unsaved: '1 unsaved tabs', label: 'First, 2 tabs, 1 unsaved' },
+				{ name: 'Second', count: '2', unsaved: null, label: 'Second, 2 tabs' }
+			],
+			manyUnsaved: [
+				{ name: 'First', count: '2', unsaved: '2 unsaved tabs', label: 'First, 2 tabs, 2 unsaved' },
+				{ name: 'Second', count: '2', unsaved: null, label: 'Second, 2 tabs' }
+			],
+			saved: [
+				{ name: 'First', count: '2', unsaved: null, label: 'First, 2 tabs' },
+				{ name: 'Second', count: '2', unsaved: null, label: 'Second, 2 tabs' }
+			],
+			otherHeaderReused: true
+		});
+	});
+
 	function connectedGroup(): HTMLElement {
 		const root = $('.monaco-workbench.modern-ui.modern-ui-tabs.modern-ui-connected-editor-tabs.floating-panels');
 		root.style.cssText = '--vscode-spacing-size20: 2px; --vscode-spacing-size40: 4px; --vscode-spacing-size60: 6px; --vscode-spacing-size80: 8px; --vscode-spacing-size160: 16px; --vscode-spacing-size200: 20px; --vscode-spacing-size280: 28px; --vscode-strokeThickness: 1px; --vscode-cornerRadius-small: 4px; --vscode-cornerRadius-medium: 6px; --vscode-cornerRadius-large: 8px; --vscode-fontSize-body1: 13px; --vscode-fontWeight-regular: 400;';

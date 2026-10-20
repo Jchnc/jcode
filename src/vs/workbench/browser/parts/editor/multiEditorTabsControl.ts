@@ -76,6 +76,24 @@ interface IEditorInputLabel {
 	readonly ariaLabel?: string;
 }
 
+interface ITabGroupStats {
+
+	/**
+	 * Index of the first tab of the group.
+	 */
+	readonly firstIndex: number;
+
+	/**
+	 * Number of tabs in the group.
+	 */
+	count: number;
+
+	/**
+	 * Number of tabs in the group with unsaved changes.
+	 */
+	dirtyCount: number;
+}
+
 interface IMultiEditorTabsControlLayoutOptions {
 
 	/**
@@ -943,6 +961,10 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 			tabContainer.style.removeProperty('--tab-sizing-fit-width');
 			this.redrawTabSelectedActiveAndDirty(this.groupsView.activeGroup === this.groupView, editor, tabContainer, tabActionBar);
 		});
+
+		// The unsaved indicator, count and label of the tab group header depend on it
+		this.redrawTabGroupHeaderOfEditor(editor);
+
 		this.invalidateConnectedTabLayout();
 	}
 
@@ -2739,7 +2761,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		return this.getTabAtIndex(this.tabsModel.count - 1);
 	}
 
-	private tabGroupHeaderDisposables: IDisposable[] = [];
+	private readonly tabGroupHeaders = new Map<string, { readonly element: HTMLElement; readonly disposables: DisposableStore }>();
 
 	private rebuildTabs(): void {
 		const tabsContainer = this.tabsContainer;
@@ -2753,7 +2775,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		}
 
 		this.tabDisposables = dispose(this.tabDisposables);
-		this.tabGroupHeaderDisposables = dispose(this.tabGroupHeaderDisposables);
+		this.disposeTabGroupHeaders();
 		this.tabResourceLabels.clear();
 		this.tabLabels = [];
 		this.activeTabLabel = undefined;
@@ -2762,52 +2784,105 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		this.handleOpenedEditors();
 	}
 
+	/**
+	 * Reconciles the tab group headers with the model. Headers are reused from one
+	 * redraw to the next, so their keyboard focus and hover state are preserved.
+	 */
 	private redrawTabGroups(): void {
 		const tabsContainer = this.tabsContainer;
 		if (!tabsContainer) {
 			return;
 		}
 
-		// Remove existing headers
-		this.tabGroupHeaderDisposables = dispose(this.tabGroupHeaderDisposables);
-		for (const child of Array.from(tabsContainer.children)) {
-			if (child.classList.contains('tab-group-header')) {
-				child.remove();
+		const stats = this.groupsView.partOptions.tabGroups.enabled ? this.getTabGroupStats() : new Map<string, ITabGroupStats>();
+
+		// Moving a focused header within the DOM drops its focus, so remember it
+		const focusedElement = tabsContainer.ownerDocument.activeElement;
+
+		// Render a header before the first tab of each group
+		const renderedGroupIds = new Set<string>();
+		for (const group of this.tabsModel.tabGroups) {
+			const groupStats = stats.get(group.id);
+			const firstTab = groupStats ? this.getTabAtIndex(groupStats.firstIndex) : undefined;
+			if (!groupStats || !firstTab) {
+				continue;
+			}
+
+			const header = this.tabGroupHeaders.get(group.id)?.element ?? this.createTabGroupHeader(group.id);
+			this.renderTabGroupHeader(header, group, groupStats);
+			if (header.nextElementSibling !== firstTab) {
+				tabsContainer.insertBefore(header, firstTab);
+			}
+			renderedGroupIds.add(group.id);
+		}
+
+		// Remove headers of groups that are gone or that have no tabs to precede
+		for (const groupId of Array.from(this.tabGroupHeaders.keys())) {
+			if (!renderedGroupIds.has(groupId)) {
+				this.disposeTabGroupHeader(groupId);
 			}
 		}
 
+		if (isHTMLElement(focusedElement) && focusedElement !== tabsContainer.ownerDocument.activeElement && focusedElement.isConnected && tabsContainer.contains(focusedElement)) {
+			focusedElement.focus({ preventScroll: true });
+		}
+	}
+
+	private getTabGroupStats(onlyGroupId?: string): Map<string, ITabGroupStats> {
+		const stats = new Map<string, ITabGroupStats>();
+		this.tabsModel.getEditors(EditorsOrder.SEQUENTIAL).forEach((editor, index) => {
+			const group = this.tabsModel.getTabGroupForEditor(editor);
+			if (!group || (onlyGroupId !== undefined && group.id !== onlyGroupId)) {
+				return;
+			}
+
+			let groupStats = stats.get(group.id);
+			if (!groupStats) {
+				groupStats = { firstIndex: index, count: 0, dirtyCount: 0 };
+				stats.set(group.id, groupStats);
+			}
+
+			groupStats.count++;
+			if (editor.isDirty()) {
+				groupStats.dirtyCount++;
+			}
+		});
+
+		return stats;
+	}
+
+	/**
+	 * Refreshes the header of the tab group the editor belongs to (if any)
+	 * and leaves the headers of all other groups untouched.
+	 */
+	private redrawTabGroupHeaderOfEditor(editor: EditorInput): void {
 		if (!this.groupsView.partOptions.tabGroups.enabled) {
 			return;
 		}
 
-		// Compute the first tab index for each group
-		const groupFirstIndex = new Map<string, number>();
-		const groupCount = new Map<string, number>();
-		const groupDirtyCount = new Map<string, number>();
-		this.tabsModel.getEditors(EditorsOrder.SEQUENTIAL).forEach((editor, index) => {
-			const group = this.tabsModel.getTabGroupForEditor(editor);
-			if (!group) {
-				return;
-			}
-			if (!groupFirstIndex.has(group.id)) {
-				groupFirstIndex.set(group.id, index);
-			}
-			groupCount.set(group.id, (groupCount.get(group.id) ?? 0) + 1);
-			if (editor.isDirty()) {
-				groupDirtyCount.set(group.id, (groupDirtyCount.get(group.id) ?? 0) + 1);
-			}
-		});
+		const group = this.tabsModel.getTabGroupForEditor(editor);
+		const header = group ? this.tabGroupHeaders.get(group.id) : undefined;
+		const groupStats = group ? this.getTabGroupStats(group.id).get(group.id) : undefined;
+		if (group && header && groupStats) {
+			this.renderTabGroupHeader(header.element, group, groupStats);
 
-		// Render a header before the first tab of each group
-		for (const group of this.tabsModel.tabGroups) {
-			const firstIndex = groupFirstIndex.get(group.id);
-			const firstTab = typeof firstIndex === 'number' ? this.getTabAtIndex(firstIndex) : undefined;
-			if (!firstTab) {
-				continue;
-			}
+			// The header changes its width when the unsaved indicator toggles
+			this.layout(this.dimensions);
+		}
+	}
 
-			const header = this.createTabGroupHeader(group, groupCount.get(group.id) ?? 0, groupDirtyCount.get(group.id) ?? 0);
-			tabsContainer.insertBefore(header, firstTab);
+	private disposeTabGroupHeader(groupId: string): void {
+		const header = this.tabGroupHeaders.get(groupId);
+		if (header) {
+			header.disposables.dispose();
+			header.element.remove();
+			this.tabGroupHeaders.delete(groupId);
+		}
+	}
+
+	private disposeTabGroupHeaders(): void {
+		for (const groupId of Array.from(this.tabGroupHeaders.keys())) {
+			this.disposeTabGroupHeader(groupId);
 		}
 	}
 
@@ -2879,12 +2954,24 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		this.groupView.focus();
 	}
 
-	private createTabGroupHeader(group: IEditorTabGroup, count: number, dirtyCount: number): HTMLElement {
+	private createTabGroupHeader(groupId: string): HTMLElement {
 		const header = $('.tab-group-header');
-		header.dataset.tabGroupId = group.id;
-		header.setAttribute('draggable', String(!group.locked));
+		header.dataset.tabGroupId = groupId;
 		header.setAttribute('role', 'button');
 		header.tabIndex = 0;
+
+		this.tabGroupHeaders.set(groupId, { element: header, disposables: this.registerTabGroupHeaderListeners(header, groupId) });
+
+		return header;
+	}
+
+	/**
+	 * Renders the state of a tab group into its header in place, so that the
+	 * header element and its listeners stay alive across updates.
+	 */
+	private renderTabGroupHeader(header: HTMLElement, group: IEditorTabGroup, { count, dirtyCount }: ITabGroupStats): void {
+		clearNode(header);
+		header.setAttribute('draggable', String(!group.locked));
 		header.classList.toggle('collapsed', group.collapsed);
 		header.classList.toggle('saved', group.saved);
 		header.classList.toggle('locked', group.locked);
@@ -2936,37 +3023,47 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		header.setAttribute('aria-label', group.collapsed ? localize('tabGroup.collapsedAria', '{0}, collapsed, {1}', label, accessibilityStatus) : localize('tabGroup.expandedAria', '{0}, {1}', label, accessibilityStatus));
 		const savedStatus = group.saved ? localize('tabGroup.savedStatus', ', saved') : '';
 		header.title = group.locked ? localize('tabGroup.headerTitleLocked', '{0} ({1}, locked{2})', label, status, savedStatus) : localize('tabGroup.headerTitle', '{0} ({1}{2})', label, status, savedStatus);
-
-		this.tabGroupHeaderDisposables.push(this.registerTabGroupHeaderListeners(header, group));
-
-		return header;
 	}
 
-	private registerTabGroupHeaderListeners(header: HTMLElement, group: IEditorTabGroup): IDisposable {
+	private registerTabGroupHeaderListeners(header: HTMLElement, groupId: string): DisposableStore {
 		const disposables = new DisposableStore();
+
+		// The header outlives updates to its group, and the model may replace the
+		// group object (e.g. when undoing a change), so always resolve it freshly.
+		const getGroup = (): IEditorTabGroup | undefined => this.tabsModel.tabGroups.find(candidate => candidate.id === groupId);
+		const toggleCollapsed = () => {
+			const group = getGroup();
+			if (group) {
+				this.groupView.setTabGroupCollapsed(group.id, !group.collapsed);
+			}
+		};
 
 		disposables.add(addDisposableListener(header, EventType.CLICK, e => {
 			EventHelper.stop(e);
-			this.groupView.setTabGroupCollapsed(group.id, !group.collapsed);
+			toggleCollapsed();
 		}));
 
 		disposables.add(addDisposableListener(header, EventType.KEY_UP, e => {
 			const event = new StandardKeyboardEvent(e);
 			if (event.equals(KeyCode.Enter) || event.equals(KeyCode.Space)) {
 				EventHelper.stop(e);
-				this.groupView.setTabGroupCollapsed(group.id, !group.collapsed);
+				toggleCollapsed();
 			}
 		}));
 
 		disposables.add(addDisposableListener(header, EventType.CONTEXT_MENU, e => {
 			EventHelper.stop(e, true);
-			new TabGroupContextMenu(this.groupView, this.editorPartsView, this.contextViewService, this.editorService, this.historyService, this.tabsContainer ?? header.parentElement ?? header).show(group, header, e);
+			const group = getGroup();
+			if (group) {
+				new TabGroupContextMenu(this.groupView, this.editorPartsView, this.contextViewService, this.editorService, this.historyService, this.tabsContainer ?? header.parentElement ?? header).show(group, header, e);
+			}
 		}));
 
 		// Drag & drop: move a whole group onto another group's header
 		disposables.add(addDisposableListener(header, EventType.DRAG_START, (e: DragEvent) => {
 			e.stopPropagation();
-			if (group.locked) {
+			const group = getGroup();
+			if (!group || group.locked) {
 				e.preventDefault();
 				return;
 			}
@@ -2980,13 +3077,13 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 
 		disposables.add(addDisposableListener(header, EventType.DRAG_OVER, (e: DragEvent) => {
 			const dragged = this.getDraggedTabGroupIdentifier();
-			if (dragged && !(dragged.sourceGroupId === this.groupView.id && dragged.tabGroup.id === group.id)) {
+			if (dragged && !(dragged.sourceGroupId === this.groupView.id && dragged.tabGroup.id === groupId)) {
 				e.preventDefault();
 				e.stopPropagation();
 				header.classList.add('drop-target');
 				return;
 			}
-			if (!group.locked && this.editorTransfer.hasData(DraggedEditorIdentifier.prototype)) {
+			if (!getGroup()?.locked && this.editorTransfer.hasData(DraggedEditorIdentifier.prototype)) {
 				e.preventDefault();
 				e.stopPropagation();
 				header.classList.add('drop-target');
@@ -3005,20 +3102,20 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 
 			const dragged = this.getDraggedTabGroupIdentifier();
 			if (dragged) {
-				if (dragged.sourceGroupId === this.groupView.id && dragged.tabGroup.id === group.id) {
+				if (dragged.sourceGroupId === this.groupView.id && dragged.tabGroup.id === groupId) {
 					return;
 				}
-				const firstIndex = this.getTabGroupFirstIndex(group.id);
+				const firstIndex = this.getTabGroupFirstIndex(groupId);
 				if (typeof firstIndex === 'number') {
 					this.dropTabGroupToIndex(firstIndex);
 				}
 				return;
 			}
 
-			if (!group.locked && this.editorTransfer.hasData(DraggedEditorIdentifier.prototype)) {
-				const members = getTabGroupMembers(this.groupView, group.id);
+			if (!getGroup()?.locked && this.editorTransfer.hasData(DraggedEditorIdentifier.prototype)) {
+				const members = getTabGroupMembers(this.groupView, groupId);
 				const lastIndex = members.reduce((index, editor) => Math.max(index, this.groupView.getIndexOfEditor(editor)), -1);
-				void this.onDrop(e, lastIndex + 1, this.tabsContainer ?? header.parentElement ?? header, group.id);
+				void this.onDrop(e, lastIndex + 1, this.tabsContainer ?? header.parentElement ?? header, groupId);
 			}
 		}));
 
@@ -3173,7 +3270,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		super.dispose();
 
 		this.tabDisposables = dispose(this.tabDisposables);
-		this.tabGroupHeaderDisposables = dispose(this.tabGroupHeaderDisposables);
+		this.disposeTabGroupHeaders();
 	}
 }
 
