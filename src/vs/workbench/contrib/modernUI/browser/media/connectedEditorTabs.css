@@ -785,3 +785,35 @@
 .modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab.connected-tab-upper-row.active > .tab-actions {
 	border-radius: var(--vscode-cornerRadius-small);
 }
+
+/*
+ * Tab groups. Members stay connected tabs: the active member merges into the editor
+ * surface like any active tab, and group membership is a thin rail along the bottom
+ * edge of the inactive members that stops where the active tab opens into the editor.
+ */
+.modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab.in-tab-group {
+	background-size: 100% var(--vscode-spacing-size20) !important;
+}
+
+.modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab.in-tab-group.active {
+	background-image: none !important;
+}
+
+/* No separators inside a group or against its edges; the shared rail and header already group the tabs. */
+.modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab.in-tab-group > .tab-divider,
+.modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab.in-tab-group + .tab > .tab-divider {
+	display: none;
+}
+
+/* The header pill shares the height and baseline of the tab fills. */
+.modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab-group-header {
+	height: calc(var(--modern-ui-connected-tab-row-height) - 2 * var(--modern-ui-connected-tab-fill-block-inset));
+	border-radius: var(--vscode-cornerRadius-small);
+	margin-top: var(--modern-ui-connected-tab-fill-block-inset);
+	margin-bottom: 0;
+}
+
+/* The rail starts at the first member, so the header carries no underline. */
+.modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab-group-header::before {
+	display: none;
+}
