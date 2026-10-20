@@ -5,13 +5,16 @@
 
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { commands, EventEmitter, ExtensionContext, l10n, ThemeIcon, TreeDataProvider, TreeItem, TreeItemCollapsibleState, Uri, window, workspace, type LogOutputChannel, type TreeView } from 'vscode';
+import { commands, EventEmitter, ExtensionContext, l10n, ThemeIcon, TreeDataProvider, TreeItem, TreeItemCollapsibleState, Uri, window, workspace, type LogOutputChannel, type QuickPickItem, type TreeView } from 'vscode';
 import { RemoteProfile, SftpConnections } from './connection';
 import { ConnectionForm, ConnectionFormResult } from './connectionForm';
 import { SftpFileSystemProvider } from './fileSystemProvider';
-import { exportProfiles, importProfiles, isEncryptedExport } from './profileJson';
+import { exportEncryptedProfiles, exportProfiles, importProfiles, isEncryptedExport } from './profileJson';
 
 const scheme = 'jcode-sftp';
+
+/** How saved passwords and passphrases are written when exporting connections. */
+type SecretHandling = 'encrypt' | 'exclude' | 'plain';
 
 export class ConnectionManager implements TreeDataProvider<RemoteProfile> {
 	private readonly changeEmitter = new EventEmitter<RemoteProfile | undefined>();
@@ -186,8 +189,6 @@ export class ConnectionManager implements TreeDataProvider<RemoteProfile> {
 	}
 
 	async export(): Promise<void> {
-		const uri = await window.showSaveDialog({ defaultUri: Uri.file(join(homedir(), 'jcode-sftp-connections.json')), filters: { JSON: ['json'] }, saveLabel: l10n.t('Export Connections') });
-		if (!uri) { return; }
 		const profiles = this.connections.profiles;
 		const credentials = new Map<string, string>();
 		for (const profile of profiles) {
@@ -195,8 +196,58 @@ export class ConnectionManager implements TreeDataProvider<RemoteProfile> {
 			const credential = await this.connections.getStoredCredential(profile.id);
 			if (credential !== undefined) { credentials.set(profile.id, credential); }
 		}
-		await workspace.fs.writeFile(uri, new TextEncoder().encode(exportProfiles(profiles, credentials)));
-		void window.showInformationMessage(l10n.t('Connections and saved credentials exported. Anyone with this file can decode its passwords.'));
+		// Nothing to protect without saved credentials, so only ask when there are secrets to write.
+		const handling = credentials.size ? await this.askSecretHandling() : 'exclude';
+		if (!handling) { return; }
+		const passphrase = handling === 'encrypt' ? await this.askNewPassphrase() : undefined;
+		if (handling === 'encrypt' && !passphrase) { return; }
+		if (handling === 'plain' && !await this.confirmPlainSecrets()) { return; }
+		const uri = await window.showSaveDialog({ defaultUri: Uri.file(join(homedir(), 'jcode-sftp-connections.json')), filters: { JSON: ['json'] }, saveLabel: l10n.t('Export Connections') });
+		if (!uri) { return; }
+		const json = passphrase
+			? await exportEncryptedProfiles(profiles, credentials, passphrase)
+			: exportProfiles(profiles, handling === 'plain' ? credentials : new Map());
+		await workspace.fs.writeFile(uri, new TextEncoder().encode(json));
+		if (handling === 'encrypt') {
+			void window.showInformationMessage(l10n.t('Connections exported with encrypted credentials. Keep the passphrase safe; it cannot be recovered.'));
+		} else if (handling === 'plain') {
+			void window.showWarningMessage(l10n.t('Connections exported with unencrypted credentials. Anyone with this file can decode its passwords.'));
+		} else {
+			void window.showInformationMessage(l10n.t('Connections exported without credentials.'));
+		}
+	}
+
+	private async askSecretHandling(): Promise<SecretHandling | undefined> {
+		const choice = await window.showQuickPick<QuickPickItem & { handling: SecretHandling }>([
+			{ label: l10n.t('Encrypt with Passphrase'), description: l10n.t('Recommended'), detail: l10n.t('Saved passwords and passphrases are encrypted. Importing them needs the same passphrase.'), handling: 'encrypt' },
+			{ label: l10n.t('Exclude Secrets'), detail: l10n.t('Export connection details only. Enter passwords again after importing.'), handling: 'exclude' },
+			{ label: l10n.t('Include Unencrypted'), detail: l10n.t('Anyone with the file can read the saved passwords and passphrases.'), handling: 'plain' }
+		], { title: l10n.t('Export Connections'), placeHolder: l10n.t('How should saved passwords and passphrases be exported?'), ignoreFocusOut: true });
+		return choice?.handling;
+	}
+
+	private async askNewPassphrase(): Promise<string | undefined> {
+		const title = l10n.t('Encrypt Export');
+		const passphrase = await window.showInputBox({
+			title, prompt: l10n.t('Enter a passphrase to encrypt saved credentials. You need it to import them.'), password: true, ignoreFocusOut: true,
+			validateInput: value => value.length < 8 ? l10n.t('Use at least 8 characters.') : undefined
+		});
+		if (passphrase === undefined) { return undefined; }
+		const confirmation = await window.showInputBox({
+			title, prompt: l10n.t('Enter the passphrase again to confirm it.'), password: true, ignoreFocusOut: true,
+			validateInput: value => value === passphrase ? undefined : l10n.t('The passphrases do not match.')
+		});
+		return confirmation === undefined ? undefined : passphrase;
+	}
+
+	private async confirmPlainSecrets(): Promise<boolean> {
+		const include = l10n.t('Include Unencrypted');
+		const choice = await window.showWarningMessage(
+			l10n.t('Export saved passwords without encryption?'),
+			{ modal: true, detail: l10n.t('Passwords and passphrases are written to the file in a form anyone can decode. Anyone who gets the file can sign in to your servers.') },
+			include
+		);
+		return choice === include;
 	}
 
 	async reconnectCurrent(): Promise<void> {

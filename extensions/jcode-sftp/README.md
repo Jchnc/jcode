@@ -2,7 +2,7 @@
 
 Open the **Remote** view in the Activity Bar, or run **JCode Remote: Manage SSH/SFTP Connections...** from the Command Palette. Use the view's **New Connection** action to enter all connection details in one form. Choose **Save and Connect** to open the remote workspace immediately, or **Save** to keep it for later. Click a saved connection to switch the current window to its workspace. The row actions and context menu let you edit or delete it. JCode opens the selected folder in the regular Explorer. Opening, saving, creating, renaming, and deleting use SFTP directly; a successful save has already reached the server.
 
-Use **Export** and **Import** in the Remote view's menu to move connection profiles between JCode installations. The JSON file includes any saved passwords and private key passphrases. Import restores them to JCode's SecretStorage without asking for another password. Anyone with the export file can recover its credentials, so store and share it accordingly. The format is:
+Use **Export** and **Import** in the Remote view's menu to move connection profiles between JCode installations. When connections have saved passwords or private key passphrases, Export asks how to handle them before anything is written. **Encrypt with Passphrase** (the default) encrypts the credentials with AES-256-GCM using a key derived from your passphrase with scrypt, and Import asks for the passphrase to restore them to JCode's SecretStorage without asking for another password. **Exclude Secrets** exports connection details only. **Include Unencrypted** writes the credentials in a form anyone can decode and requires confirming a warning first. Plaintext credentials are never written without that confirmation. The unencrypted format is:
 
 ```json
 {
@@ -21,7 +21,7 @@ Use **Export** and **Import** in the Remote view's menu to move connection profi
 }
 ```
 
-Version 1 exports without credentials and version 2 encrypted exports remain importable. Importing a version 2 export still requires its passphrase. The authentication value can be `password`, `privateKey`, or `agent`. Private key files themselves are not included, so a usable key must exist at the configured path on the destination computer. Trusted SSH host keys are also not exported; the destination installation asks you to verify the server's fingerprint on first connection.
+Version 1 exports without credentials remain importable, and version 2 is the encrypted format, which requires its passphrase to import. Exports without credentials omit the `credential` field. The authentication value can be `password`, `privateKey`, or `agent`. Private key files themselves are not included, so a usable key must exist at the configured path on the destination computer. Trusted SSH host keys are also not exported; the destination installation asks you to verify the server's fingerprint on first connection.
 
 Password and private key passphrase values are stored in VS Code SecretStorage. Connection details are stored in extension global state. The server's SHA256 host key fingerprint must be accepted on first connection and is checked on later connections if remembered. Verify the fingerprint with the server administrator before trusting it.
 

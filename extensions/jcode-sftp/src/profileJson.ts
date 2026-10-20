@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { createDecipheriv, randomUUID, scrypt } from 'node:crypto';
+import { createCipheriv, createDecipheriv, randomBytes, randomUUID, scrypt } from 'node:crypto';
 import { l10n } from 'vscode';
 import { RemoteProfile } from './connection';
 
@@ -88,15 +88,46 @@ function parseConnections(data: Record<string, unknown>, version: 1 | 2 | 3): Im
 	});
 }
 
+/**
+ * Writes the unencrypted export. Credentials are only base64 encoded, so pass an empty map to leave
+ * them out and use {@link exportEncryptedProfiles} to keep them.
+ */
 export function exportProfiles(profiles: readonly RemoteProfile[], credentials: ReadonlyMap<string, string>): string {
-	const connections: ExportedConnection[] = profiles.map(({ id, name, host, port, username, root, authentication, privateKeyPath }) => {
-		const credential = authentication === 'agent' ? undefined : credentials.get(id);
-		return {
-			name, host, port, username, root, authentication, privateKeyPath,
-			credential: credential === undefined ? undefined : Buffer.from(credential, 'utf8').toString('base64')
-		};
-	});
+	const connections = toExportedConnections(profiles, credentials, credential => Buffer.from(credential, 'utf8').toString('base64'));
 	return JSON.stringify({ version: 3, connections }, null, 2) + '\n';
+}
+
+/** Writes the encrypted (version 2) export with the credentials inside the encrypted payload. */
+export async function exportEncryptedProfiles(profiles: readonly RemoteProfile[], credentials: ReadonlyMap<string, string>, passphrase: string): Promise<string> {
+	if (!passphrase) {
+		throw new Error(l10n.t('Enter a passphrase to encrypt the export.'));
+	}
+	const salt = randomBytes(16);
+	const iv = randomBytes(12);
+	const key = await deriveKey(passphrase, salt);
+	try {
+		const cipher = createCipheriv('aes-256-gcm', key, iv);
+		const payload = JSON.stringify({ connections: toExportedConnections(profiles, credentials, credential => credential) });
+		const data = Buffer.concat([cipher.update(payload, 'utf8'), cipher.final()]);
+		return JSON.stringify({
+			version: 2,
+			encryption: 'aes-256-gcm',
+			kdf: 'scrypt',
+			salt: salt.toString('base64'),
+			iv: iv.toString('base64'),
+			tag: cipher.getAuthTag().toString('base64'),
+			data: data.toString('base64')
+		}, null, 2) + '\n';
+	} finally {
+		key.fill(0);
+	}
+}
+
+function toExportedConnections(profiles: readonly RemoteProfile[], credentials: ReadonlyMap<string, string>, encode: (credential: string) => string): ExportedConnection[] {
+	return profiles.map(({ id, name, host, port, username, root, authentication, privateKeyPath }) => {
+		const credential = authentication === 'agent' ? undefined : credentials.get(id);
+		return { name, host, port, username, root, authentication, privateKeyPath, credential: credential === undefined ? undefined : encode(credential) };
+	});
 }
 
 export async function importProfiles(json: string, passphrase?: string): Promise<ImportedConnection[]> {
