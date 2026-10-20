@@ -6,7 +6,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { commands, EventEmitter, ExtensionContext, l10n, ThemeIcon, TreeDataProvider, TreeItem, TreeItemCollapsibleState, Uri, window, workspace, type LogOutputChannel, type QuickPickItem, type TreeView } from 'vscode';
-import { RemoteProfile, SftpConnections } from './connection';
+import { CredentialError, RemoteProfile, SftpConnections } from './connection';
 import { ConnectionForm, ConnectionFormResult } from './connectionForm';
 import { SftpFileSystemProvider } from './fileSystemProvider';
 import { exportEncryptedProfiles, exportProfiles, importProfiles, isEncryptedExport } from './profileJson';
@@ -16,6 +16,9 @@ const scheme = 'jcode-sftp';
 
 /** How saved passwords and passphrases are written when exporting connections. */
 type SecretHandling = 'encrypt' | 'exclude' | 'plain';
+
+/** How many times to ask for a refused password or passphrase before giving up. */
+const maxCredentialAttempts = 3;
 
 /** Where to open a connection when other folders are already open. */
 type Placement = 'add' | 'newWindow' | 'replace';
@@ -100,7 +103,7 @@ export class ConnectionManager implements TreeDataProvider<RemoteProfile> {
 		this.connections.reconnect(result.profile.id);
 		this.refresh();
 		if (result.connect || (existing && existing.root !== result.profile.root && this.isActive(result.profile.id))) {
-			await this.open(result.profile.id);
+			await this.open(result.profile.id, result.credential);
 		}
 		return result;
 	}
@@ -109,11 +112,11 @@ export class ConnectionManager implements TreeDataProvider<RemoteProfile> {
 		return workspace.workspaceFolders?.some(folder => folder.uri.scheme === scheme && folder.uri.authority === id) ?? false;
 	}
 
-	async open(target?: string | RemoteProfile): Promise<void> {
+	async open(target?: string | RemoteProfile, typedCredential?: string): Promise<void> {
 		const profile = await this.selectProfile(target);
 		if (!profile) { return; }
 		const uri = Uri.from({ scheme, authority: profile.id, path: profile.root });
-		if (await this.ensureConnected(profile, uri)) {
+		if (await this.ensureConnected(profile, uri, typedCredential)) {
 			const folders = workspace.workspaceFolders ?? [];
 			const folder = { uri, name: profile.name || `${profile.username}@${profile.host}` };
 			const plan = planWorkspaceFolders(
@@ -157,20 +160,35 @@ export class ConnectionManager implements TreeDataProvider<RemoteProfile> {
 		return choice?.placement;
 	}
 
-	private async ensureConnected(profile: RemoteProfile, uri: Uri): Promise<boolean> {
-		try {
-			await this.provider.stat(uri);
-		} catch (error) {
-			if (profile.authentication === 'agent' || !/authentication|private key|passphrase|password/i.test(String(error))) {
-				throw error;
+	/**
+	 * Connects, asking for the password or passphrase again when the server refuses the one in use.
+	 * Typed credentials are saved by the connection only after the server accepts them. Returns false
+	 * when the user cancels the prompt.
+	 */
+	private async ensureConnected(profile: RemoteProfile, uri: Uri, typedCredential?: string): Promise<boolean> {
+		let credential = typedCredential;
+		for (let attempt = 0; ; attempt++) {
+			let failure: CredentialError;
+			try {
+				if (credential !== undefined) {
+					await this.connections.connectWithCredential(profile.id, credential);
+				}
+				await this.provider.stat(uri);
+				return true;
+			} catch (error) {
+				if (!(error instanceof CredentialError) || attempt >= maxCredentialAttempts) {
+					throw error;
+				}
+				failure = error;
 			}
-			const credential = await window.showInputBox({ title: profile.authentication === 'password' ? l10n.t('SSH Password') : l10n.t('Private Key Passphrase'), password: true, ignoreFocusOut: true });
+			credential = await window.showInputBox({
+				title: profile.authentication === 'password' ? l10n.t('SSH Password') : l10n.t('Private Key Passphrase'),
+				prompt: failure.rejected ? l10n.t('{0} Enter it again.', failure.message) : failure.message,
+				password: true,
+				ignoreFocusOut: true
+			});
 			if (credential === undefined) { return false; }
-			await this.connections.saveProfile(profile, credential);
-			this.connections.reconnect(profile.id);
-			await this.provider.stat(uri);
 		}
-		return true;
 	}
 
 	async delete(target?: string | RemoteProfile): Promise<void> {

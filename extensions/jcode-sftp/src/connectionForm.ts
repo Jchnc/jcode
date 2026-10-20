@@ -10,6 +10,8 @@ import { RemoteProfile, SftpConnections } from './connection';
 export interface ConnectionFormResult {
 	profile: RemoteProfile;
 	connect: boolean;
+	/** A credential typed for Save and Connect. It is saved by the connection once the server accepts it. */
+	credential?: string;
 }
 
 interface FormMessage {
@@ -85,8 +87,9 @@ export class ConnectionForm {
 				try {
 					const profile = validateProfile(message.profile, existing?.id ?? randomUUID());
 					const credential = profile.authentication !== 'agent' && typeof message.credential === 'string' && message.credential.length ? message.credential : undefined;
-					await this.connections.saveProfile(profile, credential);
-					finish({ profile, connect: message.connect === true });
+					const connect = message.connect === true;
+					await this.connections.saveProfile(profile, connect ? undefined : credential);
+					finish({ profile, connect, credential: connect ? credential : undefined });
 				} catch (error) {
 					void panel.webview.postMessage({ type: 'error', message: String(error) });
 				} finally {
