@@ -17,7 +17,12 @@ export interface StatusActions {
 
 /**
  * Shows the state of the connections used by the open workspace folders in the status bar, shows
- * window progress while connecting, and reports failed connections with actions to recover.
+ * window progress while connecting, and reports failed connections.
+ *
+ * The status bar item is where a failure lives: it follows the connection, so it is accurate the
+ * moment a later attempt succeeds, and its menu offers the ways to recover. A notification would
+ * stay on screen after that, and an extension cannot close one. So only an attempt the user started
+ * is reported with a dialog, which the user answers before anything else can change.
  */
 export class ConnectionStatus implements Disposable {
 	private readonly item: StatusBarItem;
@@ -25,10 +30,10 @@ export class ConnectionStatus implements Disposable {
 	private readonly progress = new Map<string, () => void>();
 	private readonly reporting = new Set<string>();
 	private readonly reported = new WeakSet<Error>();
-	/** Connections whose failure notification was dismissed. Background failures stay quiet until they connect or the user retries. */
-	private readonly muted = new Set<string>();
 	/** How many connection attempts the user started are running per connection. Those ask for credentials themselves. */
 	private readonly attempts = new Map<string, number>();
+	/** The latest connection failure during the attempts the user started, reported once they end. */
+	private readonly attemptFailures = new Map<string, Error>();
 	private timer: ReturnType<typeof setTimeout> | undefined;
 
 	constructor(private readonly connections: SftpConnections, private readonly actions: StatusActions) {
@@ -39,9 +44,11 @@ export class ConnectionStatus implements Disposable {
 			this.item,
 			connections.onDidChangeState(id => this.stateChanged(id)),
 			connections.onDidFailToConnect(({ id, error }) => {
-				// An attempt the user started asks for a missing or refused credential instead of reporting it.
-				if (!(error instanceof CredentialError && this.attempts.has(id))) {
-					void this.reportFailure(id, error);
+				// Only an attempt the user started is reported, and it asks for a missing or refused credential instead.
+				if (this.attempts.has(id) && !(error instanceof CredentialError)) {
+					// Marked right away so that callers catching it do not report it too.
+					this.reported.add(error);
+					this.attemptFailures.set(id, error);
 				}
 			}),
 			workspace.onDidChangeWorkspaceFolders(() => this.refresh())
@@ -50,11 +57,12 @@ export class ConnectionStatus implements Disposable {
 	}
 
 	/**
-	 * Runs a connection attempt the user started. Its failures are reported even if an earlier
-	 * notification was dismissed, and credential problems are left to its own prompts.
+	 * Runs a connection attempt the user started. Its failures are reported, and credential problems
+	 * are left to its own prompts. Failures of work in the background only show in the status bar.
+	 * The report waits until the attempt ends, so a failure that a retry within it overcame, such as
+	 * the immediate second try after a refused connection, does not claim that connecting failed.
 	 */
 	async attempt<T>(id: string, action: () => Promise<T>): Promise<T> {
-		this.muted.delete(id);
 		this.attempts.set(id, (this.attempts.get(id) ?? 0) + 1);
 		try {
 			return await action();
@@ -64,6 +72,11 @@ export class ConnectionStatus implements Disposable {
 				this.attempts.set(id, remaining);
 			} else {
 				this.attempts.delete(id);
+				const failure = this.attemptFailures.get(id);
+				this.attemptFailures.delete(id);
+				if (failure && this.connections.getState(id) !== 'connected') {
+					void this.reportFailure(id, failure);
+				}
 			}
 		}
 	}
@@ -86,35 +99,34 @@ export class ConnectionStatus implements Disposable {
 	}
 
 	/**
-	 * Shows a notification for a failed connection with Retry (or Enter Password) and Edit Connection
-	 * actions. Only one is shown per connection at a time, and after it is dismissed background
-	 * attempts stay quiet, so a server that is down does not keep raising notifications.
+	 * Tells the user that a connection attempt they started failed, with Retry (or Enter Password) and
+	 * Edit Connection actions. It is a dialog rather than a notification, because a notification
+	 * cannot be closed when a later attempt succeeds. Only one is shown per connection at a time.
 	 */
 	async reportFailure(id: string, error: Error): Promise<void> {
 		this.reported.add(error);
 		const profile = this.connections.profiles.find(candidate => candidate.id === id);
-		if (!profile || this.reporting.has(id) || this.muted.has(id)) {
+		if (!profile || this.reporting.has(id)) {
 			return;
 		}
 		this.reporting.add(id);
 		const retry = !(error instanceof CredentialError) ? l10n.t('Retry') : profile.authentication === 'password' ? l10n.t('Enter Password') : l10n.t('Enter Passphrase');
 		const edit = l10n.t('Edit Connection');
-		const choice = await window.showErrorMessage(l10n.t('Could not connect to {0}: {1}', profileLabel(profile), error.message), retry, edit);
-		this.reporting.delete(id);
+		let choice: string | undefined;
+		try {
+			choice = await window.showErrorMessage(l10n.t('Could not connect to {0}.', profileLabel(profile)), { modal: true, detail: error.message }, retry, edit);
+		} finally {
+			this.reporting.delete(id);
+		}
 		if (choice === retry) {
 			await this.actions.reconnect(id);
 		} else if (choice === edit) {
 			await this.actions.edit(id);
-		} else {
-			this.muted.add(id);
 		}
 	}
 
 	private stateChanged(id: string): void {
 		const state = this.connections.getState(id);
-		if (state === 'connected') {
-			this.muted.delete(id);
-		}
 		if (state === 'connecting' || state === 'reconnecting') {
 			this.beginProgress(id, state);
 		} else {
@@ -142,11 +154,13 @@ export class ConnectionStatus implements Disposable {
 		const entries: StatusEntry[] = [];
 		for (const id of this.connectionIds) {
 			const profile = this.connections.getProfile(id);
+			const failure = this.connections.lastFailure(id);
 			entries.push({
 				name: profileLabel(profile),
 				detail: `${profile.username}@${profile.host}:${profile.port}`,
 				state: this.connections.getState(id),
-				failed: this.connections.lastFailure(id) !== undefined,
+				failed: failure !== undefined,
+				failure: failure?.message,
 				retryAt: this.connections.nextRetry(id)
 			});
 		}

@@ -110,10 +110,10 @@ class FakeClient extends EventEmitter {
 	destroy(): void { }
 }
 
-/** Keeps the saved profile and its password in memory. */
-export function createStorage(): ConnectionStorage {
+/** Keeps the saved profile in memory, with a saved password unless `withPassword` is false. */
+export function createStorage({ withPassword = true } = {}): ConnectionStorage {
 	const values = new Map<string, unknown>([['jcodeSftp.profiles', [profile]]]);
-	const secrets = new Map<string, string>([['jcodeSftp.credential.a', 'secret']]);
+	const secrets = new Map<string, string>(withPassword ? [['jcodeSftp.credential.a', 'secret']] : []);
 	return {
 		globalState: {
 			get: <T>(key: string, fallback?: T): T => (values.has(key) ? values.get(key) : fallback) as T,

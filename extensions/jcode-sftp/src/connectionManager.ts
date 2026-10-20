@@ -5,12 +5,13 @@
 
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { commands, EventEmitter, ExtensionContext, l10n, ThemeIcon, TreeDataProvider, TreeItem, TreeItemCollapsibleState, Uri, window, workspace, type LogOutputChannel, type QuickPickItem, type TreeView } from 'vscode';
+import { commands, EventEmitter, ExtensionContext, l10n, QuickPickItemKind, ThemeIcon, TreeDataProvider, TreeItem, TreeItemCollapsibleState, Uri, window, workspace, type LogOutputChannel, type QuickPickItem, type TreeView } from 'vscode';
 import { CredentialError, profileLabel, RemoteProfile, SftpConnections } from './connection';
 import { ConnectionForm, ConnectionFormResult } from './connectionForm';
 import { ConnectionStatus } from './connectionStatus';
 import { SftpFileSystemProvider } from './fileSystemProvider';
 import { exportEncryptedProfiles, exportProfiles, importProfiles, isEncryptedExport } from './profileJson';
+import { planStatusMenu, type StatusMenuChoice, type StatusMenuFailure } from './statusPresentation';
 import { planWorkspaceFolders, type WorkspacePlan } from './workspacePlan';
 
 const scheme = 'jcode-sftp';
@@ -335,19 +336,37 @@ export class ConnectionManager implements TreeDataProvider<RemoteProfile> {
 		if (id) { this.connections.disconnect(id); }
 	}
 
-	/** Offers the actions for the connection shown in the status bar. */
+	/** The workspace connections whose latest attempt failed, with the reason. */
+	private failedConnections(): StatusMenuFailure[] {
+		return this.status.connectionIds.flatMap(id => {
+			const error = this.connections.lastFailure(id);
+			if (!error) { return []; }
+			const profile = this.connections.getProfile(id);
+			const credential = error instanceof CredentialError ? (profile.authentication === 'password' ? 'password' : 'passphrase') : undefined;
+			return [{ id, name: profileLabel(profile), message: error.message, credential }];
+		});
+	}
+
+	/**
+	 * Offers the actions for the connections shown in the status bar. A failed connection is listed
+	 * first with its reason, so the failure is always at hand here and never depends on a notification.
+	 */
 	async showStatusMenu(): Promise<void> {
-		const choice = await window.showQuickPick<QuickPickItem & { action: 'reconnect' | 'disconnect' | 'manage' }>([
-			{ label: `$(sync) ${l10n.t('Reconnect')}`, action: 'reconnect' },
-			{ label: `$(debug-disconnect) ${l10n.t('Disconnect')}`, action: 'disconnect' },
-			{ label: `$(remote) ${l10n.t('Manage Connections')}`, action: 'manage' }
-		], { title: l10n.t('SSH/SFTP Connection'), placeHolder: l10n.t('Select an action') });
-		if (choice?.action === 'manage') {
-			await this.show();
-		} else if (choice) {
-			const id = await this.pickWorkspaceConnection();
-			if (id) {
-				await (choice.action === 'reconnect' ? this.reconnect(id) : this.disconnect(id));
+		const entries = planStatusMenu(this.failedConnections());
+		const choice = await window.showQuickPick<QuickPickItem & { choice?: StatusMenuChoice }>(
+			entries.map(entry => entry.choice ? { label: entry.label, detail: entry.detail, choice: entry.choice } : { label: entry.label, kind: QuickPickItemKind.Separator }),
+			{ title: l10n.t('SSH/SFTP Connection'), placeHolder: l10n.t('Select an action') }
+		);
+		switch (choice?.choice?.action) {
+			case 'retry': return this.reconnect(choice.choice.id);
+			case 'edit': return this.edit(choice.choice.id);
+			case 'manage': return this.show();
+			case 'reconnect':
+			case 'disconnect': {
+				const id = await this.pickWorkspaceConnection();
+				if (id) {
+					await (choice.choice.action === 'reconnect' ? this.reconnect(id) : this.disconnect(id));
+				}
 			}
 		}
 	}
