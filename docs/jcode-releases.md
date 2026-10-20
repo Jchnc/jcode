@@ -12,7 +12,7 @@ JCode releases are hosted entirely on GitHub: Releases stores the downloadable a
 | Linux | x64 | `.deb` package and `.tar.gz` | Notifications and a link to the matching archive |
 | Linux | ARM64 | `.deb` package and `.tar.gz` | Notifications and a link to the matching archive |
 
-Linux builds do not update themselves. The `.deb` packages install JCode system-wide, but no APT repository is published, so `apt upgrade` does not see new versions: install each new `.deb` manually. The JCode packages never register the Microsoft VS Code repository or signing key. `.rpm` and AppImage packages are not built. The `.deb` dependencies are computed from the binaries compiled on the Ubuntu 24.04 runners, so it requires an equally recent glibc. Windows ARM64 and system installers are not built by this workflow.
+Linux builds do not update themselves. The `.deb` packages install JCode system-wide, but no APT repository is published, so `apt upgrade` does not see new versions: re-run the install script (`curl -fsSL https://jchnc.github.io/jcode/install.sh | bash`), which installs the newest `.deb`, or install each new `.deb` manually. The update feed workflow publishes the script from `build/jcode/install-linux.sh` to GitHub Pages. The JCode packages never register the Microsoft VS Code repository or signing key. `.rpm` and AppImage packages are not built. The `.deb` dependencies are computed from the binaries compiled on the Ubuntu 24.04 runners, so it requires an equally recent glibc. Windows ARM64 and system installers are not built by this workflow.
 
 ## One-time GitHub setup
 
@@ -67,7 +67,7 @@ Windows installers remain unsigned. Authenticode signing can be added with a Win
 
 **macOS:** extract the correct ZIP, move `JCode.app` to `/Applications`, open it, and run **Shell Command: Install 'jcode' command in PATH** from the Command Palette. Open a new terminal.
 
-**Linux (Debian/Ubuntu):** install the `.deb` with `sudo apt install ./JCode-linux-<arch>-<version>.deb`. It installs JCode into `/usr/share/jcode`, links `/usr/bin/jcode`, and adds the desktop entry, icon, and bash/zsh completions. Remove it with `sudo apt remove jcode`.
+**Linux (Debian/Ubuntu):** run `curl -fsSL https://jchnc.github.io/jcode/install.sh | bash`. The script picks the package for the machine (amd64 or arm64) from the latest published release, checks its SHA-256 digest, and installs it with apt, which also installs its dependencies; add `-s -- --version <x.y.z>` after `bash` to install a specific release. Run it again to update. Alternatively, download the `.deb` and install it with `sudo apt install ./JCode-linux-<arch>-<version>.deb`. It installs JCode into `/usr/share/jcode`, links `/usr/bin/jcode`, and adds the desktop entry, icon, and bash/zsh completions. Remove it with `sudo apt remove jcode`.
 
 **Linux (other distributions):** extract the correct archive into a dedicated directory and add its `bin` directory to PATH, or create a symlink from `~/.local/bin/jcode` to the extracted `bin/jcode`. Ensure `~/.local/bin` is on PATH. The executable and bundled shared libraries require a compatible Linux desktop environment. Future archive updates require closing JCode and replacing the extracted application.
 

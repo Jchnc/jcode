@@ -33,6 +33,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           JCODE_REPOSITORY: ${{ github.repository }}
         run: node build/jcode/update-feed.ts "$JCODE_REPOSITORY" .build/jcode-pages
+      - name: Publish the Linux install script
+        run: install -m 644 build/jcode/install-linux.sh .build/jcode-pages/install.sh
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

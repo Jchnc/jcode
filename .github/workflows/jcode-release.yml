@@ -257,4 +257,4 @@ jobs:
           JCODE_COMMIT: ${{ github.sha }}
         run: |
           version=$(node -p 'require("./package.json").version')
-          gh release create "jcode-v$version" .build/jcode-release/*.exe .build/jcode-release/*.zip .build/jcode-release/*.tar.gz .build/jcode-release/*.deb .build/jcode-release/jcode-update.json --draft --target "$JCODE_COMMIT" --title "JCode $version" --notes 'JCode for Windows x64, macOS Intel/Apple Silicon, and Linux x64/ARM64 (.tar.gz and .deb). Keep jcode-update.json attached for the GitHub Pages update feed. Test the builds before publishing.'
+          gh release create "jcode-v$version" .build/jcode-release/*.exe .build/jcode-release/*.zip .build/jcode-release/*.tar.gz .build/jcode-release/*.deb .build/jcode-release/jcode-update.json --draft --target "$JCODE_COMMIT" --title "JCode $version" --notes 'JCode for Windows x64, macOS Intel/Apple Silicon, and Linux x64/ARM64 (.tar.gz and .deb; on Debian and Ubuntu install or update with: curl -fsSL https://jchnc.github.io/jcode/install.sh | bash). Keep jcode-update.json attached for the GitHub Pages update feed. Test the builds before publishing.'

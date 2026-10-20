@@ -4,6 +4,18 @@ JCode is a customized fork of [Code - OSS](https://github.com/microsoft/vscode),
 
 **An independent editor, built on Code - OSS.** JCode is maintained in this repository and is not affiliated with or endorsed by Microsoft.
 
+## Install
+
+Download JCode for Windows, macOS and Linux from [GitHub Releases](https://github.com/Jchnc/jcode/releases).
+
+On Debian and Ubuntu, install or update JCode with one command:
+
+```sh
+curl -fsSL https://jchnc.github.io/jcode/install.sh | bash
+```
+
+It installs the right package for your machine and adds the `jcode` command: run `jcode .` to open the current folder, or `jcode <file>` to open a file. Run the command again to update, or uninstall with `sudo apt remove jcode`.
+
 ## Custom Features
 
 | Feature | What it does |
