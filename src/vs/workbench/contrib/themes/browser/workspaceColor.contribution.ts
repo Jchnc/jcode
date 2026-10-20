@@ -15,19 +15,22 @@ import { ThemeIcon } from '../../../../base/common/themables.js';
 import { localize, localize2 } from '../../../../nls.js';
 import { Categories } from '../../../../platform/action/common/actionCommonCategories.js';
 import { Action2, MenuId, registerAction2 } from '../../../../platform/actions/common/actions.js';
+import { ConfigurationScope, Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
 import { IContextViewService } from '../../../../platform/contextview/browser/contextView.js';
 import { IHoverService } from '../../../../platform/hover/browser/hover.js';
 import { IInstantiationService, ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { ILabelService } from '../../../../platform/label/common/label.js';
+import { Registry } from '../../../../platform/registry/common/platform.js';
 import { defaultButtonStyles, defaultInputBoxStyles } from '../../../../platform/theme/browser/defaultStyles.js';
 import { isDark, isHighContrast } from '../../../../platform/theme/common/theme.js';
 import { IThemeService } from '../../../../platform/theme/common/themeService.js';
 import { IWorkspaceContextService, WorkbenchState } from '../../../../platform/workspace/common/workspace.js';
+import { workbenchConfigurationNodeBase } from '../../../common/configuration.js';
 import { WorkbenchStateContext } from '../../../common/contextkeys.js';
 import { getRadioNavigationTarget, IWorkspaceColorSwatch, renderWorkspaceColorSwatch } from '../../../browser/workspaceColorSwatch.js';
 import { getWorkspaceColorPreset, getWorkspaceColorSwatch, WORKSPACE_COLOR_PALETTE } from '../../../common/workspaceColorPalette.js';
 import { IWorkbenchLayoutService } from '../../../services/layout/browser/layoutService.js';
-import { IWorkspaceAppearance, IWorkspaceAppearancePreview, IWorkspaceAppearanceService, parseWorkspaceColorInput, WORKSPACE_COLOR_COMMAND_ID, WORKSPACE_COLOR_INPUT_MAX_LENGTH, WorkspaceAppearancePreviewEnd } from '../../../services/themes/common/workspaceAppearance.js';
+import { IWorkspaceAppearance, IWorkspaceAppearancePreview, IWorkspaceAppearanceService, parseWorkspaceColorInput, WORKSPACE_COLOR_AUTO_REMOTE_SETTING, WORKSPACE_COLOR_COMMAND_ID, WORKSPACE_COLOR_INPUT_MAX_LENGTH, WorkspaceAppearancePreviewEnd } from '../../../services/themes/common/workspaceAppearance.js';
 
 /** Native workspace identity picker with a disposable live preview. */
 class WorkspaceColorPicker {
@@ -80,6 +83,8 @@ class WorkspaceColorPicker {
 		};
 		acquirePreview();
 		let selected = this.appearanceService.appearance;
+		// A color given automatically stays that way until the user picks another or none.
+		let automatic = this.appearanceService.isAutomatic;
 		let style: IWorkspaceAppearance['style'] = selected?.style ?? 'subtle';
 		let focus: (() => void) | undefined;
 		let restoreFocus = true;
@@ -164,9 +169,11 @@ class WorkspaceColorPicker {
 				styleContainer.setAttribute('role', 'radiogroup');
 				styleContainer.setAttribute('aria-label', localize('workspaceColor.appearance', "Color appearance"));
 				const note = append(panel, $('.workspace-color-note'));
-				const updateNote = () => note.textContent = isHighContrast(this.themeService.getColorTheme().type)
-					? localize('workspaceColor.highContrast', "High contrast uses the color marker only.")
-					: localize('workspaceColor.description', "Tints the title bar, status bar, and window frame.");
+				const updateNote = () => note.textContent = automatic
+					? localize('workspaceColor.automatic', "Chosen automatically for this remote workspace. Pick a color to replace it, or use the theme color to turn it off.")
+					: isHighContrast(this.themeService.getColorTheme().type)
+						? localize('workspaceColor.highContrast', "High contrast uses the color marker only.")
+						: localize('workspaceColor.description', "Tints the title bar, status bar, and window frame.");
 				updateNote();
 				disposables.add(this.themeService.onDidColorThemeChange(updateNote));
 				const actions = append(panel, $('.workspace-color-actions'));
@@ -186,7 +193,8 @@ class WorkspaceColorPicker {
 				apply.label = localize('workspaceColor.apply', "Apply");
 				const sync = (publish = true) => {
 					const preset = getWorkspaceColorPreset(selected?.color);
-					colorName.textContent = selected ? preset?.label ?? localize('workspaceColor.customLabel', "Custom") : localize('workspaceColor.themeLabel', "Theme Default");
+					const name = selected ? preset?.label ?? localize('workspaceColor.customLabel', "Custom") : localize('workspaceColor.themeLabel', "Theme Default");
+					colorName.textContent = automatic ? localize('workspaceColor.automaticLabel', "{0} (Automatic)", name) : name;
 					for (const [index, button] of swatches.entries()) {
 						const checked = preset === WORKSPACE_COLOR_PALETTE[index];
 						button.setAttribute('aria-checked', String(checked));
@@ -198,14 +206,17 @@ class WorkspaceColorPicker {
 						button.tabIndex = checked ? 0 : -1;
 					}
 					reset.enabled = !!selected;
+					updateNote();
 					updatePreviews();
-					if (publish) {
+					// What is automatic is already what is shown: previewing it would turn it into a choice.
+					if (publish && !automatic) {
 						acquirePreview().update(selected);
 					}
 				};
 				// Another preview took over: show what is current instead of an outdated selection.
 				resyncSuperseded = () => {
 					selected = this.appearanceService.appearance;
+					automatic = this.appearanceService.isAutomatic;
 					style = selected?.style ?? style;
 					showValue(selected?.color ?? '');
 					apply.enabled = true;
@@ -214,6 +225,7 @@ class WorkspaceColorPicker {
 					sync(false);
 				};
 				const selectColor = (color: string) => {
+					automatic = false;
 					selected = { color, style };
 					showValue(color);
 					apply.enabled = true;
@@ -263,6 +275,7 @@ class WorkspaceColorPicker {
 					disposables.add(addDisposableListener(button, EventType.CLICK, () => {
 						style = value;
 						if (selected) {
+							automatic = false;
 							selected = { ...selected, style };
 						}
 						sync();
@@ -279,11 +292,13 @@ class WorkspaceColorPicker {
 					input.inputElement.setAttribute('aria-invalid', String(!color));
 					error.textContent = color ? '' : localize('workspaceColor.invalid', "Enter a hex color, such as #3b82f6.");
 					if (color) {
+						automatic = false;
 						selected = { color, style };
 						sync();
 					}
 				}));
 				disposables.add(reset.onDidClick(() => {
+					automatic = false;
 					selected = undefined;
 					showValue('');
 					apply.enabled = true;
@@ -293,9 +308,12 @@ class WorkspaceColorPicker {
 				}));
 				const commit = () => {
 					if (apply.enabled) {
-						const current = acquirePreview();
-						current.update(selected);
-						current.apply();
+						// An automatic color that was left alone has nothing to save.
+						if (!automatic) {
+							const current = acquirePreview();
+							current.update(selected);
+							current.apply();
+						}
 						this.contextViewService.hideContextView();
 					}
 				};
@@ -352,5 +370,18 @@ registerAction2(class extends Action2 {
 
 	run(accessor: ServicesAccessor, anchor?: HTMLElement): void {
 		accessor.get(IInstantiationService).createInstance(WorkspaceColorPicker).show(isHTMLElement(anchor) ? anchor : undefined);
+	}
+});
+
+Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).registerConfiguration({
+	...workbenchConfigurationNodeBase,
+	properties: {
+		[WORKSPACE_COLOR_AUTO_REMOTE_SETTING]: {
+			type: 'boolean',
+			default: true,
+			// The colors follow the saved connections of this machine, so the choice stays with it as well.
+			scope: ConfigurationScope.MACHINE,
+			description: localize('workspaceColor.autoRemote', "Give each workspace on an SFTP connection a color of its own, so that remote windows are easy to recognize. A color you choose for a workspace always takes priority.")
+		}
 	}
 });

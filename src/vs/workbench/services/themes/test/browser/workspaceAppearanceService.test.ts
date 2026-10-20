@@ -5,14 +5,18 @@
 
 import assert from 'assert';
 import { Emitter } from '../../../../../base/common/event.js';
+import { URI } from '../../../../../base/common/uri.js';
 import { mock } from '../../../../../base/test/common/mock.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
+import { ConfigurationTarget } from '../../../../../platform/configuration/common/configuration.js';
+import { TestConfigurationService } from '../../../../../platform/configuration/test/common/testConfigurationService.js';
 import { StorageScope } from '../../../../../platform/storage/common/storage.js';
-import { IWorkspace, IWorkspaceContextService, IWorkspaceFoldersChangeEvent, WorkbenchState } from '../../../../../platform/workspace/common/workspace.js';
+import { IWorkspace, IWorkspaceContextService, IWorkspaceFoldersChangeEvent, toWorkspaceFolder, WorkbenchState } from '../../../../../platform/workspace/common/workspace.js';
 import { Workspace } from '../../../../../platform/workspace/test/common/testWorkspace.js';
+import { getAutomaticWorkspaceColor } from '../../../../common/workspaceColorPalette.js';
 import { TestStorageService } from '../../../../test/common/workbenchTestServices.js';
 import { WorkspaceAppearanceService } from '../../browser/workspaceAppearanceService.js';
-import { IWorkspaceAppearance, WorkspaceAppearancePreviewEnd } from '../../common/workspaceAppearance.js';
+import { IWorkspaceAppearance, WORKSPACE_COLOR_AUTO_REMOTE_SETTING, WorkspaceAppearancePreviewEnd } from '../../common/workspaceAppearance.js';
 
 suite('WorkspaceAppearanceService', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
@@ -21,10 +25,14 @@ suite('WorkspaceAppearanceService', () => {
 	const jade: IWorkspaceAppearance = { color: '#16a34a', style: 'prominent' };
 	const orchid: IWorkspaceAppearance = { color: '#9333ea', style: 'subtle' };
 
-	function createService() {
-		const storage = store.add(new TestStorageService());
+	const local = URI.file('/project');
+	const remote = (connection: string) => URI.from({ scheme: 'jcode-sftp', authority: connection, path: '/srv' });
+
+	function createService(options: { folders?: URI[]; storage?: TestStorageService; configuration?: TestConfigurationService } = {}) {
+		const storage = options.storage ?? store.add(new TestStorageService());
+		const configuration = options.configuration ?? new TestConfigurationService();
 		const foldersChanged = store.add(new Emitter<IWorkspaceFoldersChangeEvent>());
-		let workspace = new Workspace('first', []);
+		let workspace = new Workspace('first', (options.folders ?? []).map(toWorkspaceFolder));
 		const contextService = new class extends mock<IWorkspaceContextService>() {
 			override readonly onDidChangeWorkbenchState = store.add(new Emitter<WorkbenchState>()).event;
 			override readonly onDidChangeWorkspaceFolders = foldersChanged.event;
@@ -32,15 +40,26 @@ suite('WorkspaceAppearanceService', () => {
 			override getWorkbenchState() { return WorkbenchState.FOLDER; }
 			override getWorkspace(): IWorkspace { return workspace; }
 		}();
-		const service = store.add(new WorkspaceAppearanceService(storage, contextService));
+		const service = store.add(new WorkspaceAppearanceService(storage, contextService, configuration));
 		let changes = 0;
 		store.add(service.onDidChangeAppearance(() => changes++));
 		return {
 			service,
+			storage,
+			configuration,
 			saved: () => storage.getObject('workbench.workspaceAppearance', StorageScope.WORKSPACE),
 			changes: () => changes,
 			switchWorkspace: () => { workspace = new Workspace('second', []); foldersChanged.fire({ added: [], removed: [], changed: [] }); },
+			setFolders: (folders: URI[]) => { workspace = new Workspace('first', folders.map(toWorkspaceFolder)); foldersChanged.fire({ added: [], removed: [], changed: [] }); },
+			setAutoRemote: (enabled: boolean) => {
+				void configuration.setUserConfiguration(WORKSPACE_COLOR_AUTO_REMOTE_SETTING, enabled);
+				configuration.onDidChangeConfigurationEmitter.fire({ source: ConfigurationTarget.USER, affectedKeys: new Set([WORKSPACE_COLOR_AUTO_REMOTE_SETTING]), change: { keys: [WORKSPACE_COLOR_AUTO_REMOTE_SETTING], overrides: [] }, affectsConfiguration: key => key === WORKSPACE_COLOR_AUTO_REMOTE_SETTING });
+			},
 		};
+	}
+
+	function shown(service: WorkspaceAppearanceService) {
+		return { appearance: service.appearance, automatic: service.isAutomatic, chosen: service.hasChoice };
 	}
 
 	test('a new preview supersedes the previous one without being cancelled or applied for it', () => {
@@ -146,6 +165,113 @@ suite('WorkspaceAppearanceService', () => {
 			applied: false,
 			appearance: undefined,
 			saved: undefined,
+		});
+	});
+
+	suite('automatic color of a remote workspace', () => {
+
+		const automatic: IWorkspaceAppearance = { color: getAutomaticWorkspaceColor([remote('connection-1')])!, style: 'subtle' };
+
+		test('gives a workspace entirely on SFTP a color until the user chooses one, and never overwrites a choice', () => {
+			const { service, storage, configuration, saved } = createService({ folders: [remote('connection-1')] });
+			const initial = shown(service);
+
+			const choose = (appearance: IWorkspaceAppearance | undefined) => {
+				const preview = service.beginPreview();
+				preview.update(appearance);
+				preview.apply();
+				return { ...shown(service), saved: saved() };
+			};
+			const chosenColor = choose(jade);
+			const chosenSameAsAutomatic = choose(automatic);
+			const chosenNone = choose(undefined);
+			// A window opened later reads the same choices back.
+			const reopened = shown(createService({ folders: [remote('connection-1')], storage, configuration }).service);
+			const preview = service.beginPreview();
+			preview.useDefault();
+			preview.apply();
+			const defaulted = { ...shown(service), saved: saved() };
+
+			assert.deepStrictEqual({ initial, chosenColor, chosenSameAsAutomatic, chosenNone, reopened, defaulted }, {
+				initial: { appearance: automatic, automatic: true, chosen: false },
+				chosenColor: { appearance: jade, automatic: false, chosen: true, saved: jade },
+				chosenSameAsAutomatic: { appearance: automatic, automatic: false, chosen: true, saved: automatic },
+				chosenNone: { appearance: undefined, automatic: false, chosen: true, saved: { none: true } },
+				reopened: { appearance: undefined, automatic: false, chosen: true },
+				defaulted: { appearance: automatic, automatic: true, chosen: false, saved: undefined },
+			});
+		});
+
+		test('leaves a workspace that is not entirely on SFTP uncolored, and chooses nothing for it by choosing no color', () => {
+			const local1 = createService({ folders: [local] });
+			const mixed = createService({ folders: [remote('connection-1'), local] });
+			const none = (created: ReturnType<typeof createService>) => {
+				const preview = created.service.beginPreview();
+				preview.update(undefined);
+				preview.apply();
+				return { ...shown(created.service), saved: created.saved() };
+			};
+
+			assert.deepStrictEqual({ local: shown(local1.service), mixed: shown(mixed.service), localNone: none(local1), mixedNone: none(mixed) }, {
+				local: { appearance: undefined, automatic: false, chosen: false },
+				mixed: { appearance: undefined, automatic: false, chosen: false },
+				localNone: { appearance: undefined, automatic: false, chosen: false, saved: undefined },
+				mixedNone: { appearance: undefined, automatic: false, chosen: false, saved: undefined },
+			});
+		});
+
+		test('previews over the automatic color and goes back to it when the preview is dropped', () => {
+			const { service, saved } = createService({ folders: [remote('connection-1')] });
+			const preview = service.beginPreview();
+			const untouched = shown(service);
+			preview.update(orchid);
+			const previewing = shown(service);
+			preview.useDefault();
+			const defaulting = shown(service);
+			preview.update(undefined);
+			const choosingNone = shown(service);
+			preview.dispose();
+
+			assert.deepStrictEqual({ untouched, previewing, defaulting, choosingNone, afterwards: shown(service), saved: saved() }, {
+				untouched: { appearance: automatic, automatic: true, chosen: false },
+				previewing: { appearance: orchid, automatic: false, chosen: true },
+				defaulting: { appearance: automatic, automatic: true, chosen: false },
+				choosingNone: { appearance: undefined, automatic: false, chosen: true },
+				afterwards: { appearance: automatic, automatic: true, chosen: false },
+				saved: undefined,
+			});
+		});
+
+		test('follows the setting and the folders of the workspace', () => {
+			const { service, changes, setAutoRemote, setFolders } = createService({ folders: [remote('connection-1')] });
+			const preview = service.beginPreview();
+			preview.update(jade);
+			preview.apply();
+			const explicitWhileOn = shown(service);
+			const reset = service.beginPreview();
+			reset.useDefault();
+			reset.apply();
+
+			const changesBeforeOff = changes();
+			setAutoRemote(false);
+			const off = { ...shown(service), changes: changes() - changesBeforeOff };
+			const changesBeforeOn = changes();
+			setAutoRemote(true);
+			const on = { ...shown(service), changes: changes() - changesBeforeOn };
+			const changesBeforeFolders = changes();
+			setFolders([remote('connection-1'), local]);
+			const withLocalFolder = { ...shown(service), changes: changes() - changesBeforeFolders };
+			const changesBeforeUnrelated = changes();
+			setFolders([local, remote('connection-2')]);
+			const stillLocal = { ...shown(service), changes: changes() - changesBeforeUnrelated };
+
+			assert.deepStrictEqual({ explicitWhileOn, off, on, withLocalFolder, stillLocal }, {
+				explicitWhileOn: { appearance: jade, automatic: false, chosen: true },
+				off: { appearance: undefined, automatic: false, chosen: false, changes: 1 },
+				on: { appearance: automatic, automatic: true, chosen: false, changes: 1 },
+				withLocalFolder: { appearance: undefined, automatic: false, chosen: false, changes: 1 },
+				stillLocal: { appearance: undefined, automatic: false, chosen: false, changes: 0 },
+			});
 		});
 	});
 });

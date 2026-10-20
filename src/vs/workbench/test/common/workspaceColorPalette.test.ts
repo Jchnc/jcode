@@ -5,8 +5,9 @@
 
 import assert from 'assert';
 import { Color } from '../../../base/common/color.js';
+import { URI } from '../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../base/test/common/utils.js';
-import { ensureContrastOnSurfaces, getWorkspaceColorPreset, getWorkspaceColorRamp, getWorkspaceColorSwatch, WORKSPACE_COLOR_PALETTE } from '../../common/workspaceColorPalette.js';
+import { ensureContrastOnSurfaces, getAutomaticWorkspaceColor, getWorkspaceColorPreset, getWorkspaceColorRamp, getWorkspaceColorSwatch, WORKSPACE_COLOR_PALETTE } from '../../common/workspaceColorPalette.js';
 
 suite('Workspace color palette', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -94,6 +95,40 @@ suite('Workspace color palette', () => {
 			untintedMarkerOnPlain: true,
 			sameSurface: true,
 		});
+	});
+
+	test('gives a workspace entirely on the SFTP file system a stable palette color of its connection', () => {
+		const remote = (authority: string) => URI.from({ scheme: 'jcode-sftp', authority, path: '/srv' });
+		const colorOf = (...authorities: string[]) => getAutomaticWorkspaceColor(authorities.map(remote));
+
+		assert.deepStrictEqual({
+			// Pinned, so that a connection keeps its color from one release to the next.
+			pinned: ['connection-1', 'connection-2', '0b5f6c53-4f36-4f4c-9d0e-5b1f7d3a8c21', '7a1e2d9c-8b34-4c55-a1f0-3e2d4c5b6a79', 'production'].map(authority => colorOf(authority)),
+			sameForAnyCase: colorOf('CONNECTION-1') === colorOf('connection-1'),
+			// Of several connections, the first by name decides, wherever its folder sits.
+			severalConnections: [colorOf('connection-1', 'connection-2'), colorOf('connection-2', 'connection-1'), colorOf('connection-1', 'connection-1')].every(color => color === colorOf('connection-1')),
+			notRemote: {
+				noFolders: getAutomaticWorkspaceColor([]),
+				local: getAutomaticWorkspaceColor([URI.file('/project')]),
+				otherRemote: getAutomaticWorkspaceColor([URI.from({ scheme: 'vscode-remote', authority: 'ssh-remote+host', path: '/srv' })]),
+				mixed: getAutomaticWorkspaceColor([remote('connection-1'), URI.file('/project')]),
+				unnamed: colorOf(''),
+			},
+		}, {
+			pinned: ['#e11d48', '#9333ea', '#16a34a', '#65a30d', '#0d9488'],
+			sameForAnyCase: true,
+			severalConnections: true,
+			notRemote: { noFolders: undefined, local: undefined, otherRemote: undefined, mixed: undefined, unnamed: undefined },
+		});
+	});
+
+	test('spreads connections over every palette color but the neutral one', () => {
+		const used = new Set<string | undefined>();
+		for (let index = 0; index < 500; index++) {
+			used.add(getAutomaticWorkspaceColor([URI.from({ scheme: 'jcode-sftp', authority: `connection-${index}`, path: '/' })]));
+		}
+
+		assert.deepStrictEqual([...used].sort(), WORKSPACE_COLOR_PALETTE.filter(preset => preset.id !== 'graphite').map(preset => preset.value).sort());
 	});
 
 	test('resolves contrast against all surfaces at once instead of one pass after another', () => {

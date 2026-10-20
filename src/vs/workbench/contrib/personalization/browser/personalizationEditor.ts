@@ -25,7 +25,7 @@ import { EditorPane } from '../../../browser/parts/editor/editorPane.js';
 import { WORKSPACE_COLOR_PALETTE, getWorkspaceColorPreset } from '../../../common/workspaceColorPalette.js';
 import { IEditorGroup } from '../../../services/editor/common/editorGroupsService.js';
 import { IWorkbenchThemeService } from '../../../services/themes/common/workbenchThemeService.js';
-import { IWorkspaceAppearance, IWorkspaceAppearancePreview, IWorkspaceAppearanceService, parseWorkspaceColorInput, WORKSPACE_COLOR_INPUT_MAX_LENGTH, WorkspaceAppearancePreviewEnd } from '../../../services/themes/common/workspaceAppearance.js';
+import { IWorkspaceAppearance, IWorkspaceAppearancePreview, IWorkspaceAppearanceService, parseWorkspaceColorInput, WORKSPACE_COLOR_AUTO_REMOTE_SETTING, WORKSPACE_COLOR_INPUT_MAX_LENGTH, WorkspaceAppearancePreviewEnd } from '../../../services/themes/common/workspaceAppearance.js';
 import { getPersonalizationValue, PersonalizationValue } from '../common/personalizationSettings.js';
 
 interface SettingChoice {
@@ -58,8 +58,8 @@ interface ClearedSection {
 	readonly target: ConfigurationTarget;
 	/** The value each reset setting held at that scope. */
 	readonly settings: ReadonlyMap<string, PersonalizationValue | undefined>;
-	/** The workspace color that was saved, if it was reset. */
-	readonly appearance: IWorkspaceAppearance | undefined;
+	/** Whether the workspace color was reset too, and what it was: no color is the choice of none. */
+	readonly color: { readonly appearance: IWorkspaceAppearance | undefined } | undefined;
 }
 
 interface SettingControl {
@@ -139,6 +139,7 @@ export class PersonalizationEditor extends EditorPane {
 		this.themeButton(themes, localize('personalization.fileIcons', "File icons"), 'workbench.action.selectIconTheme', () => this.workbenchThemeService.getFileIconTheme().label);
 		const workspace = this.section(nav, 'workspace', Codicon.symbolColor, localize('personalization.workspaceColor', "Workspace color"), localize('personalization.workspaceDescription', "Give this workspace a recognizable color. Saved locally, without changing its settings files."));
 		this.createWorkspaceColors(workspace);
+		this.setting(workspace, WORKSPACE_COLOR_AUTO_REMOTE_SETTING, localize('personalization.autoRemoteColor', "Color remote workspaces"), localize('personalization.autoRemoteColorDescription', "Give each workspace on an SFTP connection a color of its own, so that remote windows are easy to recognize. A color you choose always takes priority."));
 		const tabs = this.section(nav, 'tabs', Codicon.files, localize('personalization.tabs', "Editor tabs"), localize('personalization.tabsDescription', "Choose where open files appear and how you move through them."));
 		this.setting(tabs, 'workbench.editor.tabPosition', localize('personalization.tabPosition', "Tab position"), localize('personalization.tabPositionDescription', "Vertical tabs use file names only and leave more room above the editor."), [
 			{ value: 'top', label: localize('personalization.top', "Top") }, { value: 'left', label: localize('personalization.left', "Left") }, { value: 'right', label: localize('personalization.right', "Right") }
@@ -229,15 +230,18 @@ export class PersonalizationEditor extends EditorPane {
 	private createWorkspaceColors(section: PersonalizationSection): void {
 		const parent = section.body;
 		section.extraReset = {
-			isModified: () => !!this.appearanceService.appearance,
+			// Choosing no color is a choice too, where a color would be automatic otherwise.
+			isModified: () => this.appearanceService.hasChoice,
 			reset: () => {
 				const preview = this.appearanceService.beginPreview();
-				try { preview.update(undefined); preview.apply(); }
+				try { preview.useDefault(); preview.apply(); }
 				finally { preview.dispose(); }
 			}
 		};
 		// Radios: one tab stop that follows the checked color, arrow keys move focus, and Enter or Space (a click) applies the focused one.
-		const palette = append(parent, $('.personalization-palette', { role: 'radiogroup', 'aria-label': localize('personalization.palette', "Workspace colors") }));
+		// The hint below says whether the checked color was chosen automatically, so the group is described by it.
+		const hintId = `personalization-color-hint-${this.group.id}`;
+		const palette = append(parent, $('.personalization-palette', { role: 'radiogroup', 'aria-label': localize('personalization.palette', "Workspace colors"), 'aria-describedby': hintId }));
 		const buttons: { button: HTMLButtonElement; swatch: IWorkspaceColorSwatch; value: string | undefined }[] = [];
 		for (const preset of [undefined, ...WORKSPACE_COLOR_PALETTE]) {
 			const button = this.button(palette, '', () => {
@@ -264,7 +268,7 @@ export class PersonalizationEditor extends EditorPane {
 		}));
 		this.createWorkspaceColorInput(parent);
 		const actions = append(parent, $('.personalization-color-actions'));
-		const hint = append(actions, $('span.personalization-muted'));
+		const hint = append(actions, $('span.personalization-muted', { id: hintId }));
 		this.updates.push(() => {
 			const available = this.workspaceService.getWorkbenchState() !== WorkbenchState.EMPTY;
 			const appearance = this.appearanceService.appearance;
@@ -278,7 +282,9 @@ export class PersonalizationEditor extends EditorPane {
 				item.button.setAttribute('aria-checked', String(index === checked));
 				item.swatch.update(item.value, appearance?.style ?? 'subtle', theme);
 			}
-			hint.textContent = available ? localize('personalization.localColor', "Only this workspace, on this device.") : localize('personalization.openWorkspace', "Open a folder or workspace to choose a color.");
+			hint.textContent = !available ? localize('personalization.openWorkspace', "Open a folder or workspace to choose a color.")
+				: this.appearanceService.isAutomatic ? localize('personalization.automaticColor', "Chosen automatically for this remote workspace. Choose a color to replace it, or None to turn it off.")
+					: localize('personalization.localColor', "Only this workspace, on this device.");
 		});
 		this.createWorkspaceColorIntensity(parent);
 	}
@@ -658,7 +664,7 @@ export class PersonalizationEditor extends EditorPane {
 			workspaceId: this.workspaceService.getWorkspace().id,
 			target,
 			settings: new Map(keys.map(key => [key, this.inspectSetting(key).ownValue] as const)),
-			appearance: extra ? this.appearanceService.appearance : undefined
+			color: extra ? { appearance: this.appearanceService.appearance } : undefined
 		};
 		extra?.reset();
 		if (keys.length && !await this.updateSettings(new Map(keys.map(key => [key, undefined] as const)), target)) { return; }
@@ -687,14 +693,14 @@ export class PersonalizationEditor extends EditorPane {
 		this.undoOffer.clear();
 		if (this.workspaceService.getWorkspace().id !== cleared.workspaceId) { return; }
 		const settings = new Map([...cleared.settings].filter(([key]) => this.inspectSetting(key, cleared.target).ownValue === undefined));
-		const appearance = this.appearanceService.appearance ? undefined : cleared.appearance;
-		if (appearance) {
+		const color = this.appearanceService.hasChoice ? undefined : cleared.color;
+		if (color) {
 			const preview = this.appearanceService.beginPreview();
-			try { preview.update(appearance); preview.apply(); }
+			try { preview.update(color.appearance); preview.apply(); }
 			finally { preview.dispose(); }
 		}
 		if (settings.size && !await this.updateSettings(settings, cleared.target)) { return; }
-		if (settings.size || appearance) {
+		if (settings.size || color) {
 			this.status.textContent = localize('personalization.sectionRestored', "{0} restored.", section.title);
 		}
 	}

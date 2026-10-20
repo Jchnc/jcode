@@ -4,6 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Color, HSLA, RGBA } from '../../base/common/color.js';
+import { hash } from '../../base/common/hash.js';
+import { URI } from '../../base/common/uri.js';
 import { localize } from '../../nls.js';
 
 interface IWorkspaceColorSurface {
@@ -68,6 +70,30 @@ export const WORKSPACE_COLOR_PALETTE: readonly IWorkspaceColorPreset[] = [
 /** Recognize existing workspace selections without rewriting their stored appearance. */
 export function getWorkspaceColorPreset(color: string | undefined): IWorkspaceColorPreset | undefined {
 	return WORKSPACE_COLOR_PALETTE.find(preset => preset.value === color || (color !== undefined && preset.legacyColors.includes(color)));
+}
+
+/** The scheme the JCode SFTP extension registers its file system under, in extensions/jcode-sftp/src/extension.ts. */
+const JCODE_SFTP_SCHEME = 'jcode-sftp';
+
+/**
+ * The palette color a workspace gets on its own, so that the window of a remote workspace is recognized
+ * at a glance, or `undefined` for a workspace that is not entirely on the JCode SFTP file system.
+ *
+ * A folder names the connection it is on by its authority, which is all the workbench knows about the
+ * remote, so the color follows the connection: stable for as long as the saved connection is, and the same
+ * whichever order the folders come in. Of several connections the first by name decides. Graphite, the
+ * neutral color, is never chosen, as it would not set a remote window apart.
+ */
+export function getAutomaticWorkspaceColor(folders: readonly URI[]): string | undefined {
+	if (!folders.length || folders.some(folder => folder.scheme !== JCODE_SFTP_SCHEME)) {
+		return undefined;
+	}
+	const remote = folders.map(folder => folder.authority.toLowerCase()).filter(authority => authority).sort()[0];
+	if (remote === undefined) {
+		return undefined;
+	}
+	const colors = WORKSPACE_COLOR_PALETTE.filter(preset => preset.id !== 'graphite');
+	return colors[(hash(remote) >>> 0) % colors.length].value;
 }
 
 const CONTRAST_STEPS = 100;

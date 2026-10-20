@@ -30,10 +30,12 @@ export class WorkspaceColorIndicator extends Disposable {
 		@IThemeService themeService: IThemeService
 	) {
 		super();
-		const label = localize('workspaceColor.marker', "Change Workspace Color");
-		this.element.setAttribute('aria-label', label);
-		this._register(hoverService.setupManagedHover(hoverDelegate, this.element, label));
+		const getLabel = () => appearanceService.isAutomatic
+			? localize('workspaceColor.markerAutomatic', "Change Workspace Color (Chosen Automatically)")
+			: localize('workspaceColor.marker', "Change Workspace Color");
+		this._register(hoverService.setupManagedHover(hoverDelegate, this.element, getLabel));
 		const update = () => {
+			this.element.setAttribute('aria-label', getLabel());
 			const appearance = appearanceService.appearance;
 			const theme = themeService.getColorTheme();
 			this.element.hidden = !appearance;

@@ -8,6 +8,10 @@ import { IDisposable } from '../../../../base/common/lifecycle.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 
 export const WORKSPACE_COLOR_COMMAND_ID = 'workbench.action.workspaceColor';
+
+/** Whether a workspace on the JCode SFTP file system gets a color of its own until the user chooses one. */
+export const WORKSPACE_COLOR_AUTO_REMOTE_SETTING = 'workbench.workspaceColor.autoRemote';
+
 export const IWorkspaceAppearanceService = createDecorator<IWorkspaceAppearanceService>('workspaceAppearanceService');
 
 /** Local workspace identity, independent of the selected color theme. */
@@ -41,14 +45,28 @@ export interface IWorkspaceAppearancePreview extends IDisposable {
 	 * another preview on its own, which would take the preview back from the new owner.
 	 */
 	readonly onDidEnd: Event<WorkspaceAppearancePreviewEnd>;
+	/**
+	 * Previews the color the user chooses: `undefined` is the choice of no color, which keeps a color
+	 * that would be given automatically away too.
+	 */
 	update(appearance: IWorkspaceAppearance | undefined): void;
+	/** Previews going back to the default, which is the automatic color for a workspace that has one, and no color otherwise. */
+	useDefault(): void;
 	/** Saves the previewed appearance. Returns `false`, saving nothing, if the preview is no longer active. */
 	apply(): boolean;
 }
 
 export interface IWorkspaceAppearanceService {
 	readonly _serviceBrand: undefined;
+	/**
+	 * What the workspace shows: the color the user chose for it, or the automatic one when they have not
+	 * chosen, or nothing. While a preview is active, what that previews instead.
+	 */
 	readonly appearance: IWorkspaceAppearance | undefined;
+	/** Whether {@link appearance} is the color given to the workspace automatically, rather than one the user chose. */
+	readonly isAutomatic: boolean;
+	/** Whether the user has chosen for this workspace, a color or none, instead of leaving it to the default. */
+	readonly hasChoice: boolean;
 	readonly onDidChangeAppearance: Event<void>;
 	/**
 	 * Starts a preview from the saved appearance. Only one preview is active at a

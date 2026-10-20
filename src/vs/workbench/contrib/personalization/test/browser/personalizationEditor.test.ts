@@ -9,6 +9,7 @@ import { mainWindow } from '../../../../../base/browser/window.js';
 import { DeferredPromise, timeout } from '../../../../../base/common/async.js';
 import { Event } from '../../../../../base/common/event.js';
 import { toDisposable } from '../../../../../base/common/lifecycle.js';
+import { URI } from '../../../../../base/common/uri.js';
 import { mock } from '../../../../../base/test/common/mock.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
@@ -24,6 +25,7 @@ import { IEditorGroup } from '../../../../services/editor/common/editorGroupsSer
 import { IWorkbenchColorTheme, IWorkbenchFileIconTheme, IWorkbenchThemeService } from '../../../../services/themes/common/workbenchThemeService.js';
 import { WorkspaceAppearanceService } from '../../../../services/themes/browser/workspaceAppearanceService.js';
 import { StorageScope } from '../../../../../platform/storage/common/storage.js';
+import { testWorkspace } from '../../../../../platform/workspace/test/common/testWorkspace.js';
 import { TestContextService, TestStorageService } from '../../../../test/common/workbenchTestServices.js';
 import { PersonalizationEditor } from '../../browser/personalizationEditor.js';
 
@@ -79,7 +81,7 @@ suite('Personalization editor', () => {
 		}
 	}
 
-	function createEditor(userValues: Record<string, string | number> = {}, oneWriteAtATime = false) {
+	function createEditor(userValues: Record<string, string | number> = {}, oneWriteAtATime = false, folders: URI[] = []) {
 		const registry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration);
 		const properties: IConfigurationNode['properties'] = {};
 		for (const key of [tabPosition, sideBarLocation]) {
@@ -114,8 +116,8 @@ suite('Personalization editor', () => {
 			override getFileIconTheme() { return fileIconTheme; }
 		}();
 		const storage = store.add(new TestStorageService());
-		const contextService = new TestContextService();
-		const appearanceService = store.add(new WorkspaceAppearanceService(storage, contextService));
+		const contextService = new TestContextService(folders.length ? testWorkspace(...folders) : undefined);
+		const appearanceService = store.add(new WorkspaceAppearanceService(storage, contextService, configurationService));
 		const notificationService = new RecordingNotificationService();
 		const editor = store.add(new PersonalizationEditor(
 			new class extends mock<IEditorGroup>() {
@@ -458,6 +460,39 @@ suite('Personalization editor', () => {
 			other: { checked: 0, tabStop: 0, focused: 0, applied: undefined },
 			clicked: { checked: 2, tabStop: 2, focused: 2, applied: '#3b82f6' },
 			custom: { checked: -1, tabStop: 0, focused: -1, applied: '#123456' },
+		});
+	});
+
+	test('shows an automatic remote color as such, which a choice replaces and a reset brings back', () => {
+		const { appearanceService, notificationService, control, parent, savedColor } = createEditor({}, false, [URI.from({ scheme: 'jcode-sftp', authority: 'connection-1', path: '/srv' })]);
+		const palette = parent.querySelector<HTMLElement>('.personalization-palette')!;
+		const radios = [...palette.querySelectorAll<HTMLElement>('button')];
+		const state = () => ({
+			checked: radios.findIndex(radio => radio.getAttribute('aria-checked') === 'true'),
+			// What the palette is described by, so that a screen reader hears it with the checked color.
+			hint: parent.querySelector(`#${palette.getAttribute('aria-describedby')}`)?.textContent,
+			resetInert: control('section:workspace:reset').getAttribute('aria-disabled') === 'true',
+			saved: savedColor(),
+		});
+
+		const automatic = state();
+		control('color:azure').click();
+		const chosen = state();
+		control('color:none').click();
+		const none = state();
+		control('section:workspace:reset').click();
+		const reset = state();
+		notificationService.prompts.at(-1)!.choose();
+		const undone = state();
+
+		assert.deepStrictEqual({ automatic, chosen, none, reset, undone, appearance: appearanceService.appearance }, {
+			// Coral, the color the connection is given.
+			automatic: { checked: 7, hint: 'Chosen automatically for this remote workspace. Choose a color to replace it, or None to turn it off.', resetInert: true, saved: undefined },
+			chosen: { checked: 2, hint: 'Only this workspace, on this device.', resetInert: false, saved: { color: '#3b82f6', style: 'subtle' } },
+			none: { checked: 0, hint: 'Only this workspace, on this device.', resetInert: false, saved: { none: true } },
+			reset: { checked: 7, hint: 'Chosen automatically for this remote workspace. Choose a color to replace it, or None to turn it off.', resetInert: true, saved: undefined },
+			undone: { checked: 0, hint: 'Only this workspace, on this device.', resetInert: false, saved: { none: true } },
+			appearance: undefined,
 		});
 	});
 
