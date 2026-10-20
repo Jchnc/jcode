@@ -10,11 +10,15 @@ import { RemoteProfile, SftpConnections } from './connection';
 import { ConnectionForm, ConnectionFormResult } from './connectionForm';
 import { SftpFileSystemProvider } from './fileSystemProvider';
 import { exportEncryptedProfiles, exportProfiles, importProfiles, isEncryptedExport } from './profileJson';
+import { planWorkspaceFolders, type WorkspacePlan } from './workspacePlan';
 
 const scheme = 'jcode-sftp';
 
 /** How saved passwords and passphrases are written when exporting connections. */
 type SecretHandling = 'encrypt' | 'exclude' | 'plain';
+
+/** Where to open a connection when other folders are already open. */
+type Placement = 'add' | 'newWindow' | 'replace';
 
 export class ConnectionManager implements TreeDataProvider<RemoteProfile> {
 	private readonly changeEmitter = new EventEmitter<RemoteProfile | undefined>();
@@ -111,18 +115,46 @@ export class ConnectionManager implements TreeDataProvider<RemoteProfile> {
 		const uri = Uri.from({ scheme, authority: profile.id, path: profile.root });
 		if (await this.ensureConnected(profile, uri)) {
 			const folders = workspace.workspaceFolders ?? [];
-			const name = profile.name || `${profile.username}@${profile.host}`;
+			const folder = { uri, name: profile.name || `${profile.username}@${profile.host}` };
+			const plan = planWorkspaceFolders(
+				folders.map(existing => ({ uri: existing.uri.toString(), name: existing.name, connection: existing.uri.scheme === scheme ? existing.uri.authority : undefined })),
+				{ uri: uri.toString(), name: folder.name, connection: profile.id }
+			);
+			if (plan.action === 'none') {
+				await commands.executeCommand('workbench.view.explorer');
+				return;
+			}
+			const placement = plan.action === 'ask' ? await this.askPlacement(folder.name) : undefined;
+			if (plan.action === 'ask' && !placement) { return; }
+			if (placement === 'newWindow') {
+				await commands.executeCommand('vscode.openFolder', uri, { forceNewWindow: true });
+				return;
+			}
 			await commands.executeCommand('workbench.view.explorer');
-			if (folders.length !== 1 || folders[0].uri.toString() !== uri.toString() || folders[0].name !== name) {
-				const updated = workspace.updateWorkspaceFolders(0, folders.length, {
-					uri,
-					name
-				});
-				if (!updated) {
-					throw new Error(l10n.t('Could not switch the current window to this SSH/SFTP workspace. Try again after the current workspace finishes opening.'));
-				}
+			if (!this.updateFolders(plan, placement, folders.length, folder)) {
+				throw new Error(l10n.t('Could not switch the current window to this SSH/SFTP workspace. Try again after the current workspace finishes opening.'));
 			}
 		}
+	}
+
+	private updateFolders(plan: WorkspacePlan, placement: Placement | undefined, count: number, folder: { uri: Uri; name: string }): boolean {
+		if (plan.action === 'open') {
+			return workspace.updateWorkspaceFolders(0, 0, folder);
+		}
+		if (plan.action === 'update') {
+			return workspace.updateWorkspaceFolders(plan.index, 1, folder);
+		}
+		return placement === 'replace' ? workspace.updateWorkspaceFolders(0, count, folder) : workspace.updateWorkspaceFolders(count, 0, folder);
+	}
+
+	/** Asks where to open a connection when other folders are already open, so none is closed unexpectedly. */
+	private async askPlacement(name: string): Promise<Placement | undefined> {
+		const choice = await window.showQuickPick<QuickPickItem & { placement: Placement }>([
+			{ label: l10n.t('Add to Workspace'), description: l10n.t('Default'), detail: l10n.t('Keep the open folders and add this connection as another folder.'), placement: 'add' },
+			{ label: l10n.t('Open in New Window'), detail: l10n.t('Leave this window as it is.'), placement: 'newWindow' },
+			{ label: l10n.t('Replace Workspace'), detail: l10n.t('Close the open folders and show only this connection.'), placement: 'replace' }
+		], { title: l10n.t('Open {0}', name), placeHolder: l10n.t('Folders are already open in this window. Where should this connection open?'), ignoreFocusOut: true });
+		return choice?.placement;
 	}
 
 	private async ensureConnected(profile: RemoteProfile, uri: Uri): Promise<boolean> {
