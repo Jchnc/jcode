@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import './media/personalization.css';
-import { $, addDisposableListener, append, Dimension, EventType } from '../../../../base/browser/dom.js';
+import { $, addDisposableListener, append, Dimension, EventType, getActiveElement, isHTMLElement } from '../../../../base/browser/dom.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { DisposableStore } from '../../../../base/common/lifecycle.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
@@ -30,11 +30,21 @@ interface SettingChoice {
 	readonly label: string;
 }
 
+/** Where keyboard focus was before the page refreshed, so a refresh never strands it. */
+interface FocusSnapshot {
+	readonly element: HTMLElement;
+	readonly key: string | undefined;
+}
+
 interface SettingControl {
 	readonly key: string;
 	readonly row: HTMLElement;
 	readonly hint: HTMLElement;
 	readonly reset: HTMLButtonElement;
+	/** Every control in the row, including its reset button. */
+	readonly elements: readonly HTMLElement[];
+	/** The control that takes focus when the focused one can no longer. */
+	readonly primary: () => HTMLElement;
 	readonly refresh: (value: PersonalizationValue | undefined, disabled: boolean) => void;
 	readonly isRelevant?: () => boolean;
 }
@@ -53,6 +63,7 @@ export class PersonalizationEditor extends EditorPane {
 	private readonly pendingSettings = new Set<string>();
 	private readonly sections: { element: HTMLElement; nav: HTMLButtonElement }[] = [];
 	private readonly targetButtons: HTMLButtonElement[] = [];
+	private readonly focusTargets = new Map<string, HTMLElement>();
 	private nextControlId = 0;
 
 	constructor(
@@ -121,8 +132,9 @@ export class PersonalizationEditor extends EditorPane {
 		this.refresh();
 	}
 
-	private button(parent: HTMLElement, label: string, action: () => void): HTMLButtonElement {
+	private button(parent: HTMLElement, label: string, action: () => void, focusKey?: string): HTMLButtonElement {
 		const button = append(parent, $('button', { type: 'button' }, label)) as HTMLButtonElement;
+		if (focusKey) { this.registerFocusTarget(focusKey, button); }
 		this.pageDisposables.add(addDisposableListener(button, EventType.CLICK, action));
 		return button;
 	}
@@ -263,38 +275,48 @@ export class PersonalizationEditor extends EditorPane {
 		const hint = append(text, $('span.personalization-setting-hint'));
 		const field = append(row, $('.personalization-field'));
 		let refresh: SettingControl['refresh'];
+		let elements: HTMLElement[];
+		let primary: SettingControl['primary'];
 		if (choices) {
 			field.setAttribute('role', 'group'); field.setAttribute('aria-labelledby', `${id}-label`);
 			field.classList.add(kind === 'placement' ? 'personalization-placement' : 'personalization-choices');
 			const buttons = choices.map(choice => {
-				const button = this.button(field, choice.label, () => { void this.updateSetting(key, choice.value); });
+				const button = this.button(field, choice.label, () => { void this.updateSetting(key, choice.value); }, `${key}:${choice.value}`);
 				if (kind === 'placement') {
 					const diagram = $('span.tab-placement-diagram', { 'aria-hidden': 'true' });
 					diagram.classList.add(`placement-${choice.value}`); button.prepend(diagram);
 				}
 				return { choice, button };
 			});
+			elements = buttons.map(({ button }) => button);
+			primary = () => buttons.find(({ button }) => button.getAttribute('aria-pressed') === 'true')?.button ?? buttons[0].button;
 			refresh = (value, disabled) => { for (const { choice, button } of buttons) { button.disabled = disabled; button.setAttribute('aria-pressed', String(choice.value === value)); } };
 		} else if (kind === 'range' && range) {
 			const input = append(field, $('input', { type: 'range', min: range[0], max: range[1], step: range[2], 'aria-labelledby': `${id}-label`, 'aria-describedby': `${id}-description` })) as HTMLInputElement;
+			this.registerFocusTarget(key, input);
 			const output = append(field, $('output'));
 			this.pageDisposables.add(addDisposableListener(input, EventType.INPUT, () => { output.textContent = localize('personalization.pixels', "{0} px", input.value); }));
 			this.pageDisposables.add(addDisposableListener(input, EventType.CHANGE, () => { void this.updateSetting(key, Number(input.value)); }));
+			elements = [input];
+			primary = () => input;
 			refresh = (value, disabled) => { input.value = String(value); input.disabled = disabled; output.textContent = localize('personalization.pixels', "{0} px", value); };
 		} else {
-			const toggle = this.button(field, '', () => { void this.updateSetting(key, !(getPersonalizationValue(this.configurationService.inspect<PersonalizationValue>(key), this.target) === true)); });
+			const toggle = this.button(field, '', () => { void this.updateSetting(key, !(getPersonalizationValue(this.configurationService.inspect<PersonalizationValue>(key), this.target) === true)); }, key);
 			toggle.className = 'personalization-toggle'; toggle.setAttribute('role', 'switch'); toggle.setAttribute('aria-labelledby', `${id}-label`); toggle.setAttribute('aria-describedby', `${id}-description`);
+			elements = [toggle];
+			primary = () => toggle;
 			refresh = (value, disabled) => { toggle.disabled = disabled; toggle.setAttribute('aria-checked', String(value === true)); toggle.textContent = value === true ? localize('personalization.on', "On") : localize('personalization.off', "Off"); };
 		}
-		const reset = this.button(row, localize('personalization.reset', "Reset"), () => { void this.updateSetting(key, undefined); });
+		const reset = this.button(row, localize('personalization.reset', "Reset"), () => { void this.updateSetting(key, undefined); }, `${key}:reset`);
 		reset.className = 'personalization-reset'; reset.setAttribute('aria-label', localize('personalization.resetSetting', "Reset {0}", title));
-		const control = { key, row, hint, reset, refresh, isRelevant };
+		const control = { key, row, hint, reset, elements: [...elements, reset], primary, refresh, isRelevant };
 		this.controls.push(control);
 		return control;
 	}
 
 	private refresh(): void {
 		if (!this.root) { return; }
+		const focus = this.captureFocus();
 		const hasWorkspace = this.workspaceService.getWorkbenchState() !== WorkbenchState.EMPTY;
 		if (!hasWorkspace) { this.target = ConfigurationTarget.USER; }
 		this.workspaceTarget.disabled = !hasWorkspace;
@@ -306,8 +328,9 @@ export class PersonalizationEditor extends EditorPane {
 			const scope = registry[control.key]?.scope;
 			const userOnly = this.target === ConfigurationTarget.WORKSPACE && (scope === ConfigurationScope.APPLICATION || scope === ConfigurationScope.MACHINE || scope === ConfigurationScope.APPLICATION_MACHINE);
 			const policy = config?.policyValue !== undefined;
-			const disabled = userOnly || policy || this.pendingSettings.has(control.key) || !registry[control.key];
+			const disabled = userOnly || policy || !registry[control.key];
 			control.refresh(getPersonalizationValue(config, this.target), disabled);
+			this.setBusy(control, this.pendingSettings.has(control.key));
 			const ownValue = this.target === ConfigurationTarget.WORKSPACE ? config?.workspaceValue : config?.userValue;
 			control.reset.disabled = disabled || ownValue === undefined;
 			control.hint.textContent = policy ? localize('personalization.managed', "Managed by your organization.") : userOnly ? localize('personalization.userOnly', "Available in User settings.") : this.target === ConfigurationTarget.USER && config?.workspaceValue !== undefined ? localize('personalization.overridden', "This workspace has its own value.") : '';
@@ -315,6 +338,47 @@ export class PersonalizationEditor extends EditorPane {
 		}
 		for (const update of this.updates) { update(); }
 		this.updateActiveSection();
+		this.restoreFocus(focus);
+	}
+
+	/**
+	 * A saving setting stays focusable: it is marked busy and ignores further input
+	 * instead of being disabled, which would drop keyboard focus to the page body.
+	 */
+	private setBusy(control: SettingControl, busy: boolean): void {
+		if (busy) { control.row.setAttribute('aria-busy', 'true'); }
+		else { control.row.removeAttribute('aria-busy'); }
+		for (const element of control.elements) {
+			if (busy) { element.setAttribute('aria-disabled', 'true'); }
+			else { element.removeAttribute('aria-disabled'); }
+		}
+	}
+
+	private captureFocus(): FocusSnapshot | undefined {
+		const element = getActiveElement();
+		return isHTMLElement(element) && this.root.contains(element)
+			? { element, key: element.dataset.focusKey }
+			: undefined;
+	}
+
+	private registerFocusTarget(key: string, element: HTMLElement): void {
+		element.dataset.focusKey = key;
+		this.focusTargets.set(key, element);
+	}
+
+	/** Put focus back on the control that had it, or its row's main control if that one can no longer take it. */
+	private restoreFocus(snapshot: FocusSnapshot | undefined): void {
+		if (!snapshot) { return; }
+		const active = getActiveElement();
+		const lost = !active || active === active.ownerDocument.body || (active === snapshot.element && !this.isFocusable(snapshot.element));
+		if (!lost) { return; }
+		const sameKey = snapshot.key === undefined ? undefined : this.focusTargets.get(snapshot.key);
+		const rowControl = this.controls.find(control => control.elements.includes(snapshot.element))?.primary();
+		[snapshot.element, sameKey, rowControl].find(element => !!element && this.isFocusable(element))?.focus();
+	}
+
+	private isFocusable(element: HTMLElement): boolean {
+		return element.isConnected && !element.matches(':disabled') && !element.closest('[hidden]');
 	}
 
 	private async updateSetting(key: string, value: PersonalizationValue | undefined): Promise<void> {

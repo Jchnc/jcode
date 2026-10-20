@@ -73,7 +73,7 @@
 	cursor: pointer;
 }
 
-.jcode-personalization button:hover:not(:disabled) {
+.jcode-personalization button:hover:not(:disabled):not([aria-disabled='true']) {
 	background: var(--vscode-toolbar-hoverBackground);
 }
 
@@ -81,6 +81,17 @@
 .jcode-personalization input:disabled {
 	opacity: 0.5;
 	cursor: default;
+}
+
+/* A setting that is saving stays focusable, so it only looks busy. */
+.jcode-personalization [aria-busy='true'] .personalization-field,
+.jcode-personalization [aria-busy='true'] .personalization-reset {
+	opacity: 0.7;
+}
+
+.jcode-personalization [aria-busy='true'] button,
+.jcode-personalization [aria-busy='true'] input {
+	cursor: progress;
 }
 
 .jcode-personalization button:focus-visible,
