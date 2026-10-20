@@ -9,7 +9,7 @@ import { URI } from '../../../../../base/common/uri.js';
 import { workbenchInstantiationService, TestFileEditorInput, registerTestEditor, createEditorPart, registerTestFileEditor, TestServiceAccessor, TestTextFileEditor, workbenchTeardown, registerTestSideBySideEditor } from '../../../../test/browser/workbenchTestServices.js';
 import { EditorPart } from '../../../../browser/parts/editor/editorPart.js';
 import { SyncDescriptor } from '../../../../../platform/instantiation/common/descriptors.js';
-import { IEditorGroupsService, GroupDirection } from '../../../editor/common/editorGroupsService.js';
+import { IEditorGroupsService, GroupDirection, GroupsOrder } from '../../../editor/common/editorGroupsService.js';
 import { EditorNavigationStack, HistoryService } from '../../browser/historyService.js';
 import { IEditorService, SIDE_GROUP } from '../../../editor/common/editorService.js';
 import { EditorService } from '../../../editor/browser/editorService.js';
@@ -747,6 +747,45 @@ suite('HistoryService', function () {
 
 		return workbenchTeardown(instantiationService);
 	});
+
+	for (const flow of [
+		{ name: 'the requested editor group', explicitTarget: true },
+		{ name: 'the active editor group', explicitTarget: false }
+	]) {
+		test(`saved tab groups are reopened into ${flow.name} with a single editor activation`, async () => {
+			const [part, historyService, , , instantiationService] = await createServices();
+			const { group, members } = await createTabGroupWithSavedFlag(part, true);
+			const savedGroupId = group.tabGroups[0].id;
+			await group.closeEditors(members);
+
+			const targetGroup = part.addGroup(group, GroupDirection.RIGHT);
+			await targetGroup.openEditor(disposables.add(new TestFileEditorInput(URI.parse('foo://existing'), TEST_EDITOR_INPUT_ID)), { pinned: true });
+			part.activateGroup(flow.explicitTarget ? group : targetGroup);
+
+			const activeEditorChanges: (string | undefined)[] = [];
+			disposables.add(targetGroup.onDidActiveEditorChange(e => activeEditorChanges.push(e.editor?.resource?.toString())));
+
+			await historyService.reopenSavedTabGroup(savedGroupId, flow.explicitTarget ? targetGroup.id : undefined);
+
+			assert.deepStrictEqual({
+				activeEditorChanges,
+				activeEditor: targetGroup.activeEditor?.resource?.toString(),
+				targetEditors: targetGroup.editors.map(editor => editor.resource?.toString()),
+				sourceEditors: group.editors.map(editor => editor.resource?.toString()),
+				tabGroups: part.getGroups(GroupsOrder.CREATION_TIME).map(candidate => candidate.tabGroups.map(({ id, name, color, saved }) => ({ id, name, color, saved }))),
+				savedGroups: historyService.getSavedTabGroups().length
+			}, {
+				activeEditorChanges: ['foo://tab1'],
+				activeEditor: 'foo://tab1',
+				targetEditors: ['foo://existing', 'foo://tab1', 'foo://tab2', 'foo://tab3'],
+				sourceEditors: ['foo://other'],
+				tabGroups: [[], [{ id: savedGroupId, name: 'Work', color: 'blue', saved: true }]],
+				savedGroups: 0
+			});
+
+			return workbenchTeardown(instantiationService);
+		});
+	}
 
 	test('getHistory', async () => {
 

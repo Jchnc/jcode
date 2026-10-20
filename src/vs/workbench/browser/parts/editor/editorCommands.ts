@@ -1619,8 +1619,13 @@ function registerTabGroupCommands(): void {
 		constructor() {
 			super({ id: OPEN_SAVED_TAB_GROUP_COMMAND_ID, title: localize2('openSavedTabGroup', 'Open Saved Tab Group…'), category: Categories.View, f1: true, precondition: tabGroupsEnabled });
 		}
-		async run(accessor: ServicesAccessor): Promise<void> {
+		async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
 			const historyService = accessor.get(IHistoryService);
+
+			// Resolve the editor group before the picker takes focus away from it
+			const resolvedContext = resolveCommandsContext(args, accessor.get(IEditorService), accessor.get(IEditorGroupsService), accessor.get(IListService));
+			const targetGroup = resolvedContext.groupedEditors[0]?.group ?? accessor.get(IEditorGroupsService).activeGroup;
+
 			const groups = historyService.getSavedTabGroups();
 			const pick = await accessor.get(IQuickInputService).pick(groups.map(group => ({
 				label: group.name,
@@ -1628,7 +1633,7 @@ function registerTabGroupCommands(): void {
 				groupId: group.id
 			})), { placeHolder: groups.length ? localize('openSavedTabGroupPlaceholder', 'Select a saved tab group to open') : localize('noSavedTabGroups', 'There are no closed saved tab groups') });
 			if (pick) {
-				await historyService.reopenSavedTabGroup(pick.groupId);
+				await historyService.reopenSavedTabGroup(pick.groupId, targetGroup.id);
 			}
 		}
 	});

@@ -955,25 +955,25 @@ export class HistoryService extends Disposable implements IHistoryService {
 		}
 	}
 
-	async reopenSavedTabGroup(id: string): Promise<void> {
+	async reopenSavedTabGroup(id: string, groupId?: GroupIdentifier): Promise<void> {
 		const savedGroup = this.savedTabGroups.find(group => group.id === id);
 		if (!savedGroup) {
 			return;
 		}
 
-		const targetGroup = this.editorGroupService.activeGroup;
-		const reopenedEditors: EditorInput[] = [];
-		let targetIndex = targetGroup.count;
-		for (const entry of [...savedGroup.editors].sort((first, second) => first.index - second.index)) {
-			const editorPane = await this.editorService.openEditor({
-				...entry.editor,
-				options: { ...entry.editor.options, pinned: true, index: targetIndex++ }
-			}, targetGroup);
-			if (editorPane?.input) {
-				reopenedEditors.push(editorPane.input);
-			}
-		}
+		const targetGroup = (groupId !== undefined ? this.editorGroupService.getGroup(groupId) : undefined) ?? this.editorGroupService.activeGroup;
 
+		// Open all editors in one batch, pinned and without activating them, so that
+		// the target group does not flicker through every editor of the saved group
+		const entries = [...savedGroup.editors].sort((first, second) => first.index - second.index);
+		const firstIndex = targetGroup.count;
+		await this.editorService.openEditors(entries.map((entry, offset) => ({
+			...entry.editor,
+			options: { ...entry.editor.options, pinned: true, inactive: true, index: firstIndex + offset }
+		})), targetGroup);
+
+		const openedEditors = targetGroup.getEditors(EditorsOrder.SEQUENTIAL);
+		const reopenedEditors = [...new Set(coalesce(entries.map(entry => openedEditors.find(editor => editor.matches(entry.editor)))))];
 		if (reopenedEditors.length > 0 && isEditorGroupView(targetGroup)) {
 			const reopenedGroup = targetGroup.createTabGroup(reopenedEditors, savedGroup.name, savedGroup.color, {
 				id: savedGroup.id,
@@ -986,6 +986,12 @@ export class HistoryService extends Disposable implements IHistoryService {
 			});
 			if (reopenedGroup) {
 				this.deleteSavedTabGroup(id);
+
+				// Reveal the group by activating its first editor once, unless the group
+				// is collapsed and its editors are hidden on purpose
+				if (!reopenedGroup.collapsed) {
+					await this.editorService.openEditor(reopenedEditors[0], { pinned: true }, targetGroup);
+				}
 			}
 		}
 	}

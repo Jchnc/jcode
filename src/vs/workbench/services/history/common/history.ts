@@ -113,8 +113,11 @@ export interface IHistoryService {
 	 */
 	saveClosedTabGroup(tabGroup: IEditorTabGroup, editors: readonly { editor: EditorInput; index: number }[]): void;
 
-	/** Reopens a saved tab group into the active editor group. */
-	reopenSavedTabGroup(id: string): Promise<void>;
+	/**
+	 * Reopens a saved tab group into the given editor group, or into the active
+	 * editor group when no group is provided or the group no longer exists.
+	 */
+	reopenSavedTabGroup(id: string, group?: GroupIdentifier): Promise<void>;
 
 	/** Permanently removes a closed saved tab group. */
 	deleteSavedTabGroup(id: string): void;
