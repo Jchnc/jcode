@@ -1026,8 +1026,11 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 			this.updateTabSizing(true);
 		}
 
-		// Redraw tabs when other options change
+		// Redraw tabs when other options change. Showing or hiding tab groups
+		// moves tabs around because of the headers, so keep the active tab visible.
+		const tabGroupsChanged = oldOptions.tabGroups.enabled !== newOptions.tabGroups.enabled;
 		if (
+			tabGroupsChanged ||
 			oldOptions.labelFormat !== newOptions.labelFormat ||
 			oldOptions.tabActionLocation !== newOptions.tabActionLocation ||
 			oldOptions.tabActionReserveSpace !== newOptions.tabActionReserveSpace ||
@@ -1042,7 +1045,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 			oldOptions.showTabIndex !== newOptions.showTabIndex ||
 			!equals(oldOptions.decorations, newOptions.decorations)
 		) {
-			this.redraw();
+			this.redraw(tabGroupsChanged ? { forceRevealActiveTab: true } : undefined);
 		}
 	}
 

@@ -355,6 +355,37 @@ suite('MultiEditorTabsControl', () => {
 		});
 	});
 
+	test('toggling tab groups updates headers and group styling immediately', () => {
+		const [first, second] = model.getEditors(EditorsOrder.SEQUENTIAL);
+		const group = model.createTabGroup([first, second], 'Work', 'blue');
+		assert.ok(group);
+		model.setTabGroupCollapsed(group.id, true);
+
+		const describeGroupStyling = () => ({
+			strip: describeTabStrip(),
+			groupedTabs: container.querySelectorAll('.tabs-container > .tab.in-tab-group').length
+		});
+		const setTabGroupsEnabled = (enabled: boolean) => {
+			const oldOptions = partOptions;
+			partOptions = { ...partOptions, tabGroups: { enabled } };
+			control.updateOptions(oldOptions, partOptions);
+		};
+
+		const initial = describeGroupStyling();
+
+		setTabGroupsEnabled(false);
+		const disabled = describeGroupStyling();
+
+		setTabGroupsEnabled(true);
+		const enabledAgain = describeGroupStyling();
+
+		assert.deepStrictEqual({ initial, disabled, enabledAgain }, {
+			initial: { strip: ['[Work]', 'file0.txt', 'file1.txt (hidden)'], groupedTabs: 2 },
+			disabled: { strip: ['file0.txt', 'file1.txt'], groupedTabs: 0 },
+			enabledAgain: { strip: ['[Work]', 'file0.txt', 'file1.txt (hidden)'], groupedTabs: 2 }
+		});
+	});
+
 	function connectedGroup(): HTMLElement {
 		const root = $('.monaco-workbench.modern-ui.modern-ui-tabs.modern-ui-connected-editor-tabs.floating-panels');
 		root.style.cssText = '--vscode-spacing-size20: 2px; --vscode-spacing-size40: 4px; --vscode-spacing-size60: 6px; --vscode-spacing-size80: 8px; --vscode-spacing-size160: 16px; --vscode-spacing-size200: 20px; --vscode-spacing-size280: 28px; --vscode-strokeThickness: 1px; --vscode-cornerRadius-small: 4px; --vscode-cornerRadius-medium: 6px; --vscode-cornerRadius-large: 8px; --vscode-fontSize-body1: 13px; --vscode-fontWeight-regular: 400;';
