@@ -213,6 +213,7 @@ import './contrib/telemetry/browser/telemetry.contribution.js';
 import './contrib/preferences/browser/preferences.contribution.js';
 import './contrib/personalization/browser/personalization.contribution.js';
 import './contrib/bookmarks/browser/bookmarks.contribution.js';
+import './contrib/tabGroups/browser/tabGroups.contribution.js';
 import './contrib/preferences/browser/keybindingsEditorContribution.js';
 import './contrib/preferences/browser/preferencesSearch.js';
 
