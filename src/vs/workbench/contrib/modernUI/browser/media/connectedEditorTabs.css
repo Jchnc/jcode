@@ -788,47 +788,49 @@
 
 /*
  * Tab groups. A group is drawn as one continuous stroke in its color, as thick as
- * --vscode-spacing-size20, lying on the tab bar's bottom separator: the header's rail,
- * the inactive members' rail, and the active member's outline (shoulder, side, top,
- * side, shoulder) all share that stroke, so nothing steps, tapers or leaves a gap.
+ * --vscode-spacing-size20, lying on the tab bar's bottom separator. Each piece is a
+ * single element so the stroke stays crisp at fractional zoom: the header's rail, each
+ * inactive member's rail, and the active member's outline, whose straight sides meet
+ * the neighbouring rails in a clean corner.
  */
 .modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab.in-tab-group {
-	/* The tab box ends above the separator: paint the stroke's upper part inside it and its lower part over the separator. */
-	background-size: 100% calc(var(--vscode-spacing-size20) - var(--vscode-strokeThickness)) !important;
-	box-shadow: 0 var(--vscode-strokeThickness) 0 0 var(--tab-group-color) !important;
+	background-image: none !important;
 	/* Above the bottom separator, which the stroke covers. */
 	z-index: 1;
 }
 
-.modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab.in-tab-group.active {
-	background-image: none !important;
-	box-shadow: none !important;
+.modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab.in-tab-group:not(.active):not(.drop-target-left):not(.drop-target-right)::after {
+	content: '';
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: calc(-1 * var(--vscode-strokeThickness));
+	height: var(--vscode-spacing-size20);
+	background-color: var(--tab-group-color);
+	pointer-events: none;
 }
 
-/* The active member's outline is the group stroke. */
+/* Rails next to the active member run under its sides, so the corners have no seam at fractional zoom. */
+.modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab.in-tab-group:has(+ .tab.in-tab-group.active)::after {
+	right: calc(-1 * var(--vscode-spacing-size20));
+}
+
+.modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab.in-tab-group.active + .tab.in-tab-group::after {
+	left: calc(-1 * var(--vscode-spacing-size20));
+}
+
+/* The active member is outlined by the stroke: rounded on top, straight sides down to the rail. */
 .modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab.in-tab-group.active:not(.connected-tab-upper-row) > .tab-connected-edge {
 	border-color: var(--tab-group-color);
 	border-width: var(--vscode-spacing-size20) var(--vscode-spacing-size20) 0;
+	clip-path: none;
+	/* Above the tab's bottom border layer (z-index 10), which would otherwise cut off the foot of its sides. */
+	z-index: 11;
 }
 
-/* Shoulders take the stroke too, moved in so their curve meets the outline's sides without a step. */
 .modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab.in-tab-group.active:not(.connected-tab-upper-row) > .tab-fill::before,
 .modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab.in-tab-group.active:not(.connected-tab-upper-row) > .tab-fill::after {
-	bottom: 0;
-	border-bottom-width: var(--vscode-spacing-size20);
-	border-bottom-color: var(--tab-group-color);
-}
-
-.modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab.in-tab-group.active:not(.connected-tab-upper-row) > .tab-fill::before {
-	right: calc(100% - var(--vscode-spacing-size20));
-	border-right-width: var(--vscode-spacing-size20);
-	border-right-color: var(--tab-group-color);
-}
-
-.modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab.in-tab-group.active:not(.connected-tab-upper-row) > .tab-fill::after {
-	left: calc(100% - var(--vscode-spacing-size20));
-	border-left-width: var(--vscode-spacing-size20);
-	border-left-color: var(--tab-group-color);
+	content: none;
 }
 
 /* No separators inside a group or against its edges; the shared stroke and header already group the tabs. */
@@ -848,13 +850,18 @@
 
 .modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab-group-header::before {
 	left: 0;
-	right: calc(-1 * var(--vscode-spacing-size20));
+	/* Reach across the gap and under the first member, so the joint has no seam at fractional zoom. */
+	right: calc(-2 * var(--vscode-spacing-size20));
 	bottom: calc(-1 * var(--vscode-spacing-size20));
 	height: var(--vscode-spacing-size20);
 }
 
 .modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab-group-header.collapsed::before {
 	right: 0;
+}
+
+.modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab-group-header.collapsed:has(~ .tab.in-tab-group.active:not(.tab-group-collapsed))::before {
+	right: calc(-2 * var(--vscode-spacing-size20));
 }
 
 /* High contrast frames every tab fill, so the header pill takes a frame in its group color to match. */
