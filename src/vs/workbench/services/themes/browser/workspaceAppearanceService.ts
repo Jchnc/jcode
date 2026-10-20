@@ -8,15 +8,74 @@ import { Disposable } from '../../../../base/common/lifecycle.js';
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IWorkspaceContextService, WorkbenchState } from '../../../../platform/workspace/common/workspace.js';
-import { IWorkspaceAppearance, IWorkspaceAppearancePreview, IWorkspaceAppearanceService, normalizeWorkspaceColor } from '../common/workspaceAppearance.js';
+import { IWorkspaceAppearance, IWorkspaceAppearancePreview, IWorkspaceAppearanceService, normalizeWorkspaceColor, WorkspaceAppearancePreviewEnd } from '../common/workspaceAppearance.js';
+
+/** What a preview needs from the service that started it. */
+interface IWorkspaceAppearancePreviewHost {
+	didUpdate(): void;
+	save(appearance: IWorkspaceAppearance | undefined): void;
+	didEnd(preview: WorkspaceAppearancePreview): void;
+}
+
+/** One owner's reversible preview. It never touches the workspace once it has ended. */
+class WorkspaceAppearancePreview implements IWorkspaceAppearancePreview {
+	private readonly endEmitter = new Emitter<WorkspaceAppearancePreviewEnd>();
+	readonly onDidEnd = this.endEmitter.event;
+	private active = true;
+
+	constructor(
+		public appearance: IWorkspaceAppearance | undefined,
+		private readonly host: IWorkspaceAppearancePreviewHost
+	) { }
+
+	get isActive(): boolean {
+		return this.active;
+	}
+
+	update(appearance: IWorkspaceAppearance | undefined): void {
+		if (!this.active) {
+			return;
+		}
+		const color = appearance && normalizeWorkspaceColor(appearance.color);
+		const next = color && appearance ? { color, style: appearance.style } : undefined;
+		if (next?.color === this.appearance?.color && next?.style === this.appearance?.style) {
+			return;
+		}
+		this.appearance = next;
+		this.host.didUpdate();
+	}
+
+	apply(): boolean {
+		if (!this.active) {
+			return false;
+		}
+		this.host.save(this.appearance);
+		this.end(WorkspaceAppearancePreviewEnd.Applied);
+		return true;
+	}
+
+	dispose(): void {
+		this.end(WorkspaceAppearancePreviewEnd.Cancelled);
+	}
+
+	end(reason: WorkspaceAppearancePreviewEnd): void {
+		if (!this.active) {
+			return;
+		}
+		this.active = false;
+		this.host.didEnd(this);
+		this.endEmitter.fire(reason);
+		this.endEmitter.dispose();
+	}
+}
 
 /** Owns machine-local persistence and reversible workspace color previews. */
-class WorkspaceAppearanceService extends Disposable implements IWorkspaceAppearanceService {
+export class WorkspaceAppearanceService extends Disposable implements IWorkspaceAppearanceService {
 	declare readonly _serviceBrand: undefined;
 	private static readonly STORAGE_KEY = 'workbench.workspaceAppearance';
 	private readonly changeEmitter = this._register(new Emitter<void>());
 	readonly onDidChangeAppearance = this.changeEmitter.event;
-	private preview: { appearance: IWorkspaceAppearance | undefined } | undefined;
+	private activePreview: WorkspaceAppearancePreview | undefined;
 	private workspaceId: string;
 
 	constructor(
@@ -26,14 +85,16 @@ class WorkspaceAppearanceService extends Disposable implements IWorkspaceAppeara
 		super();
 		this.workspaceId = contextService.getWorkspace().id;
 		this._register(storageService.onDidChangeValue(StorageScope.WORKSPACE, WorkspaceAppearanceService.STORAGE_KEY, this._store)(() => {
-			if (!this.preview) {
+			if (!this.activePreview) {
 				this.changeEmitter.fire();
 			}
 		}));
 		const onWorkspaceChange = () => {
 			if (this.workspaceId !== contextService.getWorkspace().id) {
 				this.workspaceId = contextService.getWorkspace().id;
-				this.preview = undefined;
+				const preview = this.activePreview;
+				this.activePreview = undefined;
+				preview?.end(WorkspaceAppearancePreviewEnd.Cancelled);
 				this.changeEmitter.fire();
 			}
 		};
@@ -46,9 +107,10 @@ class WorkspaceAppearanceService extends Disposable implements IWorkspaceAppeara
 		if (this.contextService.getWorkbenchState() === WorkbenchState.EMPTY) {
 			return undefined;
 		}
-		if (this.preview) {
-			return this.preview.appearance;
-		}
+		return this.activePreview ? this.activePreview.appearance : this.savedAppearance;
+	}
+
+	private get savedAppearance(): IWorkspaceAppearance | undefined {
 		try {
 			const stored = this.storageService.getObject<Partial<IWorkspaceAppearance>>(WorkspaceAppearanceService.STORAGE_KEY, StorageScope.WORKSPACE);
 			const color = typeof stored?.color === 'string' ? normalizeWorkspaceColor(stored.color) : undefined;
@@ -60,34 +122,26 @@ class WorkspaceAppearanceService extends Disposable implements IWorkspaceAppeara
 	}
 
 	beginPreview(): IWorkspaceAppearancePreview {
-		const preview = { appearance: this.appearance };
-		this.preview = preview;
-		return {
-			update: appearance => {
-				if (this.preview === preview) {
-					const color = appearance && normalizeWorkspaceColor(appearance.color);
-					const next = color && appearance ? { color, style: appearance.style } : undefined;
-					if (next?.color === preview.appearance?.color && next?.style === preview.appearance?.style) {
-						return;
-					}
-					preview.appearance = next;
-					this.changeEmitter.fire();
-				}
-			},
-			apply: () => {
-				if (this.preview === preview) {
-					this.storageService.store(WorkspaceAppearanceService.STORAGE_KEY, preview.appearance, StorageScope.WORKSPACE, StorageTarget.MACHINE);
-					this.preview = undefined;
-					this.changeEmitter.fire();
-				}
-			},
-			dispose: () => {
-				if (this.preview === preview) {
-					this.preview = undefined;
+		const previous = this.activePreview;
+		// Start from what is saved: another owner's unsaved preview must not leak into this one.
+		const preview = new WorkspaceAppearancePreview(this.savedAppearance, {
+			didUpdate: () => this.changeEmitter.fire(),
+			save: appearance => this.storageService.store(WorkspaceAppearanceService.STORAGE_KEY, appearance, StorageScope.WORKSPACE, StorageTarget.MACHINE),
+			didEnd: ended => {
+				if (this.activePreview === ended) {
+					this.activePreview = undefined;
 					this.changeEmitter.fire();
 				}
 			}
-		};
+		});
+		this.activePreview = preview;
+		if (previous) {
+			previous.end(WorkspaceAppearancePreviewEnd.Superseded);
+			if (previous.appearance?.color !== preview.appearance?.color || previous.appearance?.style !== preview.appearance?.style) {
+				this.changeEmitter.fire();
+			}
+		}
+		return preview;
 	}
 }
 

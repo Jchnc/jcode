@@ -10,7 +10,7 @@ import { InputBox } from '../../../../base/browser/ui/inputbox/inputBox.js';
 import { getDefaultHoverDelegate } from '../../../../base/browser/ui/hover/hoverDelegateFactory.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { Color } from '../../../../base/common/color.js';
-import { DisposableStore } from '../../../../base/common/lifecycle.js';
+import { DisposableStore, MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
 import { localize, localize2 } from '../../../../nls.js';
 import { Categories } from '../../../../platform/action/common/actionCommonCategories.js';
@@ -26,7 +26,7 @@ import { IWorkspaceContextService, WorkbenchState } from '../../../../platform/w
 import { WorkbenchStateContext } from '../../../common/contextkeys.js';
 import { getWorkspaceColorPreset, getWorkspaceColorRamp, WORKSPACE_COLOR_PALETTE } from '../../../common/workspaceColorPalette.js';
 import { IWorkbenchLayoutService } from '../../../services/layout/browser/layoutService.js';
-import { IWorkspaceAppearance, IWorkspaceAppearanceService, normalizeWorkspaceColor, WORKSPACE_COLOR_COMMAND_ID } from '../../../services/themes/common/workspaceAppearance.js';
+import { IWorkspaceAppearance, IWorkspaceAppearancePreview, IWorkspaceAppearanceService, normalizeWorkspaceColor, WORKSPACE_COLOR_COMMAND_ID, WorkspaceAppearancePreviewEnd } from '../../../services/themes/common/workspaceAppearance.js';
 
 /** Native workspace identity picker with a disposable live preview. */
 class WorkspaceColorPicker {
@@ -49,7 +49,35 @@ class WorkspaceColorPicker {
 		const targetContainer = anchor ? this.layoutService.getContainer(getWindow(anchor)) : this.layoutService.activeContainer;
 		const focusBefore = getActiveElement();
 		const disposables = new DisposableStore();
-		const preview = disposables.add(this.appearanceService.beginPreview());
+		// Only one preview is shown at a time. This picker owns its preview until another one supersedes it.
+		let preview: IWorkspaceAppearancePreview | undefined;
+		let superseded = false;
+		let resyncSuperseded = () => { };
+		// Once superseded, keep showing what the other surface previews or saves until this picker previews again.
+		// Registered before the preview so that it is disposed first and never resyncs a closing picker.
+		disposables.add(this.appearanceService.onDidChangeAppearance(() => {
+			if (superseded) {
+				resyncSuperseded();
+			}
+		}));
+		const previewStore = disposables.add(new MutableDisposable<DisposableStore>());
+		const acquirePreview = (): IWorkspaceAppearancePreview => {
+			if (!preview?.isActive) {
+				superseded = false;
+				const store = new DisposableStore();
+				const next = store.add(this.appearanceService.beginPreview());
+				store.add(next.onDidEnd(reason => {
+					if (reason === WorkspaceAppearancePreviewEnd.Superseded) {
+						superseded = true;
+						resyncSuperseded();
+					}
+				}));
+				previewStore.value = store;
+				preview = next;
+			}
+			return preview;
+		};
+		acquirePreview();
 		let selected = this.appearanceService.appearance;
 		let style: IWorkspaceAppearance['style'] = selected?.style ?? 'subtle';
 		let focus: (() => void) | undefined;
@@ -122,6 +150,16 @@ class WorkspaceColorPicker {
 				input.inputElement.maxLength = 7;
 				input.inputElement.spellcheck = false;
 				input.value = selected?.color ?? '';
+				// Showing a value is not the user typing it, so it must not publish a preview of its own.
+				let showingValue = false;
+				const showValue = (value: string) => {
+					showingValue = true;
+					try {
+						input.value = value;
+					} finally {
+						showingValue = false;
+					}
+				};
 				const error = append(panel, $('.workspace-color-error'));
 				error.setAttribute('role', 'status');
 				append(panel, $('.workspace-color-label-row.workspace-color-appearance-label', undefined, localize('workspaceColor.appearanceLabel', "Appearance")));
@@ -149,7 +187,7 @@ class WorkspaceColorPicker {
 				cancel.label = localize('workspaceColor.cancel', "Cancel");
 				const apply = disposables.add(new Button(actions, defaultButtonStyles));
 				apply.label = localize('workspaceColor.apply', "Apply");
-				const sync = () => {
+				const sync = (publish = true) => {
 					const preset = getWorkspaceColorPreset(selected?.color);
 					colorName.textContent = selected ? preset?.label ?? localize('workspaceColor.customLabel', "Custom") : localize('workspaceColor.themeLabel', "Theme Default");
 					for (const [index, button] of swatches.entries()) {
@@ -164,11 +202,23 @@ class WorkspaceColorPicker {
 					}
 					reset.enabled = !!selected;
 					updatePreviews();
-					preview.update(selected);
+					if (publish) {
+						acquirePreview().update(selected);
+					}
+				};
+				// Another preview took over: show what is current instead of an outdated selection.
+				resyncSuperseded = () => {
+					selected = this.appearanceService.appearance;
+					style = selected?.style ?? style;
+					showValue(selected?.color ?? '');
+					apply.enabled = true;
+					error.textContent = '';
+					input.inputElement.removeAttribute('aria-invalid');
+					sync(false);
 				};
 				const selectColor = (color: string) => {
 					selected = { color, style };
-					input.value = color;
+					showValue(color);
 					apply.enabled = true;
 					error.textContent = '';
 					input.inputElement.removeAttribute('aria-invalid');
@@ -238,6 +288,9 @@ class WorkspaceColorPicker {
 				addRadioNavigation(swatches, 2);
 				addRadioNavigation(styles);
 				disposables.add(input.onDidChange(value => {
+					if (showingValue) {
+						return;
+					}
 					const color = normalizeWorkspaceColor(value.trim());
 					apply.enabled = !!color;
 					input.inputElement.setAttribute('aria-invalid', String(!color));
@@ -249,7 +302,7 @@ class WorkspaceColorPicker {
 				}));
 				disposables.add(reset.onDidClick(() => {
 					selected = undefined;
-					input.value = '';
+					showValue('');
 					apply.enabled = true;
 					input.inputElement.removeAttribute('aria-invalid');
 					error.textContent = '';
@@ -257,7 +310,9 @@ class WorkspaceColorPicker {
 				}));
 				const commit = () => {
 					if (apply.enabled) {
-						preview.apply();
+						const current = acquirePreview();
+						current.update(selected);
+						current.apply();
 						this.contextViewService.hideContextView();
 					}
 				};
