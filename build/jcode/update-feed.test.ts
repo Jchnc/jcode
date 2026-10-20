@@ -77,7 +77,8 @@ test('only published stable JCode releases with matching installer checksums ent
 	const secondPlatform = { ...metadata, platform: 'linux-x64', asset: 'linux.tar.gz', url: metadata.url.replace('setup.exe', 'linux.tar.gz') };
 	listing[3].assets!.push({ name: secondPlatform.asset, browser_download_url: secondPlatform.url, digest: `sha256:${metadata.sha256hash}` });
 	const arrayFetcher: typeof fetch = async url => new Response(JSON.stringify(String(url).includes('/releases?') ? listing : [metadata, secondPlatform]));
-	assert.deepEqual(await collectReleases('example/jcode', arrayFetcher), [metadata, secondPlatform]);
+	// Linux entries link to the release page rather than to one of its downloads.
+	assert.deepEqual(await collectReleases('example/jcode', arrayFetcher), [metadata, { ...secondPlatform, url: 'https://github.com/example/jcode/releases/tag/jcode-v1.0.0' }]);
 	listing[3].assets![1].digest = 'sha256:incorrect';
 	await assert.rejects(collectReleases('example/jcode', fetcher), /checksum mismatch/);
 });

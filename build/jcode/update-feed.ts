@@ -123,7 +123,9 @@ export async function collectReleases(repository: string, fetcher: typeof fetch 
 				if (installer.digest && installer.digest !== `sha256:${metadata.sha256hash}`) {
 					throw new Error(`Installer checksum mismatch on ${release.tag_name}`);
 				}
-				result.push({ ...metadata, url: installer.browser_download_url, ...(release.published_at ? { publishedAt: release.published_at } : {}) });
+				// Linux update notices open the release page, which offers the .deb, the archive and the install command.
+				const url = metadata.platform.startsWith('linux') ? `https://github.com/${repository}/releases/tag/${release.tag_name}` : installer.browser_download_url;
+				result.push({ ...metadata, url, ...(release.published_at ? { publishedAt: release.published_at } : {}) });
 			}
 		}
 		if (releases.length < 100) {

@@ -9,8 +9,8 @@ JCode releases are hosted entirely on GitHub: Releases stores the downloadable a
 | Windows | x64 | Per-user `.exe` installer | Download, install, and restart through the inherited updater |
 | macOS | Intel x64 | `.zip` containing `JCode.app` | Automatic updates with signing credentials; notifications and a download link for unsigned builds |
 | macOS | Apple Silicon ARM64 | `.zip` containing `JCode.app` | Same as Intel macOS |
-| Linux | x64 | `.deb` package and `.tar.gz` | Notifications and a link to the matching archive |
-| Linux | ARM64 | `.deb` package and `.tar.gz` | Notifications and a link to the matching archive |
+| Linux | x64 | `.deb` package and `.tar.gz` | Notifications and a link to the release page |
+| Linux | ARM64 | `.deb` package and `.tar.gz` | Notifications and a link to the release page |
 
 Linux builds do not update themselves. The `.deb` packages install JCode system-wide, but no APT repository is published, so `apt upgrade` does not see new versions: re-run the install script (`curl -fsSL https://jchnc.github.io/jcode/install.sh | bash`), which installs the newest `.deb`, or install each new `.deb` manually. The update feed workflow publishes the script from `build/jcode/install-linux.sh` to GitHub Pages. The JCode packages never register the Microsoft VS Code repository or signing key. `.rpm` and AppImage packages are not built. The `.deb` dependencies are computed from the binaries compiled on the Ubuntu 24.04 runners, so it requires an equally recent glibc. Windows ARM64 and system installers are not built by this workflow.
 
