@@ -7,6 +7,8 @@
 	"command.category": "JCode Remote",
 	"command.connect": "Manage SSH/SFTP Connections...",
 	"command.reconnect": "Reconnect SSH/SFTP Workspace",
+	"command.disconnect": "Disconnect SSH/SFTP Workspace",
+	"command.statusMenu": "Show SSH/SFTP Connection Actions",
 	"command.new": "New Connection...",
 	"command.open": "Open Connection",
 	"command.edit": "Edit Connection...",

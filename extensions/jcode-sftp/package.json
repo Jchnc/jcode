@@ -11,7 +11,7 @@
 	"scripts": {
 		"test": "node --test \"out/test/**/*.test.js\""
 	},
-	"activationEvents": ["onFileSystem:jcode-sftp", "onView:jcodeSftp.connections", "onCommand:jcodeSftp.connect", "onCommand:jcodeSftp.reconnect", "onCommand:jcodeSftp.new", "onCommand:jcodeSftp.open", "onCommand:jcodeSftp.edit", "onCommand:jcodeSftp.delete", "onCommand:jcodeSftp.import", "onCommand:jcodeSftp.export"],
+	"activationEvents": ["onFileSystem:jcode-sftp", "onView:jcodeSftp.connections", "onCommand:jcodeSftp.connect", "onCommand:jcodeSftp.reconnect", "onCommand:jcodeSftp.new", "onCommand:jcodeSftp.open", "onCommand:jcodeSftp.edit", "onCommand:jcodeSftp.delete", "onCommand:jcodeSftp.import", "onCommand:jcodeSftp.export", "onCommand:jcodeSftp.disconnect", "onCommand:jcodeSftp.showStatusMenu"],
 	"capabilities": {
 		"virtualWorkspaces": true,
 		"untrustedWorkspaces": { "supported": true }
@@ -35,6 +35,8 @@
 		"commands": [
 			{ "command": "jcodeSftp.connect", "title": "%command.connect%", "category": "%command.category%" },
 			{ "command": "jcodeSftp.reconnect", "title": "%command.reconnect%", "category": "%command.category%" },
+			{ "command": "jcodeSftp.disconnect", "title": "%command.disconnect%", "category": "%command.category%" },
+			{ "command": "jcodeSftp.showStatusMenu", "title": "%command.statusMenu%", "category": "%command.category%" },
 			{ "command": "jcodeSftp.new", "title": "%command.new%", "category": "%command.category%", "icon": "$(add)" },
 			{ "command": "jcodeSftp.open", "title": "%command.open%", "category": "%command.category%", "icon": "$(folder-opened)" },
 			{ "command": "jcodeSftp.edit", "title": "%command.edit%", "category": "%command.category%", "icon": "$(edit)" },
@@ -43,6 +45,9 @@
 			{ "command": "jcodeSftp.export", "title": "%command.export%", "category": "%command.category%", "icon": "$(cloud-upload)" }
 		],
 		"menus": {
+			"commandPalette": [
+				{ "command": "jcodeSftp.showStatusMenu", "when": "false" }
+			],
 			"view/title": [
 				{ "command": "jcodeSftp.new", "when": "view == jcodeSftp.connections", "group": "navigation@1" },
 				{ "command": "jcodeSftp.import", "when": "view == jcodeSftp.connections", "group": "2_transfer@1" },

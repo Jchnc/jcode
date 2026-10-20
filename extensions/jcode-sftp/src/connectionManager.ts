@@ -6,8 +6,9 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { commands, EventEmitter, ExtensionContext, l10n, ThemeIcon, TreeDataProvider, TreeItem, TreeItemCollapsibleState, Uri, window, workspace, type LogOutputChannel, type QuickPickItem, type TreeView } from 'vscode';
-import { CredentialError, RemoteProfile, SftpConnections } from './connection';
+import { CredentialError, profileLabel, RemoteProfile, SftpConnections } from './connection';
 import { ConnectionForm, ConnectionFormResult } from './connectionForm';
+import { ConnectionStatus } from './connectionStatus';
 import { SftpFileSystemProvider } from './fileSystemProvider';
 import { exportEncryptedProfiles, exportProfiles, importProfiles, isEncryptedExport } from './profileJson';
 import { planWorkspaceFolders, type WorkspacePlan } from './workspacePlan';
@@ -28,6 +29,7 @@ export class ConnectionManager implements TreeDataProvider<RemoteProfile> {
 	readonly onDidChangeTreeData = this.changeEmitter.event;
 	private readonly view: TreeView<RemoteProfile>;
 	private readonly form: ConnectionForm;
+	private readonly status: ConnectionStatus;
 
 	constructor(
 		context: ExtensionContext,
@@ -37,7 +39,11 @@ export class ConnectionManager implements TreeDataProvider<RemoteProfile> {
 	) {
 		this.form = new ConnectionForm(context, connections);
 		this.view = window.createTreeView('jcodeSftp.connections', { treeDataProvider: this });
-		context.subscriptions.push(this.changeEmitter, this.view, workspace.onDidChangeWorkspaceFolders(() => this.refresh()));
+		this.status = new ConnectionStatus(connections, {
+			reconnect: id => this.run(() => this.reconnect(id)),
+			edit: id => this.run(() => this.edit(id))
+		});
+		context.subscriptions.push(this.changeEmitter, this.view, this.status, workspace.onDidChangeWorkspaceFolders(() => this.refresh()));
 		this.refresh();
 	}
 
@@ -47,7 +53,7 @@ export class ConnectionManager implements TreeDataProvider<RemoteProfile> {
 
 	getTreeItem(profile: RemoteProfile): TreeItem {
 		const active = workspace.workspaceFolders?.some(folder => folder.uri.scheme === scheme && folder.uri.authority === profile.id) ?? false;
-		const item = new TreeItem(profile.name || `${profile.username}@${profile.host}`, TreeItemCollapsibleState.None);
+		const item = new TreeItem(profileLabel(profile), TreeItemCollapsibleState.None);
 		item.id = profile.id;
 		item.description = active
 			? l10n.t('Current · {0}', profile.root)
@@ -67,6 +73,7 @@ export class ConnectionManager implements TreeDataProvider<RemoteProfile> {
 		const count = this.connections.profiles.length;
 		this.view.description = count ? String(count) : undefined;
 		this.changeEmitter.fire(undefined);
+		this.status.refresh();
 	}
 
 	async show(): Promise<void> {
@@ -118,7 +125,7 @@ export class ConnectionManager implements TreeDataProvider<RemoteProfile> {
 		const uri = Uri.from({ scheme, authority: profile.id, path: profile.root });
 		if (await this.ensureConnected(profile, uri, typedCredential)) {
 			const folders = workspace.workspaceFolders ?? [];
-			const folder = { uri, name: profile.name || `${profile.username}@${profile.host}` };
+			const folder = { uri, name: profileLabel(profile) };
 			const plan = planWorkspaceFolders(
 				folders.map(existing => ({ uri: existing.uri.toString(), name: existing.name, connection: existing.uri.scheme === scheme ? existing.uri.authority : undefined })),
 				{ uri: uri.toString(), name: folder.name, connection: profile.id }
@@ -165,30 +172,36 @@ export class ConnectionManager implements TreeDataProvider<RemoteProfile> {
 	 * Typed credentials are saved by the connection only after the server accepts them. Returns false
 	 * when the user cancels the prompt.
 	 */
-	private async ensureConnected(profile: RemoteProfile, uri: Uri, typedCredential?: string): Promise<boolean> {
-		let credential = typedCredential;
-		for (let attempt = 0; ; attempt++) {
-			let failure: CredentialError;
-			try {
-				if (credential !== undefined) {
-					await this.connections.connectWithCredential(profile.id, credential);
+	private ensureConnected(profile: RemoteProfile, uri: Uri, typedCredential?: string): Promise<boolean> {
+		return this.status.attempt(profile.id, async () => {
+			let credential = typedCredential;
+			for (let attempt = 0; ; attempt++) {
+				let failure: CredentialError;
+				try {
+					if (credential !== undefined) {
+						await this.connections.connectWithCredential(profile.id, credential);
+					}
+					await this.provider.stat(uri);
+					return true;
+				} catch (error) {
+					if (!(error instanceof CredentialError)) {
+						throw error;
+					}
+					if (attempt >= maxCredentialAttempts) {
+						void this.status.reportFailure(profile.id, error);
+						return false;
+					}
+					failure = error;
 				}
-				await this.provider.stat(uri);
-				return true;
-			} catch (error) {
-				if (!(error instanceof CredentialError) || attempt >= maxCredentialAttempts) {
-					throw error;
-				}
-				failure = error;
+				credential = await window.showInputBox({
+					title: profile.authentication === 'password' ? l10n.t('SSH Password') : l10n.t('Private Key Passphrase'),
+					prompt: failure.rejected ? l10n.t('{0} Enter it again.', failure.message) : failure.message,
+					password: true,
+					ignoreFocusOut: true
+				});
+				if (credential === undefined) { return false; }
 			}
-			credential = await window.showInputBox({
-				title: profile.authentication === 'password' ? l10n.t('SSH Password') : l10n.t('Private Key Passphrase'),
-				prompt: failure.rejected ? l10n.t('{0} Enter it again.', failure.message) : failure.message,
-				password: true,
-				ignoreFocusOut: true
-			});
-			if (credential === undefined) { return false; }
-		}
+		});
 	}
 
 	async delete(target?: string | RemoteProfile): Promise<void> {
@@ -197,7 +210,7 @@ export class ConnectionManager implements TreeDataProvider<RemoteProfile> {
 		if (this.isActive(profile.id)) {
 			throw new Error(l10n.t('Switch to another workspace before deleting this connection.'));
 		}
-		const choice = await window.showWarningMessage(l10n.t('Delete connection "{0}"?', profile.name || `${profile.username}@${profile.host}`), { modal: true }, l10n.t('Delete'));
+		const choice = await window.showWarningMessage(l10n.t('Delete connection "{0}"?', profileLabel(profile)), { modal: true }, l10n.t('Delete'));
 		if (choice === l10n.t('Delete')) {
 			await this.connections.deleteProfile(profile.id);
 			this.refresh();
@@ -304,11 +317,50 @@ export class ConnectionManager implements TreeDataProvider<RemoteProfile> {
 		const folders = workspace.workspaceFolders?.filter(folder => folder.uri.scheme === scheme) ?? [];
 		if (!folders.length) { await this.show(); return; }
 		const folder = folders.length === 1 ? folders[0] : await window.showQuickPick(folders.map(folder => ({ label: folder.name, folder }))).then(choice => choice?.folder);
-		if (!folder) { return; }
-		this.connections.reconnect(folder.uri.authority);
-		if (await this.ensureConnected(this.connections.getProfile(folder.uri.authority), folder.uri)) {
+		if (folder) { await this.reconnect(folder.uri.authority, folder.uri); }
+	}
+
+	/** Drops the connection of a saved profile and connects again, asking for credentials when needed. */
+	async reconnect(id: string, uri?: Uri): Promise<void> {
+		const profile = this.connections.getProfile(id);
+		this.connections.reconnect(id);
+		if (await this.ensureConnected(profile, uri ?? Uri.from({ scheme, authority: id, path: profile.root }))) {
 			void window.showInformationMessage(l10n.t('SSH/SFTP workspace reconnected.'));
 		}
+	}
+
+	/** Closes a connection. It reconnects the next time a file operation needs it. */
+	async disconnect(target?: string): Promise<void> {
+		const id = target ?? await this.pickWorkspaceConnection();
+		if (id) { this.connections.disconnect(id); }
+	}
+
+	/** Offers the actions for the connection shown in the status bar. */
+	async showStatusMenu(): Promise<void> {
+		const choice = await window.showQuickPick<QuickPickItem & { action: 'reconnect' | 'disconnect' | 'manage' }>([
+			{ label: `$(sync) ${l10n.t('Reconnect')}`, action: 'reconnect' },
+			{ label: `$(debug-disconnect) ${l10n.t('Disconnect')}`, action: 'disconnect' },
+			{ label: `$(remote) ${l10n.t('Manage Connections')}`, action: 'manage' }
+		], { title: l10n.t('SSH/SFTP Connection'), placeHolder: l10n.t('Select an action') });
+		if (choice?.action === 'manage') {
+			await this.show();
+		} else if (choice) {
+			const id = await this.pickWorkspaceConnection();
+			if (id) {
+				await (choice.action === 'reconnect' ? this.reconnect(id) : this.disconnect(id));
+			}
+		}
+	}
+
+	/** The connection of the open workspace folders, asking which one when there are several. */
+	private async pickWorkspaceConnection(): Promise<string | undefined> {
+		const ids = this.status.connectionIds;
+		if (ids.length <= 1) { return ids[0]; }
+		const choice = await window.showQuickPick(ids.map(id => {
+			const profile = this.connections.getProfile(id);
+			return { label: profileLabel(profile), description: `${profile.username}@${profile.host}:${profile.port}`, id };
+		}), { placeHolder: l10n.t('Select a connection') });
+		return choice?.id;
 	}
 
 	async run(action: () => Promise<void>): Promise<void> {
@@ -316,7 +368,10 @@ export class ConnectionManager implements TreeDataProvider<RemoteProfile> {
 			await action();
 		} catch (error) {
 			this.log.error(error);
-			void window.showErrorMessage(l10n.t('SSH/SFTP action failed: {0}', String(error)));
+			// A failed connection was already reported with actions to retry or edit it.
+			if (!(error instanceof Error && this.status.handled(error))) {
+				void window.showErrorMessage(l10n.t('SSH/SFTP action failed: {0}', String(error)));
+			}
 		}
 	}
 }

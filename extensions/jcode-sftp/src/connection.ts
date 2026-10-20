@@ -8,7 +8,7 @@ import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { Client, type ClientChannel, type ClientErrorExtensions, type ConnectConfig, type SFTPWrapper } from 'ssh2';
-import { ExtensionContext, l10n, window } from 'vscode';
+import { EventEmitter, ExtensionContext, l10n, window } from 'vscode';
 import { classifyAuthFailure } from './authFailure';
 import { PausableTimeout } from './pausableTimeout';
 
@@ -22,6 +22,14 @@ export interface RemoteProfile {
 	authentication: 'password' | 'privateKey' | 'agent';
 	privateKeyPath?: string;
 }
+
+/** The name shown for a profile: its name, or the user and host when it has none. */
+export function profileLabel(profile: RemoteProfile): string {
+	return profile.name || `${profile.username}@${profile.host}`;
+}
+
+/** Whether a saved profile has a live connection, is connecting, or has none. */
+export type ConnectionState = 'connected' | 'connecting' | 'reconnecting' | 'offline';
 
 /** A password or passphrase is missing or was refused, so the user can fix it by entering one. */
 export class CredentialError extends Error {
@@ -52,7 +60,18 @@ export class SftpConnections {
 	private readonly pending = new Map<string, PendingConnection>();
 	/** Credentials the user just typed, which are saved only once a server accepts them. */
 	private readonly candidates = new Map<string, string>();
+	/** Profiles that had a live connection since they were last disconnected. */
+	private readonly connected = new Set<string>();
+	private readonly suspended = new Set<string>();
+	private readonly failures = new Map<string, Error>();
+	private readonly stateEmitter = new EventEmitter<string>();
+	private readonly failureEmitter = new EventEmitter<{ id: string; error: Error }>();
 	private disposed = false;
+
+	/** Fires with the id of a profile whose connection state changed. */
+	readonly onDidChangeState = this.stateEmitter.event;
+	/** Fires when a connection attempt fails, including when its credential is missing or refused. */
+	readonly onDidFailToConnect = this.failureEmitter.event;
 
 	constructor(private readonly context: ExtensionContext) { }
 
@@ -77,6 +96,8 @@ export class SftpConnections {
 		const previous = profiles.find(candidate => candidate.id === profile.id);
 		const updated = previous ? profiles.map(candidate => candidate.id === profile.id ? profile : candidate) : [...profiles, profile];
 		await this.context.globalState.update(profilesKey, updated);
+		// A failure with the previous settings says nothing about the new ones.
+		this.failures.delete(profile.id);
 		if (credential !== undefined) {
 			await this.context.secrets.store(`jcodeSftp.credential.${profile.id}`, credential);
 		} else if (previous?.authentication !== profile.authentication || profile.authentication === 'agent') {
@@ -85,7 +106,7 @@ export class SftpConnections {
 	}
 
 	async deleteProfile(id: string): Promise<void> {
-		this.reconnect(id);
+		this.disconnect(id);
 		await this.context.globalState.update(profilesKey, this.profiles.filter(profile => profile.id !== id));
 		await this.context.secrets.delete(`jcodeSftp.credential.${id}`);
 	}
@@ -98,6 +119,7 @@ export class SftpConnections {
 		if (existing) {
 			return existing.sftp;
 		}
+		this.suspended.delete(id);
 		let pending = this.pending.get(id);
 		if (!pending) {
 			const profile = this.getProfile(id);
@@ -106,13 +128,58 @@ export class SftpConnections {
 			pending = { client, controller, promise: this.connect(profile, client, controller.signal) };
 			this.pending.set(id, pending);
 			const attempt = pending;
-			void pending.promise.finally(() => {
+			void attempt.promise.then(() => this.failures.delete(id), error => {
+				if (!attempt.controller.signal.aborted && !this.disposed) {
+					this.failures.set(id, error);
+					this.failureEmitter.fire({ id, error });
+				}
+			}).finally(() => {
 				if (this.pending.get(id) === attempt) {
 					this.pending.delete(id);
 				}
-			}).catch(() => undefined);
+				this.changed(id);
+			});
+			this.changed(id);
 		}
 		return (await pending.promise).sftp;
+	}
+
+	/** The connection state of a saved profile. A new attempt after a live connection ended is a reconnect. */
+	getState(id: string): ConnectionState {
+		if (this.active.has(id)) {
+			return 'connected';
+		}
+		if (this.pending.has(id)) {
+			return this.connected.has(id) ? 'reconnecting' : 'connecting';
+		}
+		return 'offline';
+	}
+
+	/** The error that ended the latest connection attempt, until a connection succeeds. */
+	lastFailure(id: string): Error | undefined {
+		return this.failures.get(id);
+	}
+
+	/**
+	 * Whether background work must not reconnect until something else asks: the user disconnected, or
+	 * the credential is missing or was refused, which retrying cannot fix.
+	 */
+	waitsForUser(id: string): boolean {
+		return this.suspended.has(id) || this.failures.get(id) instanceof CredentialError;
+	}
+
+	/** Ends the connection on request. It stays closed until the next file operation needs it. */
+	disconnect(id: string): void {
+		this.suspended.add(id);
+		this.connected.delete(id);
+		this.failures.delete(id);
+		this.reconnect(id);
+	}
+
+	private changed(id: string): void {
+		if (!this.disposed) {
+			this.stateEmitter.fire(id);
+		}
 	}
 
 	/**
@@ -187,6 +254,7 @@ export class SftpConnections {
 		const active = this.active.get(id);
 		this.active.delete(id);
 		active?.client.destroy();
+		this.changed(id);
 	}
 
 	dispose(): void {
@@ -194,6 +262,8 @@ export class SftpConnections {
 		for (const id of new Set([...this.active.keys(), ...this.pending.keys()])) {
 			this.reconnect(id);
 		}
+		this.stateEmitter.dispose();
+		this.failureEmitter.dispose();
 	}
 
 	private async connect(profile: RemoteProfile, client: Client, signal: AbortSignal): Promise<Connection> {
@@ -288,6 +358,7 @@ export class SftpConnections {
 					if (this.active.get(profile.id)?.client === client) {
 						this.active.delete(profile.id);
 						client.destroy();
+						this.changed(profile.id);
 					}
 				};
 				client.once('ready', () => {
@@ -336,6 +407,7 @@ export class SftpConnections {
 				signal.throwIfAborted();
 			}
 			this.active.set(profile.id, connection);
+			this.connected.add(profile.id);
 			return connection;
 		} catch (error) {
 			timeout?.dispose();

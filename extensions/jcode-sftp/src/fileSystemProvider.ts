@@ -489,7 +489,8 @@ export class SftpFileSystemProvider implements FileSystemProvider {
 					continue;
 				}
 				try {
-					if (!unavailable.has(uri.authority)) {
+					// Polling must not undo a disconnect or retry a refused credential, so it waits until something else reconnects.
+					if (!unavailable.has(uri.authority) && !this.connections.waitsForUser(uri.authority)) {
 						const result = await request.poller.step(this.pollSource(uri, cache), limits);
 						request.failing = false;
 						for (const { type, path } of this.requests.has(request) ? result.changes : []) {
