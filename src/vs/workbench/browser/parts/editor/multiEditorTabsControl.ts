@@ -6,6 +6,7 @@
 import './media/multieditortabscontrol.css';
 import './media/tabgroups.css';
 import { TabGroupContextMenu } from './tabGroupContextMenu.js';
+import { getTabGroupHeaderAriaLabel, getTabGroupHeaderTitle, getTabGroupName, getTabGroupTabAriaLabel } from './tabGroupLabels.js';
 import { isLinux, isMacintosh, isWindows } from '../../../../base/common/platform.js';
 import { shorten } from '../../../../base/common/labels.js';
 import { EditorResourceAccessor, Verbosity, IEditorPartOptions, SideBySideEditor, DEFAULT_EDITOR_ASSOCIATION, EditorInputCapabilities, IUntypedEditorInput, preventEditorClose, EditorCloseMethod, EditorsOrder, IToolbarActions, GroupModelChangeKind } from '../../../common/editor.js';
@@ -103,10 +104,6 @@ interface ITabGroupRenderState {
 	readonly editors: readonly EditorInput[];
 	readonly tabGroupIds: readonly (string | undefined)[];
 	readonly tabGroups: string;
-}
-
-function getTabGroupName(group: IEditorTabGroup): string {
-	return group.name || localize('tabGroup.unnamed', "Tab Group");
 }
 
 function isSameTabGroupRenderState(a: ITabGroupRenderState, b: ITabGroupRenderState): boolean {
@@ -1772,9 +1769,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 			return ariaLabel;
 		}
 
-		return tabGroup.collapsed ?
-			localize('tabGroup.tabAriaCollapsed', "{0}, tab group {1}, collapsed", ariaLabel, getTabGroupName(tabGroup)) :
-			localize('tabGroup.tabAria', "{0}, tab group {1}", ariaLabel, getTabGroupName(tabGroup));
+		return getTabGroupTabAriaLabel(ariaLabel, tabGroup);
 	}
 
 	private shortenTabLabels(labels: IEditorInputLabel[]): void {
@@ -3125,19 +3120,8 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		countBadge.textContent = String(count);
 		header.appendChild(countBadge);
 
-		const label = getTabGroupName(group);
-		const tabs = count === 1 ? localize('tabGroup.oneTab', "1 tab") : localize('tabGroup.tabCount', "{0} tabs", count);
-		const status = dirtyCount > 0 ? localize('tabGroup.headerStatusDirty', "{0}, {1} unsaved", tabs, dirtyCount) : tabs;
-		let accessibilityStatus = status;
-		if (group.saved && group.locked) {
-			accessibilityStatus = localize('tabGroup.statusSavedLocked', "{0}, saved, locked", status);
-		} else if (group.saved) {
-			accessibilityStatus = localize('tabGroup.statusSaved', "{0}, saved", status);
-		} else if (group.locked) {
-			accessibilityStatus = localize('tabGroup.statusLocked', "{0}, locked", status);
-		}
-		header.setAttribute('aria-label', group.collapsed ? localize('tabGroup.collapsedAria', "{0}, collapsed, {1}", label, accessibilityStatus) : localize('tabGroup.expandedAria', "{0}, expanded, {1}", label, accessibilityStatus));
-		header.title = localize('tabGroup.headerTitle', "{0} ({1})", label, accessibilityStatus);
+		header.setAttribute('aria-label', getTabGroupHeaderAriaLabel(group, { count, dirtyCount })); // aria-expanded announces the state
+		header.title = getTabGroupHeaderTitle(group, { count, dirtyCount });
 	}
 
 	private registerTabGroupHeaderListeners(header: HTMLElement, groupId: string): DisposableStore {

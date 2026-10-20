@@ -287,20 +287,20 @@ suite('MultiEditorTabsControl', () => {
 
 		assert.deepStrictEqual({ initial, unsaved, manyUnsaved, saved, otherHeaderReused: tabGroupHeaders()[1] === otherHeader && otherHeader.querySelector('.tab-group-count') === otherHeaderCount }, {
 			initial: [
-				{ name: 'First', count: '2', unsaved: null, label: 'First, expanded, 2 tabs' },
-				{ name: 'Second', count: '2', unsaved: null, label: 'Second, expanded, 2 tabs' }
+				{ name: 'First', count: '2', unsaved: null, label: 'First, 2 tabs' },
+				{ name: 'Second', count: '2', unsaved: null, label: 'Second, 2 tabs' }
 			],
 			unsaved: [
-				{ name: 'First', count: '2', unsaved: '1 unsaved tab', label: 'First, expanded, 2 tabs, 1 unsaved' },
-				{ name: 'Second', count: '2', unsaved: null, label: 'Second, expanded, 2 tabs' }
+				{ name: 'First', count: '2', unsaved: '1 unsaved tab', label: 'First, 2 tabs, 1 unsaved' },
+				{ name: 'Second', count: '2', unsaved: null, label: 'Second, 2 tabs' }
 			],
 			manyUnsaved: [
-				{ name: 'First', count: '2', unsaved: '2 unsaved tabs', label: 'First, expanded, 2 tabs, 2 unsaved' },
-				{ name: 'Second', count: '2', unsaved: null, label: 'Second, expanded, 2 tabs' }
+				{ name: 'First', count: '2', unsaved: '2 unsaved tabs', label: 'First, 2 tabs, 2 unsaved' },
+				{ name: 'Second', count: '2', unsaved: null, label: 'Second, 2 tabs' }
 			],
 			saved: [
-				{ name: 'First', count: '2', unsaved: null, label: 'First, expanded, 2 tabs' },
-				{ name: 'Second', count: '2', unsaved: null, label: 'Second, expanded, 2 tabs' }
+				{ name: 'First', count: '2', unsaved: null, label: 'First, 2 tabs' },
+				{ name: 'Second', count: '2', unsaved: null, label: 'Second, 2 tabs' }
 			],
 			otherHeaderReused: true
 		});
@@ -671,8 +671,8 @@ suite('MultiEditorTabsControl', () => {
 
 		const common = { sameTwistie: true, twistieHidden: 'true', saved: true, locked: true, unsaved: '1 unsaved tab', count: '2', title: 'Work (2 tabs, 1 unsaved, saved, locked)' };
 		assert.deepStrictEqual({ expanded, collapsed }, {
-			expanded: { ...common, expanded: 'true', label: 'Work, expanded, 2 tabs, 1 unsaved, saved, locked' },
-			collapsed: { ...common, expanded: 'false', label: 'Work, collapsed, 2 tabs, 1 unsaved, saved, locked' }
+			expanded: { ...common, expanded: 'true', label: 'Work, 2 tabs, 1 unsaved, saved, locked' },
+			collapsed: { ...common, expanded: 'false', label: 'Work, 2 tabs, 1 unsaved, saved, locked' }
 		});
 	});
 

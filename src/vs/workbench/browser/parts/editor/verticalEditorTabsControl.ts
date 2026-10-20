@@ -52,6 +52,7 @@ import { EditorCommandsContextActionRunner, EditorTabsControl } from './editorTa
 import { DEFAULT_EDITOR_MIN_DIMENSIONS, IEditorGroupMenuIds, IEditorGroupsView, IEditorGroupView, IEditorPartsView, IInternalEditorOpenOptions, isEditorGroupView, prepareMoveCopyEditors } from './editor.js';
 import { IEditorTitleControlDimensions } from './editorTitleControl.js';
 import { TabGroupContextMenu } from './tabGroupContextMenu.js';
+import { getTabGroupHeaderAriaLabel, getTabGroupHeaderTitle, getTabGroupName, getTabGroupTabAriaLabel } from './tabGroupLabels.js';
 
 class DraggedVerticalEditorIdentifier extends DraggedEditorIdentifier { }
 
@@ -576,8 +577,9 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 			header.appendChild(lockIndicator);
 		}
 
+		const label = getTabGroupName(group);
 		const name = $('span.vertical-tab-group-name');
-		name.textContent = group.name || localize('verticalTabs.unnamedGroup', "Tab Group");
+		name.textContent = label;
 		header.appendChild(name);
 		const dirtyIndicatorAnchor = lockIndicator ?? name;
 
@@ -585,7 +587,6 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		count.textContent = String(members.length);
 		header.appendChild(count);
 
-		const label = group.name || localize('verticalTabs.unnamedGroup', "Tab Group");
 		const hover = disposables.add(this.hoverService.setupManagedHover(getDefaultHoverDelegate('mouse'), header, ''));
 		const updateStatus = () => {
 			const dirtyCount = members.filter(editor => editor.isDirty() && !editor.isSaving()).length;
@@ -595,10 +596,9 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 				dirtyIndicator.remove();
 			}
 
-			const status = dirtyCount > 0 ? localize('verticalTabs.groupStatusDirty', "{0} editors, {1} unsaved", members.length, dirtyCount) : localize('verticalTabs.groupStatus', "{0} editors", members.length);
-			const accessibilityStatus = [status, group.saved ? localize('verticalTabs.groupSaved', "saved") : undefined, group.locked ? localize('verticalTabs.groupLocked', "locked") : undefined].filter(Boolean).join(', ');
-			header.setAttribute('aria-label', localize('verticalTabs.groupAria', "{0}, {1}", label, accessibilityStatus)); // aria-expanded announces the state
-			hover.update(localize('verticalTabs.groupTitle', "{0} ({1})", label, accessibilityStatus));
+			const details = { count: members.length, dirtyCount };
+			header.setAttribute('aria-label', getTabGroupHeaderAriaLabel(group, details)); // aria-expanded announces the state
+			hover.update(getTabGroupHeaderTitle(group, details));
 		};
 		updateStatus();
 		this.tabGroupHeaders.set(group.id, { element: header, updateStatus });
@@ -840,7 +840,11 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		row.classList.toggle('sticky', this.tabsModel.isSticky(editor));
 		row.classList.toggle('actions-left', this.groupsView.partOptions.tabActionLocation === 'left');
 		row.setAttribute('aria-selected', String(selected));
-		row.setAttribute('aria-label', computeEditorAriaLabel(editor, this.groupView.getIndexOfEditor(editor), this.groupView, this.editorPartsView.count));
+
+		// Tell screen readers which tab group a tab is in, and whether it is the one tab of a collapsed group that remains listed
+		const ariaLabel = computeEditorAriaLabel(editor, this.groupView.getIndexOfEditor(editor), this.groupView, this.editorPartsView.count);
+		const tabGroup = this.groupsView.partOptions.tabGroups.enabled ? this.tabsModel.getTabGroupForEditor(editor) : undefined;
+		row.setAttribute('aria-label', tabGroup ? getTabGroupTabAriaLabel(ariaLabel, tabGroup) : ariaLabel);
 	}
 
 	/**

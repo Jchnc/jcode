@@ -345,7 +345,7 @@ suite('VerticalEditorTabsControl', () => {
 		}, {
 			initial: 0,
 			dirty: 1,
-			ariaLabel: 'Work, 3 editors, 1 unsaved',
+			ariaLabel: 'Work, 3 tabs, 1 unsaved',
 			headerKept: true,
 			focused: true
 		});
@@ -366,6 +366,35 @@ suite('VerticalEditorTabsControl', () => {
 		assert.deepStrictEqual(model.getEditors(EditorsOrder.SEQUENTIAL).map(editor => `${(editor as TestEditorInput).getName()}${model.getTabGroupForEditor(editor) ? ':Work' : ''}`).slice(2, 9), [
 			'file2.txt', 'file8.txt:Work', 'file7.txt:Work', 'file3.txt:Work', 'file4.txt:Work', 'file5.txt', 'file6.txt'
 		]);
+	});
+
+	test('tab group headers and rows announce their group the way top tabs do, without repeating what aria-expanded says', () => {
+		const editors = model.getEditors(EditorsOrder.SEQUENTIAL).slice(0, 2);
+		const tabGroup = model.createTabGroup(editors, 'Work', 'blue')!;
+		model.setTabGroupSaved(tabGroup.id, true);
+		model.setTabGroupLocked(tabGroup.id, true);
+		(editors[1] as TestEditorInput).setDirty();
+		control.updateEditorDirty(editors[1]);
+		const describe = () => {
+			const header = container.querySelector<HTMLElement>('.vertical-tab-group-header')!;
+			return {
+				header: header.getAttribute('aria-label'),
+				expanded: header.getAttribute('aria-expanded'),
+				rows: rows().slice(0, 2).map(row => row.getAttribute('aria-label'))
+			};
+		};
+
+		const expanded = describe();
+		model.setTabGroupCollapsed(tabGroup.id, true);
+		const collapsed = describe();
+		model.renameTabGroup(tabGroup.id, '');
+		const unnamed = describe();
+
+		assert.deepStrictEqual({ expanded, collapsed, unnamed }, {
+			expanded: { header: 'Work, 2 tabs, 1 unsaved, saved, locked', expanded: 'true', rows: ['file0.txt, tab group Work', 'file1.txt, tab group Work'] },
+			collapsed: { header: 'Work, 2 tabs, 1 unsaved, saved, locked', expanded: 'false', rows: ['file0.txt, tab group Work, collapsed', 'file2.txt'] },
+			unnamed: { header: 'Tab Group, 2 tabs, 1 unsaved, saved, locked', expanded: 'false', rows: ['file0.txt, tab group Tab Group, collapsed', 'file2.txt'] }
+		});
 	});
 
 	test('toggling a tab group keeps focus on its header', () => {
@@ -415,9 +444,9 @@ suite('VerticalEditorTabsControl', () => {
 				{ role: 'treeitem', level: '1', position: '1/11', expanded: undefined, label: 'file0.txt, pinned' },
 				{ section: 'Editors', hidden: 'true' },
 				{ role: 'treeitem', level: '1', position: '2/11', expanded: undefined, label: 'file1.txt' },
-				{ role: 'treeitem', level: '1', position: '3/11', expanded: 'true', label: 'Work, 2 editors' },
-				{ role: 'treeitem', level: '2', position: '1/2', expanded: undefined, label: 'file2.txt' },
-				{ role: 'treeitem', level: '2', position: '2/2', expanded: undefined, label: 'file3.txt' },
+				{ role: 'treeitem', level: '1', position: '3/11', expanded: 'true', label: 'Work, 2 tabs' },
+				{ role: 'treeitem', level: '2', position: '1/2', expanded: undefined, label: 'file2.txt, tab group Work' },
+				{ role: 'treeitem', level: '2', position: '2/2', expanded: undefined, label: 'file3.txt, tab group Work' },
 				{ role: 'treeitem', level: '1', position: '4/11', expanded: undefined, label: 'file4.txt' }
 			],
 			tabStops: ['file0.txt'],
@@ -584,7 +613,7 @@ suite('VerticalEditorTabsControl', () => {
 		control = createControl();
 
 		const header = container.querySelector<HTMLElement>('.vertical-tab-group-header')!;
-		assert.deepStrictEqual({ hover: hovers.get(header), nativeTitle: header.title }, { hover: 'Work (2 editors)', nativeTitle: '' });
+		assert.deepStrictEqual({ hover: hovers.get(header), nativeTitle: header.title }, { hover: 'Work (2 tabs)', nativeTitle: '' });
 	});
 
 	function closeAllEditors(): void {
