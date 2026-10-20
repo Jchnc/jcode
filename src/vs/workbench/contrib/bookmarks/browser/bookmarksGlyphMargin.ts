@@ -7,7 +7,9 @@ import * as DOM from '../../../../base/browser/dom.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { ICodeEditor, IMouseTarget, MouseTargetType } from '../../../../editor/browser/editorBrowser.js';
 import { IEditorContribution } from '../../../../editor/common/editorCommon.js';
+import { ITextModel } from '../../../../editor/common/model.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
+import { IDebugService } from '../../debug/common/debug.js';
 import { ICodeBookmarksService } from '../common/bookmarks.js';
 
 export const ALT_CLICK_TOGGLES_BOOKMARK_SETTING = 'jcode.bookmarks.toggleOnAltClick';
@@ -34,9 +36,10 @@ export function getAltClickedBookmarkLine(event: Pick<MouseEvent, 'button' | 'al
 /**
  * Toggles the bookmark of a line when its glyph margin is clicked with Alt held.
  *
- * The click is taken before the editor sees it. The debugger would otherwise react to the same
- * Alt+click on an empty glyph margin by opening a conditional breakpoint, so a single click would
- * both bookmark the line and open a breakpoint editor.
+ * The click is taken before the editor sees it, so that it does not also reach other features that
+ * react to it. The one exception is the debugger: in a file where it can set breakpoints, Alt+click
+ * on an empty glyph margin opens the conditional breakpoint editor, and that stays untouched.
+ * Bookmarks are toggled with the keyboard or the line number context menu in such files.
  */
 export class BookmarkGlyphMarginContribution extends Disposable implements IEditorContribution {
 	static readonly ID = 'editor.contrib.jcodeBookmarkGlyphMargin';
@@ -45,6 +48,7 @@ export class BookmarkGlyphMarginContribution extends Disposable implements IEdit
 		private readonly editor: ICodeEditor,
 		@ICodeBookmarksService private readonly bookmarksService: ICodeBookmarksService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
+		@IDebugService private readonly debugService: IDebugService,
 	) {
 		super();
 		this._register(DOM.addDisposableListener(editor.getContainerDomNode(), DOM.EventType.MOUSE_DOWN, event => this.onMouseDown(event), true));
@@ -57,9 +61,18 @@ export class BookmarkGlyphMarginContribution extends Disposable implements IEdit
 		}
 
 		const lineNumber = getAltClickedBookmarkLine(event, this.editor.getTargetAtClientPoint(event.clientX, event.clientY));
-		if (lineNumber !== undefined) {
-			DOM.EventHelper.stop(event, true);
-			this.bookmarksService.toggle(model.uri, lineNumber, 1);
+		if (lineNumber === undefined || this.isHandledByDebugger(model)) {
+			return;
 		}
+		DOM.EventHelper.stop(event, true);
+		this.bookmarksService.toggle(model.uri, lineNumber, 1);
+	}
+
+	/**
+	 * Whether the debugger reacts to an Alt+click on the glyph margin of the model. This mirrors the
+	 * conditions under which the breakpoint editor contribution takes the click.
+	 */
+	private isHandledByDebugger(model: ITextModel): boolean {
+		return this.debugService.getAdapterManager().hasEnabledDebuggers() && this.debugService.canSetBreakpointsIn(model);
 	}
 }

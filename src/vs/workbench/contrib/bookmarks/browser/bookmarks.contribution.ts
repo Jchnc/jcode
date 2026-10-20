@@ -77,7 +77,7 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 		[ALT_CLICK_TOGGLES_BOOKMARK_SETTING]: {
 			type: 'boolean',
 			default: true,
-			markdownDescription: localize('toggleOnAltClick', "Controls whether holding `Alt` while clicking the editor glyph margin toggles a bookmark on that line. Glyphs that belong to other features, such as breakpoints, keep their own `Alt` + click behavior, but while this is enabled `Alt` + click on an empty glyph margin no longer opens the conditional breakpoint editor.")
+			markdownDescription: localize('toggleOnAltClick', "Controls whether holding `Alt` while clicking the editor glyph margin toggles a bookmark on that line. Glyphs that belong to other features, such as breakpoints, keep their own `Alt` + click behavior. In files where the debugger can set breakpoints, `Alt` + click on an empty glyph margin keeps opening the conditional breakpoint editor, so use the Toggle Bookmark command or the line number context menu to bookmark lines there.")
 		}
 	}
 });

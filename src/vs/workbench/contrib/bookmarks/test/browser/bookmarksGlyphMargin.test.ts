@@ -13,6 +13,7 @@ import { Position } from '../../../../../editor/common/core/position.js';
 import { Range } from '../../../../../editor/common/core/range.js';
 import { ITextModel } from '../../../../../editor/common/model.js';
 import { TestConfigurationService } from '../../../../../platform/configuration/test/common/testConfigurationService.js';
+import { IAdapterManager, IDebugService } from '../../../debug/common/debug.js';
 import { ALT_CLICK_TOGGLES_BOOKMARK_SETTING, BookmarkGlyphMarginContribution, getAltClickedBookmarkLine } from '../../browser/bookmarksGlyphMargin.js';
 import { ICodeBookmarksService } from '../../common/bookmarks.js';
 
@@ -63,7 +64,7 @@ suite('Bookmark glyph margin', () => {
 		});
 	});
 
-	function setup(enabled = true) {
+	function setup(enabled = true, debuggerState: { readonly hasEnabledDebuggers: boolean; readonly canSetBreakpoints: boolean } = { hasEnabledDebuggers: false, canSetBreakpoints: false }) {
 		const container = mainWindow.document.createElement('div');
 		const inner = container.appendChild(mainWindow.document.createElement('div'));
 		const toggled: { lineNumber: number; column: number | undefined }[] = [];
@@ -83,7 +84,11 @@ suite('Bookmark glyph margin', () => {
 			}
 		});
 		const configurationService = new TestConfigurationService({ [ALT_CLICK_TOGGLES_BOOKMARK_SETTING]: enabled });
-		store.add(new BookmarkGlyphMarginContribution(editor, bookmarksService, configurationService));
+		const debugService = upcastPartial<IDebugService>({
+			getAdapterManager: () => upcastPartial<IAdapterManager>({ hasEnabledDebuggers: () => debuggerState.hasEnabledDebuggers }),
+			canSetBreakpointsIn: () => debuggerState.canSetBreakpoints
+		});
+		store.add(new BookmarkGlyphMarginContribution(editor, bookmarksService, configurationService, debugService));
 
 		const click = (init: MouseEventInit) => {
 			const event = new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0, ...init });
@@ -109,6 +114,23 @@ suite('Bookmark glyph margin', () => {
 		const onBreakpoint = click({ altKey: true });
 
 		assert.deepStrictEqual({ plain, onBreakpoint, toggled, reachedEditor }, { plain: false, onBreakpoint: false, toggled: [], reachedEditor: ['mousedown', 'mousedown'] });
+	});
+
+	test('Alt+click is left to the debugger in files where it can set breakpoints', () => {
+		const debuggable = setup(true, { hasEnabledDebuggers: true, canSetBreakpoints: true });
+		const debuggableResult = { prevented: debuggable.click({ altKey: true }), toggled: debuggable.toggled, reachedEditor: debuggable.reachedEditor };
+
+		const plainText = setup(true, { hasEnabledDebuggers: true, canSetBreakpoints: false });
+		const plainTextResult = { prevented: plainText.click({ altKey: true }), toggled: plainText.toggled, reachedEditor: plainText.reachedEditor };
+
+		const withoutDebugger = setup(true, { hasEnabledDebuggers: false, canSetBreakpoints: true });
+		const withoutDebuggerResult = { prevented: withoutDebugger.click({ altKey: true }), toggled: withoutDebugger.toggled, reachedEditor: withoutDebugger.reachedEditor };
+
+		assert.deepStrictEqual({ debuggableResult, plainTextResult, withoutDebuggerResult }, {
+			debuggableResult: { prevented: false, toggled: [], reachedEditor: ['mousedown'] },
+			plainTextResult: { prevented: true, toggled: [{ lineNumber: 3, column: 1 }], reachedEditor: [] },
+			withoutDebuggerResult: { prevented: true, toggled: [{ lineNumber: 3, column: 1 }], reachedEditor: [] }
+		});
 	});
 
 	test('does nothing when the setting is turned off', () => {
