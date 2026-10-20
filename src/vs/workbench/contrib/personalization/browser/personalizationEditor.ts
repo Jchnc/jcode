@@ -7,13 +7,13 @@ import './media/personalization.css';
 import { $, addDisposableListener, append, Dimension, EventHelper, EventType, getActiveElement, getWindow, isHTMLElement } from '../../../../base/browser/dom.js';
 import { InputBox } from '../../../../base/browser/ui/inputbox/inputBox.js';
 import { Codicon } from '../../../../base/common/codicons.js';
-import { DisposableStore, MutableDisposable } from '../../../../base/common/lifecycle.js';
+import { DisposableStore, MutableDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
 import { localize } from '../../../../nls.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { ConfigurationTarget, IConfigurationService, IConfigurationValue } from '../../../../platform/configuration/common/configuration.js';
 import { ConfigurationScope, Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
-import { INotificationService } from '../../../../platform/notification/common/notification.js';
+import { INotificationService, Severity } from '../../../../platform/notification/common/notification.js';
 import { Registry } from '../../../../platform/registry/common/platform.js';
 import { IStorageService } from '../../../../platform/storage/common/storage.js';
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
@@ -51,6 +51,17 @@ interface PersonalizationSection {
 	extraReset?: { readonly isModified: () => boolean; readonly reset: () => void };
 }
 
+/** What a section's Reset to Defaults cleared, which Undo puts back. */
+interface ClearedSection {
+	readonly workspaceId: string;
+	/** The scope the settings were cleared at. */
+	readonly target: ConfigurationTarget;
+	/** The value each reset setting held at that scope. */
+	readonly settings: ReadonlyMap<string, PersonalizationValue | undefined>;
+	/** The workspace color that was saved, if it was reset. */
+	readonly appearance: IWorkspaceAppearance | undefined;
+}
+
 interface SettingControl {
 	readonly key: string;
 	readonly row: HTMLElement;
@@ -75,6 +86,8 @@ export class PersonalizationEditor extends EditorPane {
 	private readonly controls: SettingControl[] = [];
 	private readonly updates: (() => void)[] = [];
 	private readonly pageDisposables = this._register(new DisposableStore());
+	/** The notification that offers to undo the latest Reset to Defaults. */
+	private readonly undoOffer = this._register(new MutableDisposable<DisposableStore>());
 	private readonly pendingSettings = new Set<string>();
 	/** The newest value chosen on each range control that has not finished saving, which the control keeps showing meanwhile. */
 	private readonly unsavedRangeValues = new Map<string, { readonly value: number; readonly target: ConfigurationTarget }>();
@@ -514,14 +527,14 @@ export class PersonalizationEditor extends EditorPane {
 		this.restoreFocus(focus);
 	}
 
-	/** What the selected scope allows for a setting, and what it holds there. */
-	private inspectSetting(key: string): { readonly config: IConfigurationValue<PersonalizationValue> | undefined; readonly policy: boolean; readonly userOnly: boolean; readonly disabled: boolean; readonly ownValue: PersonalizationValue | undefined } {
+	/** What a scope, by default the selected one, allows for a setting, and what it holds there. */
+	private inspectSetting(key: string, target = this.target): { readonly config: IConfigurationValue<PersonalizationValue> | undefined; readonly policy: boolean; readonly userOnly: boolean; readonly disabled: boolean; readonly ownValue: PersonalizationValue | undefined } {
 		const property = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).getConfigurationProperties()[key];
 		const config = this.configurationService.inspect<PersonalizationValue>(key);
 		const scope = property?.scope;
-		const userOnly = this.target === ConfigurationTarget.WORKSPACE && (scope === ConfigurationScope.APPLICATION || scope === ConfigurationScope.MACHINE || scope === ConfigurationScope.APPLICATION_MACHINE);
+		const userOnly = target === ConfigurationTarget.WORKSPACE && (scope === ConfigurationScope.APPLICATION || scope === ConfigurationScope.MACHINE || scope === ConfigurationScope.APPLICATION_MACHINE);
 		const policy = config?.policyValue !== undefined;
-		return { config, policy, userOnly, disabled: userOnly || policy || !property, ownValue: this.target === ConfigurationTarget.WORKSPACE ? config?.workspaceValue : config?.userValue };
+		return { config, policy, userOnly, disabled: userOnly || policy || !property, ownValue: target === ConfigurationTarget.WORKSPACE ? config?.workspaceValue : config?.userValue };
 	}
 
 	private canReset(key: string): boolean {
@@ -630,14 +643,60 @@ export class PersonalizationEditor extends EditorPane {
 		}
 	}
 
-	/** Clears what a section manages: its settings at the selected scope, and its state kept outside the settings files. */
+	/**
+	 * Clears what a section manages: its settings at the selected scope, and its state kept outside the settings files.
+	 * What was cleared is offered back with an Undo action.
+	 */
 	private async resetSection(section: PersonalizationSection): Promise<void> {
+		// A color that was typed but not applied is not saved, so it is dropped rather than offered back.
+		if (section.extraReset) { this.discardColorDraft(); }
+		const target = this.target;
 		const keys = section.keys.filter(key => this.canReset(key));
 		const extra = section.extraReset?.isModified() ? section.extraReset : undefined;
 		if (!keys.length && !extra) { return; }
+		const cleared: ClearedSection = {
+			workspaceId: this.workspaceService.getWorkspace().id,
+			target,
+			settings: new Map(keys.map(key => [key, this.inspectSetting(key).ownValue] as const)),
+			appearance: extra ? this.appearanceService.appearance : undefined
+		};
 		extra?.reset();
-		if (keys.length && !await this.updateSettings(new Map(keys.map(key => [key, undefined] as const)))) { return; }
-		this.status.textContent = localize('personalization.sectionReset', "{0} reset to defaults.", section.title);
+		if (keys.length && !await this.updateSettings(new Map(keys.map(key => [key, undefined] as const)), target)) { return; }
+		const message = localize('personalization.sectionReset', "{0} reset to defaults.", section.title);
+		this.status.textContent = message;
+		this.offerUndo(section, message, cleared);
+	}
+
+	/** Shows what was reset with an action that brings it back. Only the latest reset can be undone. */
+	private offerUndo(section: PersonalizationSection, message: string, cleared: ClearedSection): void {
+		const offer = new DisposableStore();
+		const notification = this.notificationService.prompt(Severity.Info, message, [{
+			label: localize('personalization.undoReset', "Undo"),
+			run: () => { void this.undoReset(section, cleared); }
+		}]);
+		// The offer ends with the page, and when the next reset replaces it.
+		offer.add(toDisposable(() => notification.close()));
+		this.undoOffer.value = offer;
+	}
+
+	/**
+	 * Puts back what a reset cleared, except anything changed again since: that is newer than what
+	 * would be restored, and in another workspace it is not the same setting at all.
+	 */
+	private async undoReset(section: PersonalizationSection, cleared: ClearedSection): Promise<void> {
+		this.undoOffer.clear();
+		if (this.workspaceService.getWorkspace().id !== cleared.workspaceId) { return; }
+		const settings = new Map([...cleared.settings].filter(([key]) => this.inspectSetting(key, cleared.target).ownValue === undefined));
+		const appearance = this.appearanceService.appearance ? undefined : cleared.appearance;
+		if (appearance) {
+			const preview = this.appearanceService.beginPreview();
+			try { preview.update(appearance); preview.apply(); }
+			finally { preview.dispose(); }
+		}
+		if (settings.size && !await this.updateSettings(settings, cleared.target)) { return; }
+		if (settings.size || appearance) {
+			this.status.textContent = localize('personalization.sectionRestored', "{0} restored.", section.title);
+		}
 	}
 
 	private runCommand(id: string): void {

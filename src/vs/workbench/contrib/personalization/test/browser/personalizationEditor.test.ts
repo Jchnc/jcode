@@ -15,6 +15,7 @@ import { ICommandService } from '../../../../../platform/commands/common/command
 import { ConfigurationTarget, IConfigurationOverrides, IConfigurationUpdateOverrides, IConfigurationValue } from '../../../../../platform/configuration/common/configuration.js';
 import { ConfigurationScope, Extensions as ConfigurationExtensions, IConfigurationNode, IConfigurationRegistry } from '../../../../../platform/configuration/common/configurationRegistry.js';
 import { TestConfigurationService } from '../../../../../platform/configuration/test/common/testConfigurationService.js';
+import { INotificationHandle, IPromptChoice, NotificationMessage, Severity } from '../../../../../platform/notification/common/notification.js';
 import { TestNotificationService } from '../../../../../platform/notification/test/common/testNotificationService.js';
 import { Registry } from '../../../../../platform/registry/common/platform.js';
 import { NullTelemetryServiceShape } from '../../../../../platform/telemetry/common/telemetryUtils.js';
@@ -67,7 +68,18 @@ suite('Personalization editor', () => {
 		}
 	}
 
-	function createEditor(userValues: Record<string, string> = {}, oneWriteAtATime = false) {
+	/** Records the prompts it is asked to show, with whether each is still showing. */
+	class RecordingNotificationService extends TestNotificationService {
+		readonly prompts: { readonly message: string; readonly labels: string[]; readonly choose: () => void; closed: boolean }[] = [];
+
+		override prompt(_severity: Severity, message: NotificationMessage, choices: IPromptChoice[]): INotificationHandle {
+			const prompt = { message: String(message), labels: choices.map(choice => choice.label), choose: () => choices[0].run(), closed: false };
+			this.prompts.push(prompt);
+			return new class extends mock<INotificationHandle>() { override close() { prompt.closed = true; } }();
+		}
+	}
+
+	function createEditor(userValues: Record<string, string | number> = {}, oneWriteAtATime = false) {
 		const registry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration);
 		const properties: IConfigurationNode['properties'] = {};
 		for (const key of [tabPosition, sideBarLocation]) {
@@ -104,6 +116,7 @@ suite('Personalization editor', () => {
 		const storage = store.add(new TestStorageService());
 		const contextService = new TestContextService();
 		const appearanceService = store.add(new WorkspaceAppearanceService(storage, contextService));
+		const notificationService = new RecordingNotificationService();
 		const editor = store.add(new PersonalizationEditor(
 			new class extends mock<IEditorGroup>() {
 				override readonly id = 1;
@@ -116,7 +129,7 @@ suite('Personalization editor', () => {
 			new class extends mock<ICommandService>() { }(),
 			contextService,
 			appearanceService,
-			new TestNotificationService()
+			notificationService
 		));
 		editor.create(parent);
 		editor.layout(new Dimension(900, 700));
@@ -124,6 +137,7 @@ suite('Personalization editor', () => {
 		return {
 			configurationService,
 			appearanceService,
+			notificationService,
 			parent,
 			control,
 			row: control(`${tabPosition}:left`).closest('.personalization-setting')!,
@@ -255,6 +269,58 @@ suite('Personalization editor', () => {
 			after: 'true',
 			updates: [],
 			status: 'Workspace color reset to defaults.',
+		});
+	});
+
+	test('offers to undo a reset, restoring only the settings it reset that are still at their defaults', async () => {
+		const { configurationService, notificationService, control, parent } = createEditor({ [tabPosition]: 'left', [verticalTabsWidth]: 300, [sideBarLocation]: 'right' });
+		control('section:tabs:reset').click();
+		configurationService.saved.complete();
+		await timeout(0);
+		const afterReset = { prompts: notificationService.prompts.map(({ message, labels, closed }) => ({ message, labels, closed })), values: Object.fromEntries(configurationService.userValues) };
+
+		// Changed again since the reset, so undoing must leave it alone.
+		configurationService.userValues.set(tabPosition, 'right');
+		notificationService.prompts[0].choose();
+		await timeout(0);
+
+		const undone = {
+			updates: configurationService.updates.slice(2),
+			values: Object.fromEntries(configurationService.userValues),
+			closed: notificationService.prompts[0].closed,
+			status: parent.querySelector('.personalization-status')?.textContent,
+		};
+
+		assert.deepStrictEqual({ afterReset, undone }, {
+			afterReset: {
+				prompts: [{ message: 'Editor tabs reset to defaults.', labels: ['Undo'], closed: false }],
+				values: { [sideBarLocation]: 'right' },
+			},
+			undone: {
+				updates: [{ key: verticalTabsWidth, value: 300, target: ConfigurationTarget.USER }],
+				values: { [sideBarLocation]: 'right', [tabPosition]: 'right', [verticalTabsWidth]: 300 },
+				closed: true,
+				status: 'Editor tabs restored.',
+			},
+		});
+	});
+
+	test('offers to undo a workspace color reset, and only the latest reset', async () => {
+		const { appearanceService, configurationService, notificationService, control, savedColor } = createEditor({ [tabPosition]: 'left' });
+		const preview = appearanceService.beginPreview();
+		preview.update({ color: '#3b82f6', style: 'prominent' });
+		preview.apply();
+
+		control('section:tabs:reset').click();
+		configurationService.saved.complete();
+		await timeout(0);
+		control('section:workspace:reset').click();
+		const afterReset = { appearance: appearanceService.appearance, closed: notificationService.prompts.map(prompt => prompt.closed) };
+		notificationService.prompts[1].choose();
+
+		assert.deepStrictEqual({ afterReset, restored: { appearance: appearanceService.appearance, saved: savedColor(), closed: notificationService.prompts.map(prompt => prompt.closed) } }, {
+			afterReset: { appearance: undefined, closed: [true, false] },
+			restored: { appearance: { color: '#3b82f6', style: 'prominent' }, saved: { color: '#3b82f6', style: 'prominent' }, closed: [true, true] },
 		});
 	});
 
