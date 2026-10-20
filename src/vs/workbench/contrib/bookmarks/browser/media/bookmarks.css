@@ -121,9 +121,17 @@
 	color: var(--vscode-editorBookmark-foreground);
 }
 
-.jcode-bookmarks-view .jcode-bookmark-row.stale .jcode-bookmark-marker,
-.jcode-bookmarks-view .jcode-bookmark-row.stale .jcode-bookmark-secondary {
+.jcode-bookmarks-view .jcode-bookmark-row.stale .jcode-bookmark-marker {
 	color: var(--vscode-editorWarning-foreground);
+}
+
+.jcode-bookmarks-view .jcode-bookmark-row.stale .jcode-bookmark-primary,
+.jcode-bookmarks-view .jcode-bookmark-row.stale .jcode-bookmark-secondary {
+	color: var(--vscode-descriptionForeground);
+}
+
+.jcode-bookmarks-view .jcode-bookmark-row.stale .jcode-bookmark-main {
+	padding-right: 86px;
 }
 
 .jcode-bookmarks-view .jcode-bookmark-content {

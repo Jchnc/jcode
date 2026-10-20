@@ -1,0 +1,208 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+import assert from 'assert';
+import { timeout } from '../../../../../base/common/async.js';
+import { DisposableStore } from '../../../../../base/common/lifecycle.js';
+import { URI } from '../../../../../base/common/uri.js';
+import { runWithFakedTimers } from '../../../../../base/test/common/timeTravelScheduler.js';
+import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
+import { Range } from '../../../../../editor/common/core/range.js';
+import { IModelService } from '../../../../../editor/common/services/model.js';
+import { ITextModel } from '../../../../../editor/common/model.js';
+import { createModelServices } from '../../../../../editor/test/common/testTextModel.js';
+import { IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
+import { IFileService } from '../../../../../platform/files/common/files.js';
+import { FileService } from '../../../../../platform/files/common/fileService.js';
+import { NullLogService } from '../../../../../platform/log/common/log.js';
+import { MockContextKeyService } from '../../../../../platform/keybinding/test/common/mockKeybindingService.js';
+import { InMemoryStorageService, IStorageService } from '../../../../../platform/storage/common/storage.js';
+import { IUriIdentityService } from '../../../../../platform/uriIdentity/common/uriIdentity.js';
+import { UriIdentityService } from '../../../../../platform/uriIdentity/common/uriIdentityService.js';
+import { CodeBookmarksService } from '../../browser/bookmarksService.js';
+
+suite('CodeBookmarksService', () => {
+	const store = ensureNoDisposablesAreLeakedInTestSuite();
+	const resource = URI.file('/workspace/file.txt');
+
+	function setup(text = 'alpha\nbeta\ngamma\ndelta\nepsilon') {
+		const disposables = store.add(new DisposableStore());
+		const instantiationService = createModelServices(disposables);
+		const fileService = disposables.add(new FileService(new NullLogService()));
+		instantiationService.stub(IFileService, fileService);
+		instantiationService.stub(IStorageService, disposables.add(new InMemoryStorageService()));
+		instantiationService.stub(IUriIdentityService, disposables.add(new UriIdentityService(fileService)));
+		instantiationService.stub(IContextKeyService, new MockContextKeyService());
+
+		const model = disposables.add(instantiationService.get(IModelService).createModel(text, null, resource));
+		const service = disposables.add(instantiationService.createInstance(CodeBookmarksService));
+		return { model, service };
+	}
+
+	function snapshot(service: CodeBookmarksService) {
+		// Looking up a bookmark applies the edits that are otherwise picked up after a short delay.
+		service.find(resource, 1);
+		return service.bookmarks.map(({ lineNumber, lineText, stale, note }) => ({ lineNumber, lineText, stale, note }));
+	}
+
+	function countGutterDecorations(model: ITextModel): number {
+		return model.getAllDecorations().filter(decoration => decoration.options.description === 'jcode-code-bookmark').length;
+	}
+
+	function deleteLine(model: ITextModel, lineNumber: number): void {
+		model.applyEdits([{ range: lineNumber < model.getLineCount() ? new Range(lineNumber, 1, lineNumber + 1, 1) : new Range(lineNumber - 1, model.getLineMaxColumn(lineNumber - 1), lineNumber, model.getLineMaxColumn(lineNumber)), text: '' }]);
+	}
+
+	test('marks a bookmark stale instead of moving it to the next line when its line is deleted', () => {
+		const { model, service } = setup();
+		service.toggle(resource, 3);
+		service.toggle(resource, 5);
+
+		deleteLine(model, 3);
+
+		assert.deepStrictEqual({
+			bookmarks: snapshot(service),
+			gutterDecorations: countGutterDecorations(model),
+			occupant: service.find(resource, 3)
+		}, {
+			bookmarks: [
+				{ lineNumber: 3, lineText: 'gamma', stale: true, note: undefined },
+				{ lineNumber: 4, lineText: 'epsilon', stale: false, note: undefined }
+			],
+			gutterDecorations: 1,
+			occupant: undefined
+		});
+	});
+
+	test('marks a bookmark stale when the last line of the file is deleted', () => {
+		const { model, service } = setup();
+		service.toggle(resource, 5);
+
+		deleteLine(model, 5);
+
+		assert.deepStrictEqual(snapshot(service), [{ lineNumber: 5, lineText: 'epsilon', stale: true, note: undefined }]);
+	});
+
+	test('reports a deleted line to listeners without waiting for edits to settle', () => {
+		const { model, service } = setup();
+		service.toggle(resource, 3);
+		let changes = 0;
+		store.add(service.onDidChangeBookmarks(() => changes++));
+
+		deleteLine(model, 3);
+
+		assert.strictEqual(changes, 1);
+	});
+
+	test('follows edits once they settle', () => runWithFakedTimers({ useFakeTimers: true }, async () => {
+		const { model, service } = setup();
+		service.toggle(resource, 3);
+
+		model.applyEdits([{ range: new Range(1, 1, 1, 1), text: 'inserted\n' }]);
+		await timeout(250);
+
+		assert.deepStrictEqual(service.bookmarks.map(bookmark => bookmark.lineNumber), [4]);
+	}));
+
+	test('keeps a bookmark on its line when only the text of the line changes', () => {
+		const { model, service } = setup();
+		service.toggle(resource, 2);
+
+		model.applyEdits([{ range: new Range(2, 1, 2, 5), text: 'changed' }]);
+		model.applyEdits([{ range: new Range(1, 1, 1, 1), text: 'inserted\n' }]);
+
+		assert.deepStrictEqual(snapshot(service), [{ lineNumber: 3, lineText: 'changed', stale: false, note: undefined }]);
+	});
+
+	test('keeps a bookmark on an empty line when the line before it is deleted', () => {
+		const { model, service } = setup('alpha\nbeta\n\ndelta');
+		service.toggle(resource, 3);
+
+		deleteLine(model, 2);
+
+		assert.deepStrictEqual({ bookmarks: snapshot(service), gutterDecorations: countGutterDecorations(model) }, {
+			bookmarks: [{ lineNumber: 2, lineText: '', stale: false, note: undefined }],
+			gutterDecorations: 1
+		});
+	});
+
+	test('restores a stale bookmark when the deletion is undone', () => {
+		const { model, service } = setup();
+		service.toggle(resource, 3);
+		model.pushEditOperations([], [{ range: new Range(3, 1, 4, 1), text: '' }], () => null);
+		const afterDelete = snapshot(service);
+
+		model.undo();
+
+		assert.deepStrictEqual({ afterDelete, afterUndo: snapshot(service), gutterDecorations: countGutterDecorations(model) }, {
+			afterDelete: [{ lineNumber: 3, lineText: 'gamma', stale: true, note: undefined }],
+			afterUndo: [{ lineNumber: 3, lineText: 'gamma', stale: false, note: undefined }],
+			gutterDecorations: 1
+		});
+	});
+
+	test('does not let a similar line adopt a stale bookmark when the file is refreshed later', () => {
+		const { model, service } = setup('}\nbeta\n}\ndelta');
+		service.toggle(resource, 3);
+		deleteLine(model, 3);
+
+		service.toggle(resource, 1);
+
+		assert.deepStrictEqual(snapshot(service), [
+			{ lineNumber: 3, lineText: '}', stale: true, note: undefined },
+			{ lineNumber: 1, lineText: '}', stale: false, note: undefined }
+		]);
+	});
+
+	test('bookmarks a new line even when a stale bookmark was last known on it', () => {
+		const { model, service } = setup();
+		service.toggle(resource, 3);
+		deleteLine(model, 3);
+
+		service.toggle(resource, 3);
+
+		assert.deepStrictEqual(snapshot(service), [
+			{ lineNumber: 3, lineText: 'gamma', stale: true, note: undefined },
+			{ lineNumber: 3, lineText: 'delta', stale: false, note: undefined }
+		]);
+	});
+
+	test('relocates a stale bookmark to another line and clears its stale state', () => {
+		const { model, service } = setup();
+		const bookmark = service.toggle(resource, 3)!;
+		service.updateNote(bookmark.id, 'remember this');
+		deleteLine(model, 3);
+
+		service.relocate(bookmark.id, resource, 1);
+
+		assert.deepStrictEqual({ bookmarks: snapshot(service), gutterDecorations: countGutterDecorations(model) }, {
+			bookmarks: [{ lineNumber: 1, lineText: 'alpha', stale: false, note: 'remember this' }],
+			gutterDecorations: 1
+		});
+	});
+
+	test('merges a stale bookmark into the bookmark already on the line it is relocated to', () => {
+		const { model, service } = setup();
+		const stale = service.toggle(resource, 3)!;
+		service.updateNote(stale.id, 'remember this');
+		service.toggle(resource, 1);
+		deleteLine(model, 3);
+
+		service.relocate(stale.id, resource, 1);
+
+		assert.deepStrictEqual(snapshot(service), [{ lineNumber: 1, lineText: 'alpha', stale: false, note: 'remember this' }]);
+	});
+
+	test('removes only stale bookmarks', () => {
+		const { model, service } = setup();
+		service.toggle(resource, 2);
+		service.toggle(resource, 4);
+		deleteLine(model, 2);
+
+		service.removeStale();
+
+		assert.deepStrictEqual(snapshot(service), [{ lineNumber: 3, lineText: 'delta', stale: false, note: undefined }]);
+	});
+});

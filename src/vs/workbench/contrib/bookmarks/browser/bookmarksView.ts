@@ -28,7 +28,7 @@ import { IViewletViewOptions } from '../../../browser/parts/views/viewsViewlet.j
 import { IViewDescriptorService } from '../../../common/views.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { IOpenerService } from '../../../../platform/opener/common/opener.js';
-import { ICodeBookmark, ICodeBookmarksService } from '../common/bookmarks.js';
+import { getBookmarkLabel, ICodeBookmark, ICodeBookmarksService } from '../common/bookmarks.js';
 
 export class BookmarksView extends ViewPane {
 	static readonly ID = 'workbench.view.jcodeBookmarks';
@@ -140,31 +140,35 @@ export class BookmarksView extends ViewPane {
 			row.classList.add('stale');
 		}
 
+		const primary = getBookmarkLabel(bookmark);
 		const main = DOM.append(row, DOM.$('button.jcode-bookmark-main', {
 			type: 'button',
-			'title': bookmark.stale ? localize('bookmarkNeedsAttentionTitle', "This bookmark could not be relocated confidently.") : localize('openBookmarkTitle', "Open bookmark")
+			'title': bookmark.stale ? localize('staleBookmarkTitle', "The bookmarked line was deleted or can no longer be found. Relocate the bookmark to the current line, or remove it.") : localize('openBookmarkTitle', "Open bookmark")
 		})) as HTMLButtonElement;
+		if (bookmark.stale) {
+			main.setAttribute('aria-label', localize('staleBookmarkAriaLabel', "{0}, stale bookmark, was on line {1}", primary, bookmark.lineNumber));
+		}
 		this.firstFocusable ??= main;
 		const marker = DOM.append(main, DOM.$('span.jcode-bookmark-marker', { 'aria-hidden': 'true' }));
 		marker.classList.add(...ThemeIcon.asClassNameArray(bookmark.stale ? Codicon.warning : Codicon.bookmark));
 		const content = DOM.append(main, DOM.$('.jcode-bookmark-content'));
-		const primary = bookmark.note || bookmark.lineText.trim() || localize('bookmarkEmptyLine', "Empty line");
 		DOM.append(content, DOM.$('span.jcode-bookmark-primary', undefined, primary));
-		const secondaryParts = [localize('bookmarkLine', "Line {0}", bookmark.lineNumber)];
+		const secondaryParts = [bookmark.stale ? localize('bookmarkStaleLine', "Was on line {0}", bookmark.lineNumber) : localize('bookmarkLine', "Line {0}", bookmark.lineNumber)];
 		if (bookmark.note && bookmark.lineText.trim()) {
 			secondaryParts.push(bookmark.lineText.trim());
 		}
 		if (bookmark.stale) {
-			secondaryParts.push(localize('bookmarkNeedsAttention', "Needs attention"));
+			secondaryParts.push(localize('bookmarkStale', "Stale"));
 		}
 		DOM.append(content, DOM.$('span.jcode-bookmark-secondary', undefined, secondaryParts.join(' · ')));
 		this.renderDisposables.add(DOM.addDisposableListener(main, DOM.EventType.CLICK, () => this.openBookmark(bookmark)));
 
 		const actions = DOM.append(row, DOM.$('.jcode-bookmark-actions'));
-		const edit = this.actionButton(actions, Codicon.edit, localize('editBookmarkNote', "Edit Bookmark Note"), () => this.editNote(bookmark));
-		const remove = this.actionButton(actions, Codicon.trash, localize('removeBookmark', "Remove Bookmark"), () => this.bookmarksService.remove(bookmark.id));
-		edit.tabIndex = 0;
-		remove.tabIndex = 0;
+		if (bookmark.stale) {
+			this.actionButton(actions, Codicon.target, localize('relocateBookmarkToLine', "Relocate Bookmark to Current Line"), () => this.commandService.executeCommand('jcode.bookmarks.relocate', bookmark.id));
+		}
+		this.actionButton(actions, Codicon.edit, localize('editBookmarkNote', "Edit Bookmark Note"), () => this.editNote(bookmark));
+		this.actionButton(actions, Codicon.trash, localize('removeBookmark', "Remove Bookmark"), () => this.bookmarksService.remove(bookmark.id));
 	}
 
 	private actionButton(parent: HTMLElement, icon: ThemeIcon, label: string, action: () => void | Promise<void>): HTMLButtonElement {

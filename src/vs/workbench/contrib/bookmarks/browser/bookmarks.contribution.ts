@@ -12,12 +12,14 @@ import { EditorContextKeys } from '../../../../editor/common/editorContextKeys.j
 import { ILocalizedString, localize, localize2 } from '../../../../nls.js';
 import { Action2, MenuId, registerAction2 } from '../../../../platform/actions/common/actions.js';
 import { CommandsRegistry } from '../../../../platform/commands/common/commands.js';
+import { IAccessibilityService } from '../../../../platform/accessibility/common/accessibility.js';
 import { ContextKeyExpr } from '../../../../platform/contextkey/common/contextkey.js';
 import { IDialogService } from '../../../../platform/dialogs/common/dialogs.js';
 import { SyncDescriptor } from '../../../../platform/instantiation/common/descriptors.js';
 import { ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { KeyChord, KeyCode, KeyMod } from '../../../../base/common/keyCodes.js';
 import { KeybindingWeight } from '../../../../platform/keybinding/common/keybindingsRegistry.js';
+import { ILabelService } from '../../../../platform/label/common/label.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
 import { Registry } from '../../../../platform/registry/common/platform.js';
@@ -28,7 +30,7 @@ import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase 
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { IViewsService } from '../../../services/views/common/viewsService.js';
 import { VIEW_CONTAINER } from '../../files/browser/explorerViewlet.js';
-import { CONTEXT_CODE_BOOKMARKS_PRESENT, ICodeBookmark, ICodeBookmarksService } from '../common/bookmarks.js';
+import { CONTEXT_CODE_BOOKMARKS_PRESENT, CONTEXT_CODE_BOOKMARKS_STALE_PRESENT, getBookmarkLabel, ICodeBookmark, ICodeBookmarksService } from '../common/bookmarks.js';
 import { CodeBookmarksService } from './bookmarksService.js';
 import { BookmarksView } from './bookmarksView.js';
 
@@ -38,6 +40,8 @@ const NEXT_BOOKMARK_ID = 'jcode.bookmarks.next';
 const PREVIOUS_BOOKMARK_ID = 'jcode.bookmarks.previous';
 const SHOW_BOOKMARKS_ID = 'jcode.bookmarks.show';
 const REMOVE_ALL_BOOKMARKS_ID = 'jcode.bookmarks.removeAll';
+const REMOVE_STALE_BOOKMARKS_ID = 'jcode.bookmarks.removeStale';
+const RELOCATE_BOOKMARK_ID = 'jcode.bookmarks.relocate';
 
 const bookmarksViewIcon = registerIcon('jcode-bookmarks-view-icon', Codicon.bookmark, localize('bookmarksViewIcon', "View icon of the Bookmarks view."));
 
@@ -191,6 +195,74 @@ registerAction2(class extends Action2 {
 		}
 	}
 });
+
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: REMOVE_STALE_BOOKMARKS_ID,
+			title: localize2('removeStaleBookmarks', "Remove Stale Bookmarks"),
+			f1: true,
+			precondition: CONTEXT_CODE_BOOKMARKS_STALE_PRESENT,
+			menu: {
+				id: MenuId.ViewTitle,
+				group: '1_cleanup',
+				order: 1,
+				when: ContextKeyExpr.and(ContextKeyExpr.equals('view', BookmarksView.ID), CONTEXT_CODE_BOOKMARKS_STALE_PRESENT)
+			}
+		});
+	}
+
+	run(accessor: ServicesAccessor): void {
+		accessor.get(ICodeBookmarksService).removeStale();
+	}
+});
+
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: RELOCATE_BOOKMARK_ID,
+			title: localize2('relocateBookmark', "Relocate Bookmark"),
+			f1: true,
+			precondition: CONTEXT_CODE_BOOKMARKS_STALE_PRESENT
+		});
+	}
+
+	async run(accessor: ServicesAccessor, bookmarkId?: unknown): Promise<void> {
+		const service = accessor.get(ICodeBookmarksService);
+		const notificationService = accessor.get(INotificationService);
+		const quickInputService = accessor.get(IQuickInputService);
+		const labelService = accessor.get(ILabelService);
+		const accessibilityService = accessor.get(IAccessibilityService);
+		const editor = getActiveCodeEditor(accessor.get(IEditorService));
+		const model = editor?.getModel();
+		const position = editor?.getPosition();
+		if (!model || !position) {
+			notificationService.info(localize('relocateNeedsEditor', "Place the cursor on a line in an editor to relocate a bookmark to it."));
+			return;
+		}
+
+		const id = typeof bookmarkId === 'string' ? bookmarkId : await pickStaleBookmark(service, quickInputService, labelService);
+		if (!id) {
+			return;
+		}
+		const relocated = service.relocate(id, model.uri, position.lineNumber, position.column);
+		if (relocated) {
+			accessibilityService.status(localize('bookmarkRelocated', "Bookmark relocated to line {0}", relocated.lineNumber));
+		}
+	}
+});
+
+async function pickStaleBookmark(service: ICodeBookmarksService, quickInputService: IQuickInputService, labelService: ILabelService): Promise<string | undefined> {
+	const picked = await quickInputService.pick(service.bookmarks.filter(bookmark => bookmark.stale).map(bookmark => ({
+		id: bookmark.id,
+		label: getBookmarkLabel(bookmark),
+		description: localize('staleBookmarkLocation', "{0}, was on line {1}", labelService.getUriLabel(bookmark.resource, { relative: true }), bookmark.lineNumber)
+	})), {
+		title: localize('relocateBookmarkTitle', "Relocate Bookmark"),
+		placeHolder: localize('relocateBookmarkPlaceholder', "Select the stale bookmark to move to the current line")
+	});
+	return picked?.id;
+}
 
 CommandsRegistry.registerCommandAlias('bookmarks.toggle', TOGGLE_BOOKMARK_ID);
 
