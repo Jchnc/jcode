@@ -14,7 +14,7 @@ import { ITextEditorOptions } from '../../../../../platform/editor/common/editor
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { ILabelService } from '../../../../../platform/label/common/label.js';
 import { INotificationHandle, INotificationService } from '../../../../../platform/notification/common/notification.js';
-import { IQuickInputService, IQuickPick, IQuickPickDidAcceptEvent, IQuickPickItem, IQuickPickItemButtonEvent, QuickInputHideReason, QuickPickFocus } from '../../../../../platform/quickinput/common/quickInput.js';
+import { IQuickInputService, IQuickInputButton, IQuickPick, IQuickPickDidAcceptEvent, IQuickPickItem, IQuickPickItemButtonEvent, QuickInputHideReason, QuickPickFocus } from '../../../../../platform/quickinput/common/quickInput.js';
 import { IUriIdentityService } from '../../../../../platform/uriIdentity/common/uriIdentity.js';
 import { extUri } from '../../../../../base/common/resources.js';
 import { PickerEditorState } from '../../../../browser/quickaccess.js';
@@ -38,6 +38,8 @@ suite('Go to Bookmark quick pick', () => {
 
 		const onDidChangeActive = disposables.add(new Emitter<IQuickPickItem[]>());
 		const onDidTriggerItemButton = disposables.add(new Emitter<IQuickPickItemButtonEvent<IQuickPickItem>>());
+		const onDidTriggerButton = disposables.add(new Emitter<IQuickInputButton>());
+		const backButton: IQuickInputButton = { iconClass: 'back' };
 		const onDidAccept = disposables.add(new Emitter<IQuickPickDidAcceptEvent>());
 		const onDidHide = disposables.add(new Emitter<{ reason: QuickInputHideReason }>());
 		let activeItems: readonly IQuickPickItem[] = [];
@@ -59,6 +61,7 @@ suite('Go to Bookmark quick pick', () => {
 			get selectedItems() { return selectedItems; },
 			onDidChangeActive: onDidChangeActive.event,
 			onDidTriggerItemButton: onDidTriggerItemButton.event,
+			onDidTriggerButton: onDidTriggerButton.event,
 			onDidAccept: onDidAccept.event,
 			onDidHide: onDidHide.event,
 			show() { log.push('show'); },
@@ -84,9 +87,10 @@ suite('Go to Bookmark quick pick', () => {
 					bookmarks = bookmarks.map(candidate => ({ ...candidate, lineNumber: candidate.lineNumber + pendingLinesInserted }));
 					pendingLinesInserted = 0;
 				},
-				remove(id: string) { bookmarks = bookmarks.filter(candidate => candidate.id !== id); }
+				remove(id: string) { bookmarks = bookmarks.filter(candidate => candidate.id !== id); },
+				updateColor(id: string, color: string | undefined) { bookmarks = bookmarks.map(candidate => candidate.id === id ? { ...candidate, color } : candidate); }
 			}),
-			quickInputService: upcastPartial<IQuickInputService>({ createQuickPick: (() => picker) as IQuickInputService['createQuickPick'] }),
+			quickInputService: upcastPartial<IQuickInputService>({ createQuickPick: (() => picker) as IQuickInputService['createQuickPick'], backButton }),
 			editorService: new class extends mock<IEditorService>() {
 				override async openEditor(input: unknown): Promise<undefined> {
 					log.push(`open ${isResourceEditorInput(input) ? input.resource.path : ''}`);
@@ -114,6 +118,12 @@ suite('Go to Bookmark quick pick', () => {
 			activate: (index: number) => { picker.activeItems = [picker.items[index]]; },
 			select: (index: number) => { selectedItems = [picker.items[index]]; onDidAccept.fire({ inBackground: false }); },
 			removeItem: (index: number) => onDidTriggerItemButton.fire({ button: { iconClass: 'remove' }, item: picker.items[index] }),
+			/**
+			 * Presses a button of an item, such as the first button of a bookmark, which sets its color.
+			 */
+			pressItemButton: (index: number, buttonIndex: number) => onDidTriggerItemButton.fire({ button: picker.items[index].buttons![buttonIndex], item: picker.items[index] }),
+			pressBack: () => onDidTriggerButton.fire(backButton),
+			colors: () => picker.items.map(item => ({ label: item.label, description: item.description, iconColor: item.iconColor?.id })),
 			hide: (reason: QuickInputHideReason) => onDidHide.fire({ reason }),
 			get activeLabels() { return activeItems.map(item => item.label); }
 		};
@@ -130,7 +140,7 @@ suite('Go to Bookmark quick pick', () => {
 		assert.deepStrictEqual({
 			items: items(),
 			matchesDescriptionAndDetail: [picker.matchOnDescription, picker.matchOnDetail],
-			removeButtons: picker.items.map(item => item.buttons?.length)
+			buttons: picker.items.map(item => item.buttons?.map(button => button.tooltip))
 		}, {
 			items: [
 				{ label: 'text 1', description: '/src/a.ts:1', detail: undefined },
@@ -138,7 +148,7 @@ suite('Go to Bookmark quick pick', () => {
 				{ label: 'check this', description: '/src/b.ts:4', detail: 'text 4' }
 			],
 			matchesDescriptionAndDetail: [true, true],
-			removeButtons: [1, 1, 1]
+			buttons: [['Set Bookmark Color', 'Remove Bookmark'], ['Set Bookmark Color', 'Remove Bookmark'], ['Set Bookmark Color', 'Remove Bookmark']]
 		});
 
 		hide(QuickInputHideReason.Blur);
@@ -228,6 +238,71 @@ suite('Go to Bookmark quick pick', () => {
 		quickPick.removeItem(3);
 
 		assert.deepStrictEqual({ items: quickPick.items().map(item => item.label), active: quickPick.activeLabels }, { items: ['text 1', 'text 2', 'text 3'], active: ['text 2'] });
+
+		quickPick.hide(QuickInputHideReason.Blur);
+		await quickPick.closed;
+	});
+
+	test('shows the color of a bookmark in its icon and names it next to the line, where a search finds it', async () => {
+		const quickPick = setup([bookmark('/src/a.ts', 1), bookmark('/src/b.ts', 2, { color: 'blue' }), bookmark('/src/c.ts', 3, { color: 'not-in-the-palette' })]);
+
+		assert.deepStrictEqual(quickPick.colors(), [
+			{ label: 'text 1', description: '/src/a.ts:1', iconColor: undefined },
+			{ label: 'text 2', description: '/src/b.ts:2 · Blue', iconColor: 'editorBookmark.blueForeground' },
+			{ label: 'text 3', description: '/src/c.ts:3', iconColor: undefined }
+		]);
+
+		quickPick.hide(QuickInputHideReason.Blur);
+		await quickPick.closed;
+	});
+
+	test('tags a bookmark with a color picked in the list, and returns to the bookmarks with it highlighted', async () => {
+		const quickPick = setup([bookmark('/src/a.ts', 1), bookmark('/src/b.ts', 2)]);
+		quickPick.picker.value = 'text';
+
+		quickPick.pressItemButton(1, 0);
+		const picking = { title: quickPick.picker.title, search: quickPick.picker.value, back: quickPick.picker.buttons.length, labels: quickPick.picker.items.map(item => item.label), active: quickPick.activeLabels };
+		quickPick.select(quickPick.picker.items.findIndex(item => item.label === 'Blue'));
+
+		assert.deepStrictEqual({ picking, after: { title: quickPick.picker.title, search: quickPick.picker.value, back: quickPick.picker.buttons.length, colors: quickPick.colors(), active: quickPick.activeLabels } }, {
+			picking: {
+				title: 'Set Bookmark Color',
+				search: '',
+				back: 1,
+				labels: ['No Color', 'Slate', 'Blue', 'Cyan', 'Teal', 'Rose', 'Amber', 'Orange', 'Emerald', 'Pink', 'Violet', 'Indigo'],
+				active: ['No Color']
+			},
+			after: {
+				title: 'Go to Bookmark',
+				search: 'text',
+				back: 0,
+				colors: [
+					{ label: 'text 1', description: '/src/a.ts:1', iconColor: undefined },
+					{ label: 'text 2', description: '/src/b.ts:2 · Blue', iconColor: 'editorBookmark.blueForeground' }
+				],
+				active: ['text 2']
+			}
+		});
+
+		quickPick.hide(QuickInputHideReason.Blur);
+		await quickPick.closed;
+	});
+
+	test('removes the color of a bookmark by picking no color, and leaves it alone when going back', async () => {
+		const quickPick = setup([bookmark('/src/a.ts', 1, { color: 'teal' })]);
+
+		quickPick.pressItemButton(0, 0);
+		const marked = quickPick.picker.items.filter(item => item.description === 'Current').map(item => item.label);
+		quickPick.pressBack();
+		const afterBack = quickPick.colors();
+		quickPick.pressItemButton(0, 0);
+		quickPick.select(0);
+
+		assert.deepStrictEqual({ marked, afterBack, afterRemoval: quickPick.colors() }, {
+			marked: ['Teal'],
+			afterBack: [{ label: 'text 1', description: '/src/a.ts:1 · Teal', iconColor: 'editorBookmark.tealForeground' }],
+			afterRemoval: [{ label: 'text 1', description: '/src/a.ts:1', iconColor: undefined }]
+		});
 
 		quickPick.hide(QuickInputHideReason.Blur);
 		await quickPick.closed;

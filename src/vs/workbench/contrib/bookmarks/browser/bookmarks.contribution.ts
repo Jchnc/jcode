@@ -15,7 +15,7 @@ import { Action2, MenuId, registerAction2 } from '../../../../platform/actions/c
 import { CommandsRegistry } from '../../../../platform/commands/common/commands.js';
 import { IAccessibilityService } from '../../../../platform/accessibility/common/accessibility.js';
 import { Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
-import { ContextKeyExpr } from '../../../../platform/contextkey/common/contextkey.js';
+import { ContextKeyExpr, IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
 import { IDialogService } from '../../../../platform/dialogs/common/dialogs.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { SyncDescriptor } from '../../../../platform/instantiation/common/descriptors.js';
@@ -36,6 +36,7 @@ import { VIEW_CONTAINER } from '../../files/browser/explorerViewlet.js';
 import { IUriIdentityService } from '../../../../platform/uriIdentity/common/uriIdentity.js';
 import { FocusedViewContext } from '../../../common/contextkeys.js';
 import { BOOKMARKS_VIEW_ITEM_INLINE_MENU, BOOKMARKS_VIEW_ITEM_MENU, BookmarkItemKind, CONTEXT_CODE_BOOKMARK_ITEM_KIND, CONTEXT_CODE_BOOKMARKS_PRESENT, CONTEXT_CODE_BOOKMARKS_STALE_PRESENT, getBookmarkLabel, ICodeBookmark, ICodeBookmarksService, isBookmarkActionContext } from '../common/bookmarks.js';
+import { pickBookmarkColor } from './bookmarksColorPick.js';
 import { ALT_CLICK_TOGGLES_BOOKMARK_SETTING, BookmarkGlyphMarginContribution } from './bookmarksGlyphMargin.js';
 import { findBookmarkToNavigateTo, getBookmarkFileOrder, openBookmark } from './bookmarksNavigation.js';
 import { showBookmarksQuickPick } from './bookmarksQuickPick.js';
@@ -54,6 +55,7 @@ const RELOCATE_BOOKMARK_ID = 'jcode.bookmarks.relocate';
 const GO_TO_BOOKMARK_ID = 'jcode.bookmarks.goTo';
 const EDIT_BOOKMARK_NOTE_ID = 'jcode.bookmarks.editNote';
 const REMOVE_BOOKMARK_ID = 'jcode.bookmarks.remove';
+const SET_BOOKMARK_COLOR_ID = 'jcode.bookmarks.setColor';
 
 const IS_BOOKMARK_ITEM = CONTEXT_CODE_BOOKMARK_ITEM_KIND.notEqualsTo(BookmarkItemKind.File);
 const IS_FOCUSED_IN_BOOKMARKS_VIEW = FocusedViewContext.isEqualTo(BookmarksView.ID);
@@ -199,6 +201,16 @@ function getContextBookmark(accessor: ServicesAccessor, context: unknown): ICode
 }
 
 /**
+ * Finds the bookmark on the line of the cursor in the active editor.
+ */
+function getBookmarkAtCursor(accessor: ServicesAccessor): ICodeBookmark | undefined {
+	const editor = getActiveCodeEditor(accessor.get(IEditorService));
+	const model = editor?.getModel();
+	const position = editor?.getPosition();
+	return model && position ? accessor.get(ICodeBookmarksService).find(model.uri, position.lineNumber) : undefined;
+}
+
+/**
  * Finds the bookmark an action was invoked on: the one passed by the Bookmarks view, else the one
  * that has keyboard focus in the view.
  */
@@ -231,6 +243,39 @@ registerAction2(class extends Action2 {
 		const bookmark = resolveBookmark(accessor, context);
 		if (bookmark) {
 			await promptForBookmarkNote(service, quickInputService, bookmark);
+		}
+	}
+});
+
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: SET_BOOKMARK_COLOR_ID,
+			title: localize2('setBookmarkColor', "Set Bookmark Color..."),
+			icon: Codicon.symbolColor,
+			f1: true,
+			precondition: CONTEXT_CODE_BOOKMARKS_PRESENT,
+			menu: { id: BOOKMARKS_VIEW_ITEM_MENU, group: '1_modification', order: 3, when: IS_BOOKMARK_ITEM }
+		});
+	}
+
+	async run(accessor: ServicesAccessor, context?: unknown): Promise<void> {
+		const service = accessor.get(ICodeBookmarksService);
+		const quickInputService = accessor.get(IQuickInputService);
+		const accessibilityService = accessor.get(IAccessibilityService);
+		// Without an item to act on, as from the palette, it is the bookmark focused in the Bookmarks view when that has
+		// focus, else the bookmark under the cursor. A bookmark that was focused in the view earlier is not a hidden target.
+		const isFocusedInView = accessor.get(IContextKeyService).contextMatchesRules(IS_FOCUSED_IN_BOOKMARKS_VIEW);
+		const bookmark = getContextBookmark(accessor, context) ?? (isFocusedInView ? resolveBookmark(accessor, undefined) : getBookmarkAtCursor(accessor));
+		if (!bookmark) {
+			accessor.get(INotificationService).info(localize('setColorNeedsBookmark', "Place the cursor on a bookmarked line, or select a bookmark in the Bookmarks view, to set its color."));
+			return;
+		}
+
+		const pick = await pickBookmarkColor(quickInputService, bookmark.color);
+		if (pick) {
+			service.updateColor(bookmark.id, pick.color);
+			accessibilityService.status(pick.color ? localize('bookmarkColorSet', "Bookmark color set to {0}", pick.label) : localize('bookmarkColorRemoved', "Bookmark color removed"));
 		}
 	}
 });

@@ -130,6 +130,25 @@ suite('BookmarksTree', () => {
 		});
 	});
 
+	test('shows the color of a bookmark in its marker, names it, and announces it', () => {
+		const { tree, rows } = setup();
+		const describeRow = (row: HTMLElement) => ({
+			markerColor: row.querySelector<HTMLElement>('.jcode-bookmark-marker')!.style.color,
+			secondary: row.querySelector('.jcode-bookmark-secondary')!.textContent,
+			ariaLabel: row.getAttribute('aria-label')
+		});
+
+		tree.setBookmarks([bookmark('/a.ts', 1), bookmark('/a.ts', 2, { color: 'blue' }), bookmark('/a.ts', 3, { color: 'blue', stale: true })]);
+		const [, plain, colored, stale] = rows();
+
+		assert.deepStrictEqual({ plain: describeRow(plain), colored: describeRow(colored), stale: describeRow(stale) }, {
+			plain: { markerColor: '', secondary: 'Line 1', ariaLabel: 'line 1, line 1' },
+			colored: { markerColor: 'var(--vscode-editorBookmark-blueForeground)', secondary: 'Line 2 · Blue', ariaLabel: 'line 2, line 2, Blue color' },
+			// A stale bookmark keeps the warning color, which matters more than its tag.
+			stale: { markerColor: '', secondary: 'Was on line 3 · Blue · Stale', ariaLabel: 'line 3, stale bookmark, was on line 3, Blue color' }
+		});
+	});
+
 	test('hands focus to the next bookmark when the focused one is removed', () => {
 		const { tree } = setup();
 		tree.setBookmarks(bookmarks);

@@ -23,6 +23,7 @@ import { IStorageService, StorageScope, StorageTarget } from '../../../../platfo
 import { registerColor } from '../../../../platform/theme/common/colorRegistry.js';
 import { themeColorFromId } from '../../../../platform/theme/common/themeService.js';
 import { IUriIdentityService } from '../../../../platform/uriIdentity/common/uriIdentity.js';
+import { getBookmarkColor, getBookmarkColorClassName } from '../common/bookmarkColors.js';
 import { CONTEXT_CODE_BOOKMARKS_PRESENT, CONTEXT_CODE_BOOKMARKS_STALE_PRESENT, findBookmarkLine, ICodeBookmark, ICodeBookmarkAnchor, ICodeBookmarksService, mergeDuplicateBookmarks, resolveBookmarkLinesAfterEdit } from '../common/bookmarks.js';
 
 const STORAGE_KEY = 'jcode.codeBookmarks';
@@ -36,6 +37,7 @@ interface IStoredBookmark {
 	readonly lineNumber: number;
 	readonly column: number;
 	readonly note?: string;
+	readonly color?: string;
 	readonly lineText: string;
 	readonly beforeText: string;
 	readonly afterText: string;
@@ -65,13 +67,19 @@ interface ITrackedModel {
 }
 
 function createDecorationOptions(bookmark: ICodeBookmark): IModelDecorationOptions {
+	const color = getBookmarkColor(bookmark.color);
+	const hoverMessage = new MarkdownString(bookmark.note || localize('bookmarkHover', "Bookmark at line {0}", bookmark.lineNumber));
+	if (color) {
+		// The color is also named, so that it does not rely on being seen.
+		hoverMessage.appendMarkdown('\n\n').appendText(localize('bookmarkColorHover', "Color: {0}", color.label));
+	}
 	return {
 		description: 'jcode-code-bookmark',
-		glyphMarginClassName: `${ThemeIcon.asClassName(Codicon.bookmark)} jcode-bookmark-glyph`,
+		glyphMarginClassName: `${ThemeIcon.asClassName(Codicon.bookmark)} jcode-bookmark-glyph${color ? ` ${getBookmarkColorClassName(color.id)}` : ''}`,
 		glyphMargin: { position: GlyphMarginLane.Center },
 		stickiness: TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
-		hoverMessage: new MarkdownString(bookmark.note || localize('bookmarkHover', "Bookmark at line {0}", bookmark.lineNumber)),
-		overviewRuler: { color: themeColorFromId(bookmarkOverviewRuler), position: OverviewRulerLane.Center }
+		hoverMessage,
+		overviewRuler: { color: themeColorFromId(color?.colorId ?? bookmarkOverviewRuler), position: OverviewRulerLane.Center }
 	};
 }
 
@@ -171,6 +179,23 @@ export class CodeBookmarksService extends Disposable implements ICodeBookmarksSe
 			}
 			resource = bookmark.resource;
 			return { ...bookmark, note: normalized };
+		});
+		if (resource) {
+			this.changed(resource);
+		}
+	}
+
+	updateColor(id: string, color: string | undefined): void {
+		if (color !== undefined && !getBookmarkColor(color)) {
+			return;
+		}
+		let resource: URI | undefined;
+		this._bookmarks = this._bookmarks.map(bookmark => {
+			if (bookmark.id !== id || bookmark.color === color) {
+				return bookmark;
+			}
+			resource = bookmark.resource;
+			return { ...bookmark, color };
 		});
 		if (resource) {
 			this.changed(resource);
@@ -636,7 +661,7 @@ export class CodeBookmarksService extends Disposable implements ICodeBookmarksSe
 		}
 		try {
 			const stored = JSON.parse(raw) as IStoredBookmark[];
-			return stored.filter(bookmark => bookmark.id && bookmark.resource && bookmark.lineNumber > 0).map(bookmark => ({ ...bookmark, resource: URI.parse(bookmark.resource) }));
+			return stored.filter(bookmark => bookmark.id && bookmark.resource && bookmark.lineNumber > 0).map(bookmark => ({ ...bookmark, resource: URI.parse(bookmark.resource), color: getBookmarkColor(bookmark.color)?.id }));
 		} catch {
 			return [];
 		}

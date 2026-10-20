@@ -6,6 +6,9 @@
 import assert from 'assert';
 import { URI } from '../../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
+import { getColorRegistry } from '../../../../../platform/theme/common/colorUtils.js';
+import { WORKBENCH_COLOR_PALETTE } from '../../../../common/workbenchColorPalette.js';
+import { BOOKMARK_COLORS, getBookmarkColor, getBookmarkGlyphColorRules } from '../../common/bookmarkColors.js';
 import { captureBookmarkAnchor, findAdjacentBookmark, findBookmarkLine, groupBookmarksByFile, ICodeBookmark, isBookmarkLineRemoved, mergeDuplicateBookmarks, resolveBookmarkLinesAfterEdit } from '../../common/bookmarks.js';
 
 suite('Code bookmarks', () => {
@@ -138,6 +141,46 @@ suite('Code bookmarks', () => {
 			olderWins: [{ id: 'b', note: undefined }],
 			bothNotes: [{ id: 'b', note: 'second · first' }],
 			staleStaysApart: [{ id: 'a', note: undefined }, { id: 'b', note: undefined }, { id: 'd', note: undefined }]
+		});
+	});
+
+	test('keeps the color of the merged bookmark, else the color of the other one', () => {
+		const resource = URI.file('/workspace/file.ts');
+		const bookmark = (id: string, extra: Partial<ICodeBookmark> = {}): ICodeBookmark => ({ id, resource, lineNumber: 1, column: 1, lineText: 'text', beforeText: '', afterText: '', stale: false, createdAt: 10, ...extra });
+		const merged = (...bookmarks: ICodeBookmark[]) => mergeDuplicateBookmarks(bookmarks, uri => uri.toString()).map(({ id, note, color }) => ({ id, note, color }));
+
+		assert.deepStrictEqual({
+			ownColorWins: merged(bookmark('a', { createdAt: 1, color: 'blue' }), bookmark('b', { note: 'keep', color: 'red' })),
+			otherColorFillsIn: merged(bookmark('a', { createdAt: 1, color: 'blue' }), bookmark('b', { note: 'keep' })),
+			olderWithoutColorTakesIt: merged(bookmark('a', { createdAt: 1 }), bookmark('b', { color: 'teal' })),
+			uncolored: merged(bookmark('a'), bookmark('b', { createdAt: 1 }))
+		}, {
+			ownColorWins: [{ id: 'b', note: 'keep', color: 'red' }],
+			otherColorFillsIn: [{ id: 'b', note: 'keep', color: 'blue' }],
+			olderWithoutColorTakesIt: [{ id: 'a', note: undefined, color: 'teal' }],
+			uncolored: [{ id: 'b', note: undefined, color: undefined }]
+		});
+	});
+
+	test('only knows the colors of the shared palette', () => {
+		assert.deepStrictEqual({
+			known: BOOKMARK_COLORS.length > 0 && BOOKMARK_COLORS.every(color => getBookmarkColor(color.id) === color),
+			themeColors: BOOKMARK_COLORS.map(color => color.colorId),
+			registered: BOOKMARK_COLORS.every(color => getColorRegistry().getColors().some(registered => registered.id === color.colorId)),
+			glyphRules: getBookmarkGlyphColorRules().length,
+			blueGlyphRule: getBookmarkGlyphColorRules().find(rule => rule.includes('jcode-bookmark-color-blue')),
+			sharedWithTabGroups: BOOKMARK_COLORS.map(color => color.id),
+			unknown: getBookmarkColor('magenta'),
+			none: getBookmarkColor(undefined)
+		}, {
+			known: true,
+			themeColors: WORKBENCH_COLOR_PALETTE.map(color => `editorBookmark.${color.id}Foreground`),
+			registered: true,
+			glyphRules: WORKBENCH_COLOR_PALETTE.length,
+			blueGlyphRule: '.monaco-workbench .jcode-bookmark-glyph.codicon.jcode-bookmark-color-blue { color: var(--vscode-editorBookmark-blueForeground); }',
+			sharedWithTabGroups: WORKBENCH_COLOR_PALETTE.map(color => color.id),
+			unknown: undefined,
+			none: undefined
 		});
 	});
 

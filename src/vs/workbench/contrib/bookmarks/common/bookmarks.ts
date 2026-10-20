@@ -63,6 +63,10 @@ export interface ICodeBookmark extends ICodeBookmarkAnchor {
 	readonly column: number;
 	readonly note?: string;
 	/**
+	 * The id of the color the bookmark is tagged with, as in `BOOKMARK_COLORS`.
+	 */
+	readonly color?: string;
+	/**
 	 * Whether the bookmarked line was deleted or could not be found again.
 	 */
 	readonly stale: boolean;
@@ -76,6 +80,10 @@ export interface ICodeBookmarksService {
 
 	toggle(resource: URI, lineNumber: number, column?: number): ICodeBookmark | undefined;
 	updateNote(id: string, note: string | undefined): void;
+	/**
+	 * Tags a bookmark with a color of `BOOKMARK_COLORS`, or removes its color when given `undefined`.
+	 */
+	updateColor(id: string, color: string | undefined): void;
 	remove(id: string): void;
 	removeAll(): void;
 	/**
@@ -154,8 +162,8 @@ export function getBookmarkLabel(bookmark: Pick<ICodeBookmark, 'note' | 'lineTex
 
 /**
  * Merges bookmarks that share a resource and line so that every line has at most one bookmark.
- * The bookmark with a note is kept, else the one created first, and it keeps the note of the
- * other when it has none of its own.
+ * The bookmark with a note is kept, else the one created first, and it keeps the note and the
+ * color of the other when it has none of its own.
  *
  * A stale bookmark no longer has a position, so it is only merged with an identical stale bookmark.
  *
@@ -183,7 +191,7 @@ function mergeBookmarks(first: ICodeBookmark, second: ICodeBookmark): ICodeBookm
 	const keepFirst = !!first.note === !!second.note ? first.createdAt <= second.createdAt : !!first.note;
 	const [kept, other] = keepFirst ? [first, second] : [second, first];
 	const note = kept.note && other.note && kept.note !== other.note ? `${kept.note} · ${other.note}` : kept.note || other.note;
-	return { ...kept, note };
+	return { ...kept, note, color: kept.color ?? other.color };
 }
 
 /**

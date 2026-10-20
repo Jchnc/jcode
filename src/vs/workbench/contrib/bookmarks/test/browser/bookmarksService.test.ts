@@ -7,6 +7,7 @@ import assert from 'assert';
 import { timeout } from '../../../../../base/common/async.js';
 import { DisposableStore } from '../../../../../base/common/lifecycle.js';
 import { IMarkdownString } from '../../../../../base/common/htmlContent.js';
+import { ThemeColor } from '../../../../../base/common/themables.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { runWithFakedTimers } from '../../../../../base/test/common/timeTravelScheduler.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
@@ -44,7 +45,11 @@ suite('CodeBookmarksService', () => {
 
 		const model = disposables.add(instantiationService.get(IModelService).createModel(text, null, resource));
 		const service = disposables.add(instantiationService.createInstance(CodeBookmarksService));
-		return { model, service };
+		/**
+		 * Starts another service on the same storage, as when the window is opened again.
+		 */
+		const restart = () => disposables.add(instantiationService.createInstance(CodeBookmarksService));
+		return { model, service, restart };
 	}
 
 	function snapshot(service: CodeBookmarksService) {
@@ -350,6 +355,98 @@ suite('CodeBookmarksService', () => {
 		service.find(resource, 4);
 
 		assert.deepStrictEqual({ before, after: hover() }, { before: ['Bookmark at line 3'], after: ['Bookmark at line 4'] });
+	});
+
+	function describeGutterDecorations(model: ITextModel) {
+		return model.getAllDecorations().filter(decoration => decoration.options.description === 'jcode-code-bookmark').map(({ options }) => ({
+			glyph: options.glyphMarginClassName,
+			hover: (options.hoverMessage as IMarkdownString).value,
+			overviewRuler: (options.overviewRuler?.color as ThemeColor).id
+		}));
+	}
+
+	test('shows the color of a bookmark in its gutter icon, its hover, and the overview ruler', () => {
+		const { model, service } = setup();
+		const bookmark = service.toggle(resource, 2)!;
+		const plain = describeGutterDecorations(model);
+
+		service.updateColor(bookmark.id, 'blue');
+		const colored = describeGutterDecorations(model);
+		service.updateColor(bookmark.id, 'not a color');
+		const unknownIgnored = describeGutterDecorations(model);
+		service.updateColor(bookmark.id, undefined);
+
+		assert.deepStrictEqual({ plain, colored, unknownIgnored, removed: describeGutterDecorations(model) }, {
+			plain: [{ glyph: 'codicon codicon-bookmark jcode-bookmark-glyph', hover: 'Bookmark at line 2', overviewRuler: 'editorOverviewRuler.bookmarkForeground' }],
+			colored: [{ glyph: 'codicon codicon-bookmark jcode-bookmark-glyph jcode-bookmark-color-blue', hover: 'Bookmark at line 2\n\nColor:&nbsp;Blue', overviewRuler: 'editorBookmark.blueForeground' }],
+			unknownIgnored: [{ glyph: 'codicon codicon-bookmark jcode-bookmark-glyph jcode-bookmark-color-blue', hover: 'Bookmark at line 2\n\nColor:&nbsp;Blue', overviewRuler: 'editorBookmark.blueForeground' }],
+			removed: [{ glyph: 'codicon codicon-bookmark jcode-bookmark-glyph', hover: 'Bookmark at line 2', overviewRuler: 'editorOverviewRuler.bookmarkForeground' }]
+		});
+	});
+
+	test('keeps the color of a bookmark when the edits move it', () => {
+		const { model, service } = setup();
+		const bookmark = service.toggle(resource, 3)!;
+		service.updateColor(bookmark.id, 'teal');
+
+		model.applyEdits([{ range: new Range(1, 1, 1, 1), text: 'inserted\n' }]);
+		service.sync();
+
+		assert.deepStrictEqual({ lineNumber: service.bookmarks[0].lineNumber, color: service.bookmarks[0].color, gutter: describeGutterDecorations(model).map(decoration => decoration.glyph) }, {
+			lineNumber: 4,
+			color: 'teal',
+			gutter: ['codicon codicon-bookmark jcode-bookmark-glyph jcode-bookmark-color-teal']
+		});
+	});
+
+	test('persists the color of a bookmark, and ignores a stored color that is not in the palette', () => runWithFakedTimers({ useFakeTimers: true }, async () => {
+		const { service, restart } = setup();
+		const colored = service.toggle(resource, 2)!;
+		service.toggle(resource, 4);
+		service.updateColor(colored.id, 'purple');
+		await timeout(400);
+		service.dispose();
+
+		const restored = restart();
+		const { service: withUnknownColor } = setup('alpha\nbeta', [{ id: 'a', resource: resource.toString(), lineNumber: 2, column: 1, lineText: 'beta', beforeText: 'alpha', afterText: '', stale: false, createdAt: 1, color: 'magenta' }]);
+
+		assert.deepStrictEqual({
+			restored: restored.bookmarks.map(({ lineNumber, color }) => ({ lineNumber, color })),
+			unknownColor: withUnknownColor.bookmarks.map(({ color }) => color)
+		}, {
+			restored: [{ lineNumber: 2, color: 'purple' }, { lineNumber: 4, color: undefined }],
+			unknownColor: [undefined]
+		});
+	}));
+
+	test('keeps a color when bookmarks are merged by an edit, by a relocation, or in stored data', () => {
+		const joined = setup();
+		joined.service.toggle(resource, 2);
+		const second = joined.service.toggle(resource, 3)!;
+		joined.service.updateColor(second.id, 'blue');
+		// Joining the lines moves both bookmarks onto line 2, and the first one has no color of its own.
+		joined.model.applyEdits([{ range: new Range(2, 5, 3, 1), text: '' }]);
+
+		const relocated = setup();
+		const stale = relocated.service.toggle(resource, 3)!;
+		relocated.service.updateColor(stale.id, 'purple');
+		relocated.service.toggle(resource, 1);
+		deleteLine(relocated.model, 3);
+		relocated.service.relocate(stale.id, resource, 1);
+
+		const stored = (id: string, extra: object = {}) => ({ id, resource: resource.toString(), lineNumber: 2, column: 1, lineText: 'beta', beforeText: 'alpha', afterText: 'gamma', stale: false, createdAt: 1, ...extra });
+		const fromStorage = setup('alpha\nbeta\ngamma', [stored('a', { color: 'red' }), stored('b', { note: 'second', color: 'green' }), stored('c', { note: 'third' }), stored('d', { lineNumber: 1, lineText: 'alpha', createdAt: 5 })]);
+
+		const summarize = (service: CodeBookmarksService) => {
+			// Looking up a bookmark applies the edits that are otherwise picked up after a short delay.
+			service.find(resource, 1);
+			return service.bookmarks.map(({ lineNumber, note, color }) => ({ lineNumber, note, color }));
+		};
+		assert.deepStrictEqual({ joined: summarize(joined.service), relocated: summarize(relocated.service), fromStorage: summarize(fromStorage.service) }, {
+			joined: [{ lineNumber: 2, note: undefined, color: 'blue' }],
+			relocated: [{ lineNumber: 1, note: undefined, color: 'purple' }],
+			fromStorage: [{ lineNumber: 2, note: 'second · third', color: 'green' }, { lineNumber: 1, note: undefined, color: undefined }]
+		});
 	});
 
 	test('removes only stale bookmarks', () => {

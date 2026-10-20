@@ -27,8 +27,10 @@ import { ServiceCollection } from '../../../../platform/instantiation/common/ser
 import { ILabelService } from '../../../../platform/label/common/label.js';
 import { WorkbenchObjectTree } from '../../../../platform/list/browser/listService.js';
 import { defaultCountBadgeStyles, IStyleOverride } from '../../../../platform/theme/browser/defaultStyles.js';
+import { asCssVariable } from '../../../../platform/theme/common/colorUtils.js';
 import { IUriIdentityService } from '../../../../platform/uriIdentity/common/uriIdentity.js';
 import { IResourceLabel, ResourceLabels } from '../../../browser/labels.js';
+import { getBookmarkColor } from '../common/bookmarkColors.js';
 import { getBookmarkFileOrder } from './bookmarksNavigation.js';
 import { BOOKMARKS_VIEW_ITEM_INLINE_MENU, BookmarkItemKind, CONTEXT_CODE_BOOKMARK_ITEM_KIND, getBookmarkLabel, IBookmarkActionContext, IBookmarkFileGroup, ICodeBookmark, groupBookmarksByFile } from '../common/bookmarks.js';
 
@@ -153,11 +155,15 @@ class BookmarksAccessibilityProvider implements IListAccessibilityProvider<Bookm
 
 		const { bookmark } = element;
 		const label = getBookmarkLabel(bookmark);
+		const color = getBookmarkColor(bookmark.color);
+		let ariaLabel: string;
 		if (bookmark.stale) {
-			return localize('staleBookmarkAriaLabel', "{0}, stale bookmark, was on line {1}", label, bookmark.lineNumber);
+			ariaLabel = localize('staleBookmarkAriaLabel', "{0}, stale bookmark, was on line {1}", label, bookmark.lineNumber);
+		} else {
+			const lineText = bookmark.note ? bookmark.lineText.trim() : '';
+			ariaLabel = lineText ? localize('bookmarkWithTextAriaLabel', "{0}, line {1}, {2}", label, bookmark.lineNumber, lineText) : localize('bookmarkAriaLabel', "{0}, line {1}", label, bookmark.lineNumber);
 		}
-		const lineText = bookmark.note ? bookmark.lineText.trim() : '';
-		return lineText ? localize('bookmarkWithTextAriaLabel', "{0}, line {1}, {2}", label, bookmark.lineNumber, lineText) : localize('bookmarkAriaLabel', "{0}, line {1}", label, bookmark.lineNumber);
+		return color ? localize('bookmarkColorAriaLabel', "{0}, {1} color", ariaLabel, color.label) : ariaLabel;
 	}
 }
 
@@ -252,9 +258,16 @@ class BookmarkRenderer implements ITreeRenderer<BookmarkElement, void, IBookmark
 
 		template.row.classList.toggle('stale', bookmark.stale);
 		template.marker.className = `jcode-bookmark-marker ${ThemeIcon.asClassName(bookmark.stale ? Codicon.warning : Codicon.bookmark)}`;
+		// A stale bookmark keeps its warning color, which matters more than the tag.
+		const color = getBookmarkColor(bookmark.color);
+		template.marker.style.color = color && !bookmark.stale ? asCssVariable(color.colorId) : '';
 		template.primary.textContent = getBookmarkLabel(bookmark);
 
 		const secondaryParts = [bookmark.stale ? localize('bookmarkStaleLine', "Was on line {0}", bookmark.lineNumber) : localize('bookmarkLine', "Line {0}", bookmark.lineNumber)];
+		if (color) {
+			// The color is named, so that it does not rely on being seen.
+			secondaryParts.push(color.label);
+		}
 		if (bookmark.note && lineText) {
 			secondaryParts.push(lineText);
 		}
