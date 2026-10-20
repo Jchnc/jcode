@@ -477,13 +477,68 @@ suite('EditorGroupModel', () => {
 
 	suite('tab groups', () => {
 
+		/** Opens pinned editors with the IDs "a", "b", "c", ... in that order. */
 		function openEditors(group: EditorGroupModel, count: number): EditorInput[] {
-			const editors = Array.from({ length: count }, () => input());
+			const editors = Array.from({ length: count }, (_, i) => input(String.fromCharCode('a'.charCodeAt(0) + i)));
 			for (const editor of editors) {
 				group.openEditor(editor, { pinned: true, active: true });
 			}
 
 			return editors;
+		}
+
+		/** Describes the editors in order as their ID, followed by the name of their tab group (if any). */
+		function describeLayout(group: EditorGroupModel): string[] {
+			return group.getEditors(EditorsOrder.SEQUENTIAL).map(editor => {
+				const tabGroup = group.getTabGroupForEditor(editor);
+
+				return tabGroup ? `${(editor as TestEditorInput).id}:${tabGroup.name}` : (editor as TestEditorInput).id;
+			});
+		}
+
+		/** Records the move, sticky and tab group events of the group while the test runs. */
+		function recordEvents(group: EditorGroupModel): string[] {
+			const events: string[] = [];
+			disposables.add(group.onDidModelChange(e => {
+				switch (e.kind) {
+					case GroupModelChangeKind.EDITOR_MOVE:
+						events.push('move');
+						break;
+					case GroupModelChangeKind.EDITOR_STICKY:
+						events.push('sticky');
+						break;
+					case GroupModelChangeKind.TAB_GROUP_CREATED:
+						events.push(`created:${e.tabGroup?.name}`);
+						break;
+					case GroupModelChangeKind.TAB_GROUP_CHANGED:
+						events.push(`changed:${e.tabGroup?.name}`);
+						break;
+					case GroupModelChangeKind.TAB_GROUP_REMOVED:
+						events.push(`removed:${e.tabGroup?.name}`);
+						break;
+				}
+			}));
+
+			return events;
+		}
+
+		/** Finds tab groups that are empty, not contiguous or contain sticky editors. */
+		function findTabGroupViolations(group: EditorGroupModel): string[] {
+			const violations: string[] = [];
+			const editors = group.getEditors(EditorsOrder.SEQUENTIAL);
+			for (const tabGroup of group.tabGroups) {
+				const indexes = editors.flatMap((editor, i) => group.getTabGroupForEditor(editor)?.id === tabGroup.id ? [i] : []);
+				if (indexes.length === 0) {
+					violations.push(`${tabGroup.name} is empty`);
+				} else if (indexes[indexes.length - 1] - indexes[0] + 1 !== indexes.length) {
+					violations.push(`${tabGroup.name} is not contiguous`);
+				}
+				if (indexes.some(i => group.isSticky(i))) {
+					violations.push(`${tabGroup.name} contains a sticky editor`);
+				}
+			}
+
+			return violations;
 		}
 
 		test('tab group IDs are unique identifiers', () => {
@@ -536,8 +591,7 @@ suite('EditorGroupModel', () => {
 			const source = createEditorGroupModel();
 			const target = createEditorGroupModel();
 			const [a, b] = openEditors(source, 2);
-			const [c] = openEditors(target, 1);
-			const [d] = openEditors(target, 1);
+			const [c, d] = openEditors(target, 2);
 
 			const moved = target.createTabGroup([c], 'Moved', 'red', { id: 'moved-group' })!;
 			const conflicting = target.createTabGroup([d], 'Conflicting', 'blue', { id: 'moved-group' })!;
@@ -554,6 +608,296 @@ suite('EditorGroupModel', () => {
 				targetGroups: ['Moved', 'Conflicting'],
 				sourceKeepsOwnId: [sourceGroup.id]
 			});
+		});
+
+		test('sticking a grouped editor removes it from its tab group', () => {
+			const group = createEditorGroupModel();
+			const [, b, c, d] = openEditors(group, 5);
+			group.createTabGroup([b, c, d], 'G');
+			const events = recordEvents(group);
+
+			group.stick(c);
+
+			assert.deepStrictEqual({ layout: describeLayout(group), sticky: group.isSticky(c), events }, {
+				layout: ['c', 'a', 'b:G', 'd:G', 'e'],
+				sticky: true,
+				events: ['move', 'sticky', 'changed:G']
+			});
+		});
+
+		test('sticking the last editor of a tab group removes the tab group', () => {
+			const group = createEditorGroupModel();
+			const [, b] = openEditors(group, 3);
+			group.createTabGroup([b], 'G');
+			const events = recordEvents(group);
+
+			group.stick(b);
+
+			assert.deepStrictEqual({ layout: describeLayout(group), tabGroups: group.tabGroups.length, events }, {
+				layout: ['b', 'a', 'c'],
+				tabGroups: 0,
+				events: ['move', 'sticky', 'removed:G']
+			});
+		});
+
+		test('opening a grouped editor as sticky removes it from its tab group', () => {
+			const group = createEditorGroupModel();
+			const [, b, c] = openEditors(group, 4);
+			group.createTabGroup([b, c], 'G');
+
+			group.openEditor(c, { sticky: true });
+
+			assert.deepStrictEqual(describeLayout(group), ['c', 'a', 'b:G', 'd']);
+		});
+
+		test('moving an editor in between the members of a tab group makes it join the group', () => {
+			const group = createEditorGroupModel();
+			const [a, , , , e] = openEditors(group, 5);
+			group.createTabGroup(group.getEditors(EditorsOrder.SEQUENTIAL).slice(1, 4), 'G');
+			const events = recordEvents(group);
+
+			group.moveEditor(a, 2);
+			const afterMovingFirst = describeLayout(group);
+			group.moveEditor(e, 1);
+
+			assert.deepStrictEqual({ afterMovingFirst, afterMovingLast: describeLayout(group), events }, {
+				afterMovingFirst: ['b:G', 'c:G', 'a:G', 'd:G', 'e'],
+				afterMovingLast: ['b:G', 'e:G', 'c:G', 'a:G', 'd:G'],
+				events: ['move', 'changed:G', 'move', 'changed:G']
+			});
+		});
+
+		test('moving an editor next to a tab group does not make it join the group', () => {
+			const group = createEditorGroupModel();
+			const [a, , , , e] = openEditors(group, 5);
+			group.createTabGroup(group.getEditors(EditorsOrder.SEQUENTIAL).slice(1, 4), 'G');
+			const events = recordEvents(group);
+
+			group.moveEditor(a, 3);
+			const afterMovingPast = describeLayout(group);
+			group.moveEditor(e, 0);
+
+			assert.deepStrictEqual({ afterMovingPast, afterMovingBefore: describeLayout(group), events }, {
+				afterMovingPast: ['b:G', 'c:G', 'd:G', 'a', 'e'],
+				afterMovingBefore: ['e', 'b:G', 'c:G', 'd:G', 'a'],
+				events: ['move', 'move']
+			});
+		});
+
+		test('moving an editor in between the members of a locked tab group places it past the group', () => {
+			const group = createEditorGroupModel();
+			const [a, , , , e] = openEditors(group, 5);
+			const tabGroup = group.createTabGroup(group.getEditors(EditorsOrder.SEQUENTIAL).slice(1, 4), 'G')!;
+			group.setTabGroupLocked(tabGroup.id, true);
+			const events = recordEvents(group);
+
+			group.moveEditor(a, 2);
+			const afterMovingRight = describeLayout(group);
+			group.moveEditor(e, 3);
+			group.moveEditor(e, 2);
+
+			assert.deepStrictEqual({ afterMovingRight, afterMovingLeftStepByStep: describeLayout(group), events }, {
+				afterMovingRight: ['b:G', 'c:G', 'd:G', 'a', 'e'],
+				afterMovingLeftStepByStep: ['e', 'b:G', 'c:G', 'd:G', 'a'],
+				events: ['move', 'move', 'move']
+			});
+		});
+
+		test('moving a grouped editor outside of its tab group removes it from the group', () => {
+			const group = createEditorGroupModel();
+			const [, b, c] = openEditors(group, 5);
+			group.createTabGroup(group.getEditors(EditorsOrder.SEQUENTIAL).slice(1, 4), 'G');
+			const events = recordEvents(group);
+
+			group.moveEditor(c, 0);
+			const afterMovingLeft = describeLayout(group);
+			group.moveEditor(b, 4);
+
+			assert.deepStrictEqual({ afterMovingLeft, afterMovingRight: describeLayout(group), events }, {
+				afterMovingLeft: ['c', 'a', 'b:G', 'd:G', 'e'],
+				afterMovingRight: ['c', 'a', 'd:G', 'e', 'b'],
+				events: ['move', 'changed:G', 'move', 'changed:G']
+			});
+		});
+
+		test('moving a grouped editor to either end of its tab group keeps it in the group', () => {
+			const group = createEditorGroupModel();
+			const [, b, , d] = openEditors(group, 5);
+			group.createTabGroup(group.getEditors(EditorsOrder.SEQUENTIAL).slice(1, 4), 'G');
+			const events = recordEvents(group);
+
+			group.moveEditor(b, 3);
+			const afterMovingToEnd = describeLayout(group);
+			group.moveEditor(d, 1);
+
+			assert.deepStrictEqual({ afterMovingToEnd, afterMovingToStart: describeLayout(group), events }, {
+				afterMovingToEnd: ['a', 'c:G', 'd:G', 'b:G', 'e'],
+				afterMovingToStart: ['a', 'd:G', 'c:G', 'b:G', 'e'],
+				events: ['move', 'move']
+			});
+		});
+
+		test('moving the last editor of a tab group out of the group removes the group', () => {
+			const group = createEditorGroupModel();
+			const [, b] = openEditors(group, 4);
+			group.createTabGroup([b], 'G');
+			const events = recordEvents(group);
+
+			group.moveEditor(b, 3);
+
+			assert.deepStrictEqual({ layout: describeLayout(group), tabGroups: group.tabGroups.length, events }, {
+				layout: ['a', 'c', 'd', 'b'],
+				tabGroups: 0,
+				events: ['move', 'removed:G']
+			});
+		});
+
+		test('a grouped editor cannot be moved out of a locked tab group', () => {
+			const group = createEditorGroupModel();
+			const [, b, c] = openEditors(group, 5);
+			const tabGroup = group.createTabGroup(group.getEditors(EditorsOrder.SEQUENTIAL).slice(1, 4), 'G')!;
+			group.setTabGroupLocked(tabGroup.id, true);
+			const events = recordEvents(group);
+
+			group.moveEditor(c, 0);
+			const afterMovingLeft = describeLayout(group);
+			group.moveEditor(b, 4);
+
+			assert.deepStrictEqual({ afterMovingLeft, afterMovingRight: describeLayout(group), events }, {
+				afterMovingLeft: ['a', 'c:G', 'b:G', 'd:G', 'e'],
+				afterMovingRight: ['a', 'c:G', 'd:G', 'b:G', 'e'],
+				events: ['move', 'move']
+			});
+		});
+
+		test('the only editor of a locked tab group cannot be moved', () => {
+			const group = createEditorGroupModel();
+			const [, b] = openEditors(group, 3);
+			const tabGroup = group.createTabGroup([b], 'G')!;
+			group.setTabGroupLocked(tabGroup.id, true);
+
+			const moved = group.moveEditor(b, 2);
+
+			assert.deepStrictEqual({ moved, layout: describeLayout(group) }, { moved: undefined, layout: ['a', 'b:G', 'c'] });
+		});
+
+		test('moving a grouped editor in between the members of another group moves it to that group', () => {
+			const group = createEditorGroupModel();
+			const [, b] = openEditors(group, 6);
+			const editors = group.getEditors(EditorsOrder.SEQUENTIAL);
+			group.createTabGroup(editors.slice(0, 2), 'G');
+			group.createTabGroup(editors.slice(3, 5), 'H');
+			const events = recordEvents(group);
+
+			group.moveEditor(b, 3);
+
+			assert.deepStrictEqual({ layout: describeLayout(group), events }, {
+				layout: ['a:G', 'c', 'd:H', 'b:H', 'e:H', 'f'],
+				events: ['move', 'changed:G', 'changed:H']
+			});
+		});
+
+		test('moving a sticky editor in between the members of a tab group unsticks it and joins the group', () => {
+			const group = createEditorGroupModel();
+			const [a] = openEditors(group, 5);
+			group.stick(a);
+			group.createTabGroup(group.getEditors(EditorsOrder.SEQUENTIAL).slice(2, 4), 'G');
+			const events = recordEvents(group);
+
+			group.moveEditor(a, 2);
+
+			assert.deepStrictEqual({ layout: describeLayout(group), stickyCount: group.stickyCount, events }, {
+				layout: ['b', 'c:G', 'a:G', 'd:G', 'e'],
+				stickyCount: 0,
+				events: ['move', 'sticky', 'changed:G']
+			});
+		});
+
+		test('moving a grouped editor into the sticky editors removes it from its tab group', () => {
+			const group = createEditorGroupModel();
+			const [a, , c] = openEditors(group, 5);
+			group.stick(a);
+			group.createTabGroup(group.getEditors(EditorsOrder.SEQUENTIAL).slice(2, 4), 'G');
+			const events = recordEvents(group);
+
+			group.moveEditor(c, 0);
+
+			assert.deepStrictEqual({ layout: describeLayout(group), sticky: group.isSticky(c), events }, {
+				layout: ['c', 'a', 'b', 'd:G', 'e'],
+				sticky: true,
+				events: ['move', 'sticky', 'changed:G']
+			});
+		});
+
+		test('moving a tab group never splits another tab group', () => {
+			const group = createEditorGroupModel();
+			openEditors(group, 6);
+			const editors = group.getEditors(EditorsOrder.SEQUENTIAL);
+			const tabGroup = group.createTabGroup(editors.slice(4, 6), 'G')!;
+			group.createTabGroup(editors.slice(0, 3), 'H');
+
+			group.moveTabGroup(tabGroup.id, 1);
+			const afterMovingToStart = describeLayout(group);
+			group.moveTabGroup(tabGroup.id, 4);
+
+			assert.deepStrictEqual({ afterMovingToStart, afterMovingToEnd: describeLayout(group) }, {
+				afterMovingToStart: ['e:G', 'f:G', 'a:H', 'b:H', 'c:H', 'd'],
+				afterMovingToEnd: ['a:H', 'b:H', 'c:H', 'e:G', 'f:G', 'd']
+			});
+		});
+
+		test('tab groups stay contiguous and free of sticky editors across random operations', () => {
+			const group = createEditorGroupModel();
+			const editors = openEditors(group, 8);
+
+			let seed = 20240607;
+			const random = (max: number) => {
+				seed = (Math.imul(seed, 1103515245) + 12345) & 0x7fffffff;
+				return Math.floor(seed / 65536) % max;
+			};
+
+			const violations: string[] = [];
+			for (let step = 0; step < 500; step++) {
+				const editor = editors[random(editors.length)];
+				const tabGroups = group.tabGroups;
+				const operation = random(9);
+				switch (operation) {
+					case 0:
+					case 1:
+					case 2:
+						group.moveEditor(editor, random(editors.length));
+						break;
+					case 3:
+						group.stick(editor);
+						break;
+					case 4:
+						group.unstick(editor);
+						break;
+					case 5: {
+						const start = random(editors.length - 1);
+						group.createTabGroup(group.getEditors(EditorsOrder.SEQUENTIAL).slice(start, start + 1 + random(3)), `G${step}`);
+						break;
+					}
+					case 6:
+						group.removeFromTabGroup([editor]);
+						break;
+					case 7:
+						if (tabGroups.length > 0) {
+							const tabGroup = tabGroups[random(tabGroups.length)];
+							group.setTabGroupLocked(tabGroup.id, !tabGroup.locked);
+						}
+						break;
+					case 8:
+						if (tabGroups.length > 0) {
+							group.moveTabGroup(tabGroups[random(tabGroups.length)].id, random(editors.length + 1));
+						}
+						break;
+				}
+
+				violations.push(...findTabGroupViolations(group).map(violation => `step ${step} (operation ${operation}): ${violation}`));
+			}
+
+			assert.deepStrictEqual(violations, []);
 		});
 	});
 

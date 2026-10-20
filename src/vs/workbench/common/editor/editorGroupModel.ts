@@ -674,6 +674,15 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 		}
 
 		const editor = this.editors[index];
+
+		// Keep tab groups intact: this can leave or join a tab group
+		// and can also adjust where the editor ends up
+		const tabGroupMove = this.resolveTabGroupMove(editor, index, toIndex);
+		toIndex = tabGroupMove.toIndex;
+		if (toIndex === index) {
+			return;
+		}
+
 		const sticky = this.sticky;
 
 		// Adjust sticky index: editor moved out of sticky state into unsticky state
@@ -689,6 +698,14 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 		// Move
 		this.editors.splice(index, 1);
 		this.editors.splice(toIndex, 0, editor);
+
+		// Update tab group membership before anyone gets notified of the move
+		if (tabGroupMove.leave) {
+			this.editorTabGroups.delete(editor);
+		}
+		if (tabGroupMove.join) {
+			this.editorTabGroups.set(editor, tabGroupMove.join.id);
+		}
 
 		// Move Event
 		const event: IGroupEditorMoveEvent = {
@@ -708,6 +725,12 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 			};
 			this._onDidModelChange.fire(event);
 		}
+
+		// Tab group events (if membership changed as part of the move)
+		if (tabGroupMove.join) {
+			this.pinTabGroupMembers([editor]);
+		}
+		this.notifyTabGroupMembershipChanged([tabGroupMove.leave, tabGroupMove.join]);
 
 		return editor;
 	}
@@ -952,6 +975,12 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 		// Pin editor
 		this.pin(editor);
 
+		// Sticky editors cannot be part of a tab group
+		const tabGroup = this.getTabGroupForEditor(editor);
+		if (tabGroup) {
+			this.editorTabGroups.delete(editor);
+		}
+
 		// Move editor to be the last sticky editor
 		const newEditorIndex = this.sticky + 1;
 		this.moveEditor(editor, newEditorIndex);
@@ -966,6 +995,8 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 			editorIndex: newEditorIndex
 		};
 		this._onDidModelChange.fire(event);
+
+		this.notifyTabGroupMembershipChanged([tabGroup]);
 	}
 
 	unstick(candidate: EditorInput): EditorInput | undefined {
@@ -1280,12 +1311,7 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 			this.editorTabGroups.set(editor, group.id);
 		}
 		this.pinTabGroupMembers(candidates);
-		for (const affectedGroup of affectedGroups) {
-			this.pruneTabGroup(affectedGroup.id);
-			if (this.getTabGroup(affectedGroup.id)) {
-				this._onDidModelChange.fire({ kind: GroupModelChangeKind.TAB_GROUP_CHANGED, tabGroup: affectedGroup });
-			}
-		}
+		this.notifyTabGroupMembershipChanged(affectedGroups);
 
 		this._onDidModelChange.fire({ kind: GroupModelChangeKind.TAB_GROUP_CREATED, tabGroup: group });
 
@@ -1338,12 +1364,7 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 			affectedGroups.add(group);
 		}
 
-		for (const group of affectedGroups) {
-			this.pruneTabGroup(group.id);
-			if (this.getTabGroup(group.id)) {
-				this._onDidModelChange.fire({ kind: GroupModelChangeKind.TAB_GROUP_CHANGED, tabGroup: group });
-			}
-		}
+		this.notifyTabGroupMembershipChanged(affectedGroups);
 	}
 
 	addToTabGroup(groupId: string, editors: EditorInput[]): void {
@@ -1466,6 +1487,15 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 		}
 
 		const remainingEditors = this.editors.filter(editor => this.editorTabGroups.get(editor) !== groupId);
+
+		// Never split another tab group: when the target is inside of one,
+		// move to the closer end of that group instead.
+		const enclosingGroupId = this.getEnclosingTabGroupId(remainingEditors, insertIndex);
+		if (enclosingGroupId) {
+			const range = this.getTabGroupRange(remainingEditors, enclosingGroupId);
+			insertIndex = insertIndex - range.first <= range.last + 1 - insertIndex ? range.first : range.last + 1;
+		}
+
 		const reorderedEditors = remainingEditors.toSpliced(insertIndex, 0, ...groupEditors);
 		if (reorderedEditors.every((editor, index) => editor === this.editors[index])) {
 			return;
@@ -1546,6 +1576,95 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 		});
 		if (this.tabGroupUndoStack.length > 20) {
 			this.tabGroupUndoStack.shift();
+		}
+	}
+
+	/**
+	 * Works out how moving an editor affects tab group membership so that the
+	 * members of a tab group always stay contiguous:
+	 *
+	 * - A grouped editor that is moved outside of the range of its group leaves
+	 *   the group. If the group is locked, the move is limited to that range.
+	 * - An editor without a group (including one that just left its group) that
+	 *   is moved in between two members of a group joins that group. If the
+	 *   group is locked, the editor is placed past the group instead: after it
+	 *   when moving right and before it when moving left, so that moving an
+	 *   editor one step at a time never gets stuck at a locked group.
+	 */
+	private resolveTabGroupMove(editor: EditorInput, index: number, toIndex: number): { readonly toIndex: number; readonly leave?: IEditorTabGroup; readonly join?: IEditorTabGroup } {
+		if (this._tabGroups.length === 0) {
+			return { toIndex };
+		}
+
+		// Positions refer to the editors once the moved editor is taken out
+		const remainingEditors = this.editors.filter(candidate => candidate !== editor);
+
+		let leave: IEditorTabGroup | undefined;
+
+		const tabGroup = this.getTabGroupForEditor(editor);
+		if (tabGroup) {
+			const { first, last } = this.getTabGroupRange(remainingEditors, tabGroup.id);
+
+			// Staying within the group (either end of the group included)
+			if (first >= 0 && toIndex >= first && toIndex <= last + 1) {
+				return { toIndex };
+			}
+
+			// A locked group keeps its editors: the editor cannot go past the group
+			if (tabGroup.locked) {
+				return { toIndex: first < 0 ? index : Math.max(first, Math.min(toIndex, last + 1)) };
+			}
+
+			leave = tabGroup;
+		}
+
+		const enclosingGroupId = this.getEnclosingTabGroupId(remainingEditors, toIndex);
+		const target = enclosingGroupId ? this.getTabGroup(enclosingGroupId) : undefined;
+		if (target?.locked) {
+			const { first, last } = this.getTabGroupRange(remainingEditors, target.id);
+
+			return { toIndex: toIndex < index ? first : last + 1, leave };
+		}
+
+		return { toIndex, leave, join: target };
+	}
+
+	/**
+	 * Returns the tab group that the position in front of the editor at the
+	 * given index is inside of: the editors on both sides belong to it.
+	 */
+	private getEnclosingTabGroupId(editors: readonly EditorInput[], index: number): string | undefined {
+		const groupIdBefore = index > 0 ? this.editorTabGroups.get(editors[index - 1]) : undefined;
+		const groupIdAfter = index < editors.length ? this.editorTabGroups.get(editors[index]) : undefined;
+
+		return groupIdBefore && groupIdBefore === groupIdAfter ? groupIdBefore : undefined;
+	}
+
+	/**
+	 * Returns the index of the first and the last member of a tab group
+	 * in the given editors, or -1 for both if the group has no member.
+	 */
+	private getTabGroupRange(editors: readonly EditorInput[], groupId: string): { readonly first: number; readonly last: number } {
+		return {
+			first: editors.findIndex(editor => this.editorTabGroups.get(editor) === groupId),
+			last: editors.findLastIndex(editor => this.editorTabGroups.get(editor) === groupId)
+		};
+	}
+
+	/**
+	 * Prunes tab groups that lost all their members and lets listeners know
+	 * about the groups that are still around that their members changed.
+	 */
+	private notifyTabGroupMembershipChanged(tabGroups: Iterable<IEditorTabGroup | undefined>): void {
+		for (const tabGroup of new Set(tabGroups)) {
+			if (!tabGroup) {
+				continue;
+			}
+
+			this.pruneTabGroup(tabGroup.id);
+			if (this.getTabGroup(tabGroup.id)) {
+				this._onDidModelChange.fire({ kind: GroupModelChangeKind.TAB_GROUP_CHANGED, tabGroup });
+			}
 		}
 	}
 
