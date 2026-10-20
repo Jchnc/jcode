@@ -6,7 +6,7 @@
 import { coalesce } from '../../../../base/common/arrays.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { FuzzyScorerCache } from '../../../../base/common/fuzzyScorer.js';
-import { KeyChord, KeyCode, KeyMod } from '../../../../base/common/keyCodes.js';
+import { KeyCode, KeyMod } from '../../../../base/common/keyCodes.js';
 import { DisposableStore } from '../../../../base/common/lifecycle.js';
 import { basename } from '../../../../base/common/resources.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
@@ -203,7 +203,7 @@ registerAction2(class SearchTabsAction extends Action2 {
 			f1: true,
 			keybinding: {
 				weight: KeybindingWeight.WorkbenchContrib,
-				primary: KeyChord(KeyMod.CtrlCmd | KeyCode.KeyK, KeyCode.KeyA)
+				primary: KeyMod.Shift | KeyMod.Alt | KeyCode.KeyT
 			}
 		});
 	}

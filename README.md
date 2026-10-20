@@ -122,7 +122,7 @@ Make sure `~/.local/bin` is on your PATH.
 
 ## Features
 
-> Shortcuts below use `Ctrl`. On macOS, use `Cmd` instead.
+> JCode shortcuts use `Shift+Alt` (`Shift+Option` on macOS). See [Keyboard shortcuts](#keyboard-shortcuts).
 
 ### Tab groups
 
@@ -167,7 +167,7 @@ Rules apply to the tabs you already have open and to every file you open afterwa
 
 - **Save a session:** **View: Save Tab Session…** remembers your editor groups, tabs, and tab groups under a name.
 - **Restore it:** **View: Open Tab Session…** brings them back. Unsaved changes are never lost.
-- **Search tabs:** **View: Search Open Tabs…** (`Ctrl+K A`) finds any open tab across all editor groups, plus your saved groups.
+- **Search tabs:** **View: Search Open Tabs…** (`Shift+Alt+T`) finds any open tab across all editor groups, plus your saved groups.
 
 Sessions are stored per workspace on your device.
 
@@ -182,7 +182,7 @@ Move the tabs beside the editor. On the Personalization page set **Tab position*
 ```
 
 - Drag the edge of the strip to resize it; double-click the edge to reset.
-- Press `Ctrl+F` while the strip has focus to filter tabs by name or path.
+- Select **Filter Tabs** in the strip's toolbar to filter tabs by name or path.
 - In a narrow editor group, the strip shrinks to a compact rail of file icons.
 
 ### Workspace colors
@@ -193,8 +193,8 @@ Remote SSH/SFTP workspaces get a color automatically. Turn that off on the Perso
 
 ### Bookmarks
 
-- **Toggle a bookmark:** `Ctrl+K B`, or Alt+click the margin next to the line numbers.
-- **Jump to one:** **Go to Bookmark...** (`Ctrl+K L`) searches by note, file, or color.
+- **Toggle a bookmark:** `Shift+Alt+B`, or Alt+click the margin next to the line numbers.
+- **Jump to one:** **Go to Bookmark...** (`Shift+Alt+L`) searches by note, file, or color. `Shift+Alt+J` and `Shift+Alt+K` step through bookmarks.
 - **Organize:** add notes with **Bookmark with Note...** and color tags from the list. The **Bookmarks** view in the Explorer shows them all.
 
 Bookmarks follow their line as you edit. If the line is deleted, the bookmark is marked stale so you can relocate or remove it.
@@ -221,19 +221,22 @@ Chat, inline suggestions, and the Copilot sign-in are **off by default**. To tur
 
 ## Keyboard shortcuts
 
-On macOS, use `Cmd` instead of `Ctrl`. A shortcut like `Ctrl+K G` means press `Ctrl+K`, release, then press `G`.
+Every JCode shortcut is a single press of **Shift+Alt** plus a letter (**Shift+Option** on macOS). They are free on Windows, Linux, and macOS, so they never override another command.
 
-| Action | Shortcut |
-| --- | --- |
-| New tab group from selected tabs | `Ctrl+K G` |
-| Collapse or expand the active tab group | `Ctrl+K Ctrl+G` |
-| Rename the active tab group | `Ctrl+K Ctrl+Shift+G` |
-| Next / previous tab group | `Ctrl+K ]` / `Ctrl+K [` |
-| Close the tab group | `Ctrl+K X` |
-| Search open tabs | `Ctrl+K A` |
-| Filter vertical tabs (strip focused) | `Ctrl+F` |
-| Toggle bookmark | `Ctrl+K B` |
-| Go to bookmark | `Ctrl+K L` |
+| Action | Windows / Linux | macOS |
+| --- | --- | --- |
+| Search open tabs | `Shift+Alt+T` | `Shift+Option+T` |
+| New tab group from selected tabs | `Shift+Alt+G` | `Shift+Option+G` |
+| Collapse or expand the tab group | `Shift+Alt+E` | `Shift+Option+E` |
+| Next / previous tab group | `Shift+Alt+N` / `Shift+Alt+P` | `Shift+Option+N` / `Shift+Option+P` |
+| Close the tab group | `Shift+Alt+W` | `Shift+Option+W` |
+| Toggle bookmark | `Shift+Alt+B` | `Shift+Option+B` |
+| Bookmark list | `Shift+Alt+L` | `Shift+Option+L` |
+| Next / previous bookmark | `Shift+Alt+J` / `Shift+Alt+K` | `Shift+Option+J` / `Shift+Option+K` |
+
+On macOS, `Shift+Option` with a letter normally types a special character (such as `` for `Shift+Option+K`); in JCode these keys run the shortcuts instead.
+
+`Ctrl+F` (`Cmd+F` on macOS) always searches your code. To change a shortcut, open **Preferences: Open Keyboard Shortcuts** and search for the command.
 
 Find every other JCode command in the Command Palette by typing **Tab Group**, **Tab Session**, **Bookmark**, or **JCode Remote**.
 

@@ -28,7 +28,7 @@ import { ITelemetryService } from '../../../../platform/telemetry/common/telemet
 import { ActiveGroupEditorsByMostRecentlyUsedQuickAccess } from './editorQuickAccess.js';
 import { SideBySideEditor } from './sideBySideEditor.js';
 import { TextDiffEditor } from './textDiffEditor.js';
-import { ActiveEditorCanSplitInGroupContext, ActiveEditorGroupEmptyContext, ActiveEditorGroupLockedContext, ActiveEditorStickyContext, ActiveEditorInTabGroupContext, EditorPartModalCanMoveToEditorAreaContext, EditorPartModalContext, EditorPartModalMaximizedContext, EditorPartModalNavigationContext, EditorPartModalSidebarContext, IsSessionsWindowContext, MultipleEditorGroupsContext, SideBySideEditorActiveContext, TextCompareEditorActiveContext, VerticalEditorTabsFocusContext } from '../../../common/contextkeys.js';
+import { ActiveEditorCanSplitInGroupContext, ActiveEditorGroupEmptyContext, ActiveEditorGroupLockedContext, ActiveEditorStickyContext, ActiveEditorInTabGroupContext, EditorPartModalCanMoveToEditorAreaContext, EditorPartModalContext, EditorPartModalMaximizedContext, EditorPartModalNavigationContext, EditorPartModalSidebarContext, IsSessionsWindowContext, MultipleEditorGroupsContext, SideBySideEditorActiveContext, TextCompareEditorActiveContext } from '../../../common/contextkeys.js';
 import { CloseDirection, EditorInputCapabilities, EditorsOrder, GroupIdentifier, IResourceDiffEditorInput, IUntitledTextResourceEditorInput, isDiffEditorInput, isEditorInputWithOptionsAndGroup, isResourceEditorInput } from '../../../common/editor.js';
 import { IMultiDiffEditorOptions } from '../../../../editor/common/multiDiffEditor.js';
 import { EditorInput } from '../../../common/editor/editorInput.js';
@@ -1879,7 +1879,7 @@ function registerTabGroupCommands(): void {
 				precondition: ContextKeyExpr.and(tabGroupsEnabled, ActiveEditorStickyContext.toNegated()),
 				keybinding: {
 					weight: KeybindingWeight.WorkbenchContrib,
-					primary: KeyChord(KeyMod.CtrlCmd | KeyCode.KeyK, KeyCode.KeyG)
+					primary: KeyMod.Shift | KeyMod.Alt | KeyCode.KeyG
 				}
 			});
 		}
@@ -2074,7 +2074,7 @@ function registerTabGroupCommands(): void {
 				precondition: activeEditorInEnabledTabGroup,
 				keybinding: {
 					weight: KeybindingWeight.WorkbenchContrib,
-					primary: KeyChord(KeyMod.CtrlCmd | KeyCode.KeyK, KeyMod.CtrlCmd | KeyCode.KeyG)
+					primary: KeyMod.Shift | KeyMod.Alt | KeyCode.KeyE
 				}
 			});
 		}
@@ -2092,12 +2092,7 @@ function registerTabGroupCommands(): void {
 				id: FILTER_VERTICAL_TABS_COMMAND_ID,
 				title: localize2('filterVerticalTabs', "Filter Tabs"),
 				category: Categories.View,
-				f1: false, // only offered where the vertical tabs are, i.e. their toolbar and keyboard focus
-				keybinding: {
-					weight: KeybindingWeight.WorkbenchContrib,
-					when: VerticalEditorTabsFocusContext,
-					primary: KeyMod.CtrlCmd | KeyCode.KeyF
-				}
+				f1: false, // only offered where the vertical tabs are, from their toolbar; Ctrl+F stays Find
 			});
 		}
 		run(accessor: ServicesAccessor): void {
@@ -2112,8 +2107,8 @@ function registerTabGroupCommands(): void {
 	});
 
 	for (const action of [
-		{ id: FOCUS_NEXT_TAB_GROUP_COMMAND_ID, title: localize2('focusNextTabGroup', "Focus Next Tab Group"), direction: 'next' as const, key: KeyCode.BracketRight },
-		{ id: FOCUS_PREVIOUS_TAB_GROUP_COMMAND_ID, title: localize2('focusPreviousTabGroup', "Focus Previous Tab Group"), direction: 'previous' as const, key: KeyCode.BracketLeft }
+		{ id: FOCUS_NEXT_TAB_GROUP_COMMAND_ID, title: localize2('focusNextTabGroup', "Focus Next Tab Group"), direction: 'next' as const, key: KeyCode.KeyN },
+		{ id: FOCUS_PREVIOUS_TAB_GROUP_COMMAND_ID, title: localize2('focusPreviousTabGroup', "Focus Previous Tab Group"), direction: 'previous' as const, key: KeyCode.KeyP }
 	]) {
 		registerAction2(class extends Action2 {
 			constructor() {
@@ -2125,7 +2120,7 @@ function registerTabGroupCommands(): void {
 					precondition: tabGroupsEnabled,
 					keybinding: {
 						weight: KeybindingWeight.WorkbenchContrib,
-						primary: KeyChord(KeyMod.CtrlCmd | KeyCode.KeyK, action.key)
+						primary: KeyMod.Shift | KeyMod.Alt | action.key
 					}
 				});
 			}
@@ -2146,11 +2141,7 @@ function registerTabGroupCommands(): void {
 				title: localize2('renameTabGroup', "Rename Active Tab Group"),
 				category: Categories.View,
 				f1: true,
-				precondition: activeEditorInEnabledTabGroup,
-				keybinding: {
-					weight: KeybindingWeight.WorkbenchContrib,
-					primary: KeyChord(KeyMod.CtrlCmd | KeyCode.KeyK, KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyG)
-				}
+				precondition: activeEditorInEnabledTabGroup
 			});
 		}
 		async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
@@ -2249,7 +2240,7 @@ function registerTabGroupCommands(): void {
 				precondition: activeEditorInEnabledTabGroup,
 				keybinding: {
 					weight: KeybindingWeight.WorkbenchContrib,
-					primary: KeyChord(KeyMod.CtrlCmd | KeyCode.KeyK, KeyCode.KeyX)
+					primary: KeyMod.Shift | KeyMod.Alt | KeyCode.KeyW
 				}
 			});
 		}

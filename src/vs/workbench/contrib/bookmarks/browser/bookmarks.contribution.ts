@@ -20,7 +20,7 @@ import { IDialogService } from '../../../../platform/dialogs/common/dialogs.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { SyncDescriptor } from '../../../../platform/instantiation/common/descriptors.js';
 import { IInstantiationService, ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
-import { KeyChord, KeyCode, KeyMod } from '../../../../base/common/keyCodes.js';
+import { KeyCode, KeyMod } from '../../../../base/common/keyCodes.js';
 import { KeybindingWeight } from '../../../../platform/keybinding/common/keybindingsRegistry.js';
 import { ILabelService } from '../../../../platform/label/common/label.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
@@ -109,7 +109,7 @@ registerAction2(class extends Action2 {
 			icon: Codicon.bookmark,
 			f1: true,
 			keybinding: {
-				primary: KeyChord(KeyMod.CtrlCmd | KeyCode.KeyK, KeyCode.KeyB),
+				primary: KeyMod.Shift | KeyMod.Alt | KeyCode.KeyB,
 				weight: KeybindingWeight.WorkbenchContrib,
 				when: EditorContextKeys.editorTextFocus
 			},
@@ -311,7 +311,7 @@ registerAction2(class extends Action2 {
 			f1: true,
 			precondition: CONTEXT_CODE_BOOKMARKS_PRESENT,
 			// Ctrl+K L sits next to Toggle Bookmark (Ctrl+K B) and no other binding uses it.
-			keybinding: { primary: KeyChord(KeyMod.CtrlCmd | KeyCode.KeyK, KeyCode.KeyL), weight: KeybindingWeight.WorkbenchContrib },
+			keybinding: { primary: KeyMod.Shift | KeyMod.Alt | KeyCode.KeyL, weight: KeybindingWeight.WorkbenchContrib },
 			menu: {
 				id: MenuId.ViewTitle,
 				group: 'navigation',
@@ -334,8 +334,8 @@ registerAction2(class extends Action2 {
 	}
 });
 
-registerNavigationAction(NEXT_BOOKMARK_ID, localize2('nextBookmark', "Go to Next Bookmark"), 1);
-registerNavigationAction(PREVIOUS_BOOKMARK_ID, localize2('previousBookmark', "Go to Previous Bookmark"), -1);
+registerNavigationAction(NEXT_BOOKMARK_ID, localize2('nextBookmark', "Go to Next Bookmark"), 1, KeyCode.KeyJ);
+registerNavigationAction(PREVIOUS_BOOKMARK_ID, localize2('previousBookmark', "Go to Previous Bookmark"), -1, KeyCode.KeyK);
 
 registerAction2(class extends Action2 {
 	constructor() {
@@ -454,10 +454,10 @@ async function pickStaleBookmark(service: ICodeBookmarksService, quickInputServi
 
 CommandsRegistry.registerCommandAlias('bookmarks.toggle', TOGGLE_BOOKMARK_ID);
 
-function registerNavigationAction(id: string, title: ILocalizedString, direction: 1 | -1): void {
+function registerNavigationAction(id: string, title: ILocalizedString, direction: 1 | -1, key: KeyCode): void {
 	registerAction2(class extends Action2 {
 		constructor() {
-			super({ id, title, f1: true });
+			super({ id, title, f1: true, keybinding: { primary: KeyMod.Shift | KeyMod.Alt | key, weight: KeybindingWeight.WorkbenchContrib, when: CONTEXT_CODE_BOOKMARKS_PRESENT } });
 		}
 
 		async run(accessor: ServicesAccessor): Promise<void> {
