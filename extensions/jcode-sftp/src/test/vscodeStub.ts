@@ -26,3 +26,27 @@ export enum FileChangeType {
 	Created = 2,
 	Deleted = 3
 }
+
+/** A synchronous event emitter with the shape of the `vscode` one. */
+export class EventEmitter<T> {
+	private readonly listeners = new Set<(value: T) => unknown>();
+
+	readonly event = (listener: (value: T) => unknown): { dispose(): void } => {
+		this.listeners.add(listener);
+		return { dispose: () => { this.listeners.delete(listener); } };
+	};
+
+	fire(value: T): void {
+		for (const listener of [...this.listeners]) {
+			listener(value);
+		}
+	}
+
+	dispose(): void {
+		this.listeners.clear();
+	}
+}
+
+export const window = {
+	showWarningMessage: async (): Promise<undefined> => undefined
+};

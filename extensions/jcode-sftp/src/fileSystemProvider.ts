@@ -120,13 +120,23 @@ export class SftpFileSystemProvider implements FileSystemProvider {
 		});
 	}
 
-	private async run<T>(uri: Uri, action: (sftp: SFTPWrapper) => Promise<T>, retry = false): Promise<T> {
+	/**
+	 * Runs an operation on the connection of the URI. 'retry' repeats it once on a new connection when
+	 * the connection dropped. 'background' does the same for work nobody waits for (change detection),
+	 * but connects quietly and never repeats a connection attempt that just failed: the connection backs
+	 * off instead, so a server that is down is not tried again at once.
+	 */
+	private async run<T>(uri: Uri, action: (sftp: SFTPWrapper) => Promise<T>, mode: 'once' | 'retry' | 'background' = 'once'): Promise<T> {
+		const request = { background: mode === 'background' };
+		let connected = false;
 		try {
-			return await action(await this.connections.sftp(uri.authority));
+			const sftp = await this.connections.sftp(uri.authority, request);
+			connected = true;
+			return await action(sftp);
 		} catch (error) {
-			if (retry && error instanceof Error && isConnectionError(error)) {
+			if (mode !== 'once' && (connected || mode === 'retry') && error instanceof Error && isConnectionError(error)) {
 				this.connections.reconnect(uri.authority);
-				return action(await this.connections.sftp(uri.authority));
+				return action(await this.connections.sftp(uri.authority, request));
 			}
 			throw error;
 		}
@@ -150,7 +160,7 @@ export class SftpFileSystemProvider implements FileSystemProvider {
 		return this.run(uri, async sftp => {
 			const { stat, type } = await resolveStat(sftp, uri.path);
 			return fileStat(stat, type);
-		}, true);
+		}, 'retry');
 	}
 
 	async readDirectory(uri: Uri): Promise<[string, FileType][]> {
@@ -163,14 +173,14 @@ export class SftpFileSystemProvider implements FileSystemProvider {
 				}
 			}
 			return entries;
-		}, true);
+		}, 'retry');
 	}
 
 	async readFile(uri: Uri): Promise<Uint8Array> {
 		return this.run(uri, async sftp => {
 			const content = await operation<Buffer | string>(callback => sftp.readFile(uri.path, callback));
 			return typeof content === 'string' ? Buffer.from(content) : content;
-		}, true);
+		}, 'retry');
 	}
 
 	async writeFile(uri: Uri, content: Uint8Array, options: { create: boolean; overwrite: boolean }): Promise<void> {
@@ -488,6 +498,12 @@ export class SftpFileSystemProvider implements FileSystemProvider {
 				if (request.dueAt > Date.now()) {
 					continue;
 				}
+				// A server that keeps failing is tried less and less often. Looking at the delay costs nothing,
+				// so polling stays on its usual schedule and resumes within one interval of the server returning.
+				if (this.connections.backgroundDelay(uri.authority) > 0) {
+					request.dueAt = Date.now() + this.pollInterval();
+					continue;
+				}
 				try {
 					// Polling must not undo a disconnect or retry a refused credential, so it waits until something else reconnects.
 					if (!unavailable.has(uri.authority) && !this.connections.waitsForUser(uri.authority)) {
@@ -547,7 +563,7 @@ export class SftpFileSystemProvider implements FileSystemProvider {
 					}
 					throw error;
 				}
-			}, true),
+			}, 'background'),
 			list: async (path, include) => {
 				let directory = cache.directories.get(key(path));
 				if (!directory) {
@@ -564,7 +580,7 @@ export class SftpFileSystemProvider implements FileSystemProvider {
 					if (include(entryPath)) {
 						let link = entry.attrs.isSymbolicLink() ? cache.links.get(key(entryPath)) : undefined;
 						if (entry.attrs.isSymbolicLink() && !link) {
-							link = this.run(uri, sftp => resolveStat(sftp, entryPath, entry.attrs), true);
+							link = this.run(uri, sftp => resolveStat(sftp, entryPath, entry.attrs), 'background');
 							cache.links.set(key(entryPath), link);
 						}
 						const { stat, type } = await (link ?? { stat: entry.attrs, type: fileType(entry.attrs) });
@@ -579,7 +595,7 @@ export class SftpFileSystemProvider implements FileSystemProvider {
 	/** Lists a directory for polling: a missing one is empty and an unreadable one is skipped. */
 	private async readEntries(uri: Uri, path: string): Promise<FileEntryWithStats[] | undefined> {
 		try {
-			const entries = await this.run(uri, sftp => operation<FileEntryWithStats[]>(callback => sftp.readdir(path, callback)), true);
+			const entries = await this.run(uri, sftp => operation<FileEntryWithStats[]>(callback => sftp.readdir(path, callback)), 'background');
 			return entries.filter(entry => entry.filename !== '.' && entry.filename !== '..');
 		} catch (error) {
 			if (error instanceof FileSystemError && error.code === 'FileNotFound') {

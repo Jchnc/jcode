@@ -8,9 +8,10 @@ import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { Client, type ClientChannel, type ClientErrorExtensions, type ConnectConfig, type SFTPWrapper } from 'ssh2';
-import { EventEmitter, ExtensionContext, l10n, window } from 'vscode';
+import { EventEmitter, l10n, window, type Memento, type SecretStorage } from 'vscode';
 import { classifyAuthFailure } from './authFailure';
 import { PausableTimeout } from './pausableTimeout';
+import { ReconnectBackoff } from './reconnectBackoff';
 
 export interface RemoteProfile {
 	id: string;
@@ -39,17 +40,40 @@ export class CredentialError extends Error {
 	}
 }
 
+/** The parts of an ssh2 client that a connection uses, so that tests can substitute a fake. */
+export interface SshClient {
+	connect(config: ConnectConfig): void;
+	on(event: 'error', listener: (error: Error) => void): void;
+	once(event: 'ready' | 'close', listener: () => void): void;
+	sftp(callback: (error: Error | undefined, sftp: SFTPWrapper) => void): void;
+	exec(command: string, callback: (error: Error | undefined, channel: ClientChannel) => void): void;
+	destroy(): void;
+}
+
+/** What connections need from the extension context: saved profiles and trusted host keys, and secrets. */
+export interface ConnectionStorage {
+	readonly globalState: Pick<Memento, 'get' | 'update'>;
+	readonly secrets: Pick<SecretStorage, 'get' | 'store' | 'delete'>;
+}
+
 interface Connection {
-	client: Client;
+	client: SshClient;
 	sftp: SFTPWrapper;
 	/** Set once the server refuses or ignores command execution so it is not retried. */
 	execUnavailable?: boolean;
 }
 
 interface PendingConnection {
-	client: Client;
+	client: SshClient;
 	controller: AbortController;
 	promise: Promise<Connection>;
+	/** Set for a background retry after earlier failures, which stays out of the connection state until someone waits for it. */
+	quiet: boolean;
+}
+
+/** Who needs a connection: a request of the user, or work in the background that can wait and try again later. */
+export interface ConnectionRequest {
+	background?: boolean;
 }
 
 const profilesKey = 'jcodeSftp.profiles';
@@ -73,7 +97,11 @@ export class SftpConnections {
 	/** Fires when a connection attempt fails, including when its credential is missing or refused. */
 	readonly onDidFailToConnect = this.failureEmitter.event;
 
-	constructor(private readonly context: ExtensionContext) { }
+	constructor(
+		private readonly context: ConnectionStorage,
+		private readonly backoff = new ReconnectBackoff(),
+		private readonly createClient: () => SshClient = () => new Client()
+	) { }
 
 	get profiles(): RemoteProfile[] {
 		return this.context.globalState.get<RemoteProfile[]>(profilesKey, []);
@@ -98,6 +126,7 @@ export class SftpConnections {
 		await this.context.globalState.update(profilesKey, updated);
 		// A failure with the previous settings says nothing about the new ones.
 		this.failures.delete(profile.id);
+		this.backoff.reset(profile.id);
 		if (credential !== undefined) {
 			await this.context.secrets.store(`jcodeSftp.credential.${profile.id}`, credential);
 		} else if (previous?.authentication !== profile.authentication || profile.authentication === 'agent') {
@@ -111,7 +140,12 @@ export class SftpConnections {
 		await this.context.secrets.delete(`jcodeSftp.credential.${id}`);
 	}
 
-	async sftp(id: string): Promise<SFTPWrapper> {
+	/**
+	 * Resolves the SFTP session of a saved profile, connecting when there is none. A request from the
+	 * user connects at once. Background work (change detection) instead waits out a delay that grows
+	 * while the server keeps failing, so a server that is down is not tried again at every poll.
+	 */
+	async sftp(id: string, request: ConnectionRequest = {}): Promise<SFTPWrapper> {
 		if (this.disposed) {
 			throw new Error(l10n.t('SSH connections have been disposed.'));
 		}
@@ -119,18 +153,32 @@ export class SftpConnections {
 		if (existing) {
 			return existing.sftp;
 		}
-		this.suspended.delete(id);
 		let pending = this.pending.get(id);
+		if (request.background) {
+			if (!pending && (this.waitsForUser(id) || this.backoff.remaining(id) > 0)) {
+				throw new Error(l10n.t('Waiting before connecting again.'));
+			}
+		} else {
+			// Someone is waiting for the connection, so it is tried right away and in plain view.
+			this.suspended.delete(id);
+			this.backoff.reset(id);
+			if (pending?.quiet) {
+				pending.quiet = false;
+				this.changed(id);
+			}
+		}
 		if (!pending) {
 			const profile = this.getProfile(id);
-			const client = new Client();
+			const client = this.createClient();
 			const controller = new AbortController();
-			pending = { client, controller, promise: this.connect(profile, client, controller.signal) };
+			const quiet = request.background === true && this.backoff.failures(id) > 0;
+			pending = { client, controller, quiet, promise: this.connect(profile, client, controller.signal) };
 			this.pending.set(id, pending);
 			const attempt = pending;
 			void attempt.promise.then(() => this.failures.delete(id), error => {
 				if (!attempt.controller.signal.aborted && !this.disposed) {
 					this.failures.set(id, error);
+					this.backoff.failed(id);
 					this.failureEmitter.fire({ id, error });
 				}
 			}).finally(() => {
@@ -139,20 +187,39 @@ export class SftpConnections {
 				}
 				this.changed(id);
 			});
-			this.changed(id);
+			if (!quiet) {
+				this.changed(id);
+			}
 		}
 		return (await pending.promise).sftp;
 	}
 
-	/** The connection state of a saved profile. A new attempt after a live connection ended is a reconnect. */
+	/**
+	 * The connection state of a saved profile. A new attempt after a live connection ended is a
+	 * reconnect. A quiet retry in the background still counts as offline, so the state does not flicker.
+	 */
 	getState(id: string): ConnectionState {
 		if (this.active.has(id)) {
 			return 'connected';
 		}
-		if (this.pending.has(id)) {
+		const pending = this.pending.get(id);
+		if (pending && !pending.quiet) {
 			return this.connected.has(id) ? 'reconnecting' : 'connecting';
 		}
 		return 'offline';
+	}
+
+	/** Milliseconds until background work may try to connect again: zero when it may do so now. */
+	backgroundDelay(id: string): number {
+		return this.active.has(id) || this.pending.has(id) ? 0 : this.backoff.remaining(id);
+	}
+
+	/**
+	 * When background work may next try to connect after a failure, in milliseconds since the epoch.
+	 * Undefined when nothing is scheduled: it is connected, an attempt is running, or it waits for the user.
+	 */
+	nextRetry(id: string): number | undefined {
+		return this.active.has(id) || this.pending.has(id) || this.waitsForUser(id) ? undefined : this.backoff.retryAt(id);
 	}
 
 	/** The error that ended the latest connection attempt, until a connection succeeds. */
@@ -173,6 +240,7 @@ export class SftpConnections {
 		this.suspended.add(id);
 		this.connected.delete(id);
 		this.failures.delete(id);
+		this.backoff.reset(id);
 		this.reconnect(id);
 	}
 
@@ -266,7 +334,7 @@ export class SftpConnections {
 		this.failureEmitter.dispose();
 	}
 
-	private async connect(profile: RemoteProfile, client: Client, signal: AbortSignal): Promise<Connection> {
+	private async connect(profile: RemoteProfile, client: SshClient, signal: AbortSignal): Promise<Connection> {
 		// Where the credential in use came from, so only a failing saved one is cleared and only an accepted typed one is saved.
 		let credential: string | undefined;
 		let credentialSource: 'saved' | 'typed' | undefined;
@@ -408,6 +476,7 @@ export class SftpConnections {
 			}
 			this.active.set(profile.id, connection);
 			this.connected.add(profile.id);
+			this.backoff.reset(profile.id);
 			return connection;
 		} catch (error) {
 			timeout?.dispose();

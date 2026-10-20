@@ -31,6 +31,19 @@ describe('presentStatus', () => {
 		});
 	});
 
+	test('tells when an offline connection is tried again, and only then', () => {
+		const tooltip = (state: StatusEntry['state'], retryAt?: number) => presentStatus([{ ...entry('Production', state, true), retryAt }], time => `t=${time}`).tooltip;
+		assert.deepStrictEqual({
+			offline: tooltip('offline', 1500),
+			waitingForUser: tooltip('offline'),
+			connecting: tooltip('connecting', 1500)
+		}, {
+			offline: 'Production (deploy@production.example.com:22): Offline. Retrying after t=1500',
+			waitingForUser: 'Production (deploy@production.example.com:22): Offline',
+			connecting: 'Production (deploy@production.example.com:22): Connecting'
+		});
+	});
+
 	test('summarizes several connections by the one needing the most attention', () => {
 		assert.deepStrictEqual(presentStatus([entry('Production', 'connected'), entry('Staging', 'offline', true), entry('Backup', 'reconnecting')]), {
 			text: '$(debug-disconnect) 3 SSH Connections (Offline)',

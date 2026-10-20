@@ -146,7 +146,8 @@ export class ConnectionStatus implements Disposable {
 				name: profileLabel(profile),
 				detail: `${profile.username}@${profile.host}:${profile.port}`,
 				state: this.connections.getState(id),
-				failed: this.connections.lastFailure(id) !== undefined
+				failed: this.connections.lastFailure(id) !== undefined,
+				retryAt: this.connections.nextRetry(id)
 			});
 		}
 		if (!entries.length) {
