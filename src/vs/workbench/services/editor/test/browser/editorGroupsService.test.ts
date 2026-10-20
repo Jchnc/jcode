@@ -1360,6 +1360,49 @@ suite('EditorGroupsService', () => {
 		assert.strictEqual(group.getEditorByIndex(4), input8);
 	});
 
+	test('replaceEditors - keeps the tab group membership and position of replaced editors', async () => {
+		const [part] = await createPart();
+		const group = part.activeGroup;
+
+		const inputs = ['a', 'b', 'c', 'd'].map(name => createTestFileEditorInput(URI.file(`foo/${name}`), TEST_EDITOR_INPUT_ID));
+		const replacements = ['x', 'y', 'z'].map(name => createTestFileEditorInput(URI.file(`foo/${name}`), TEST_EDITOR_INPUT_ID));
+		for (const input of inputs) {
+			await group.openEditor(input, { pinned: true });
+		}
+		const [, b, c] = inputs;
+		const tabGroup = group.createTabGroup([b, c], 'G', undefined, { saved: true })!;
+		await group.openEditor(c);
+		const describeLayout = () => group.getEditors(EditorsOrder.SEQUENTIAL).map(editor => `${editor.resource?.path.split('/').pop()}${group.getTabGroupForEditor(editor) ? ':G' : ''}`);
+
+		// Replace the inactive and the active member of the tab group (the active editor is replaced last)
+		await group.replaceEditors([{ editor: b, replacement: replacements[0] }, { editor: c, replacement: replacements[1] }]);
+		const afterReplacingMembers = describeLayout();
+
+		// Replacing the editors in front of and after the tab group does not make them join it
+		await group.replaceEditors([{ editor: inputs[0], replacement: replacements[2] }]);
+
+		assert.deepStrictEqual({ afterReplacingMembers, afterReplacingOthers: describeLayout(), sameTabGroup: group.tabGroups.length === 1 && group.tabGroups[0] === tabGroup, activeEditor: group.activeEditor?.resource?.path.split('/').pop() }, {
+			afterReplacingMembers: ['a', 'x:G', 'y:G', 'd'],
+			afterReplacingOthers: ['z', 'x:G', 'y:G', 'd'],
+			sameTabGroup: true,
+			activeEditor: 'y'
+		});
+	});
+
+	test('replaceEditors - keeps a saved tab group when its only member is replaced', async () => {
+		const [part] = await createPart();
+		const group = part.activeGroup;
+
+		const input = createTestFileEditorInput(URI.file('foo/a'), TEST_EDITOR_INPUT_ID);
+		const replacement = createTestFileEditorInput(URI.file('foo/b'), TEST_EDITOR_INPUT_ID);
+		await group.openEditor(input, { pinned: true });
+		const tabGroup = group.createTabGroup([input], 'G', undefined, { saved: true })!;
+
+		await group.replaceEditors([{ editor: input, replacement }]);
+
+		assert.deepStrictEqual({ tabGroups: group.tabGroups, member: group.getTabGroupForEditor(replacement) }, { tabGroups: [tabGroup], member: tabGroup });
+	});
+
 	test('replaceEditors - should be able to replace when side by side editor is involved with same input side by side', async () => {
 		const [part, instantiationService] = await createPart();
 		const group = part.activeGroup;

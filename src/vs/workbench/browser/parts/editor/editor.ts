@@ -480,6 +480,12 @@ export interface IInternalEditorOpenOptions extends IInternalEditorTitleControlO
 	 * Inactive editors to select after opening the active selected editor.
 	 */
 	readonly inactiveSelection?: EditorInput[];
+
+	/**
+	 * The editor that the opened editor is about to replace. When that editor
+	 * is a member of a tab group, the opened editor takes over its place there.
+	 */
+	readonly replaces?: EditorInput;
 }
 
 export interface IInternalEditorCloseOptions extends IInternalEditorTitleControlOptions {

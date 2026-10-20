@@ -31,6 +31,12 @@ export interface IEditorOpenOptions {
 	readonly inactiveSelection?: EditorInput[];
 	readonly index?: number;
 	readonly supportSideBySide?: SideBySideEditor.ANY | SideBySideEditor.BOTH;
+
+	/**
+	 * The editor that the opened editor is about to replace. If that editor is a member
+	 * of a tab group, a new editor takes over its position and membership.
+	 */
+	readonly replaces?: EditorInput;
 }
 
 export interface IEditorOpenResult {
@@ -357,7 +363,12 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 
 	openEditor(candidate: EditorInput, options?: IEditorOpenOptions): IEditorOpenResult {
 		const makeSticky = options?.sticky || (typeof options?.index === 'number' && this.isSticky(options.index));
-		const makePinned = options?.pinned || options?.sticky;
+
+		// A new editor that replaces a member of a tab group becomes a member itself
+		const replacedEditor = options?.replaces ? this.findEditor(options.replaces)?.[0] : undefined;
+		const replacedTabGroup = replacedEditor && !makeSticky ? this.getTabGroupForEditor(replacedEditor) : undefined;
+
+		const makePinned = options?.pinned || options?.sticky || !!replacedTabGroup;
 		const makeTransient = !!options?.transient;
 		const makeActive = options?.active || !this.activeEditor || (!makePinned && this.preview === this.activeEditor);
 
@@ -368,9 +379,15 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 			const newEditor = candidate;
 			const indexOfActive = this.indexOf(this.active);
 
-			// Insert into specific position
+			// Insert in front of the editor to replace: once that editor is
+			// closed, the new editor has the same position in the tab group
 			let targetIndex: number;
-			if (options && typeof options.index === 'number') {
+			if (replacedEditor && replacedTabGroup) {
+				targetIndex = this.indexOf(replacedEditor);
+			}
+
+			// Insert into specific position
+			else if (options && typeof options.index === 'number') {
 				targetIndex = options.index;
 			}
 
@@ -416,7 +433,7 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 
 			// A newly opened editor does not belong to a tab group. Keep it after the
 			// whole group when its requested position would split group members.
-			if (!makeSticky && targetIndex > 0 && targetIndex < this.editors.length) {
+			if (!makeSticky && !replacedTabGroup && targetIndex > 0 && targetIndex < this.editors.length) {
 				const precedingGroupId = this.editorTabGroups.get(this.editors[targetIndex - 1]);
 				if (precedingGroupId) {
 					for (let index = this.editors.length - 1; index >= targetIndex; index--) {
@@ -441,6 +458,11 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 			// Insert into our list of editors if pinned or we have no preview editor
 			if (makePinned || !this.preview) {
 				this.splice(targetIndex, false, newEditor);
+
+				// Join the tab group before anyone gets notified of the new editor
+				if (replacedTabGroup) {
+					this.editorTabGroups.set(newEditor, replacedTabGroup.id);
+				}
 			}
 
 			// Handle transient

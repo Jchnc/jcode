@@ -1334,7 +1334,8 @@ export class EditorGroupView extends Themable implements IEditorGroupView {
 			transient: !!options?.transient,
 			inactiveSelection: internalOptions?.inactiveSelection,
 			active: this.count === 0 || !options?.inactive,
-			supportSideBySide: internalOptions?.supportSideBySide
+			supportSideBySide: internalOptions?.supportSideBySide,
+			replaces: internalOptions?.replaces
 		};
 
 		if (!openEditorOptions.active && !openEditorOptions.pinned && this.model.activeEditor && !this.model.isPinned(this.model.activeEditor)) {
@@ -2204,7 +2205,7 @@ export class EditorGroupView extends Themable implements IEditorGroupView {
 		for (const { editor, replacement, forceReplaceDirty, options } of inactiveReplacements) {
 
 			// Open inactive editor
-			await this.doOpenEditor(replacement, options);
+			await this.doOpenEditor(replacement, options, { replaces: editor });
 
 			// Close replaced inactive editor unless they match
 			if (!editor.matches(replacement)) {
@@ -2226,7 +2227,7 @@ export class EditorGroupView extends Themable implements IEditorGroupView {
 		if (activeReplacement) {
 
 			// Open replacement as active editor
-			const openEditorResult = this.doOpenEditor(activeReplacement.replacement, activeReplacement.options);
+			const openEditorResult = this.doOpenEditor(activeReplacement.replacement, activeReplacement.options, { replaces: activeReplacement.editor });
 
 			// Close replaced active editor unless they match
 			if (!activeReplacement.editor.matches(activeReplacement.replacement)) {

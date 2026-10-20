@@ -668,6 +668,104 @@ suite('EditorGroupModel', () => {
 			assert.deepStrictEqual(describeLayout(group), ['c', 'a', 'b:G', 'd']);
 		});
 
+		test('an editor that replaces a grouped editor takes its place in the tab group', () => {
+			const group = createEditorGroupModel();
+			const [, b, c] = openEditors(group, 5);
+			group.createTabGroup([b, c], 'G');
+			const events = recordEvents(group);
+			const tabGroupAtOpen: (string | undefined)[] = [];
+			disposables.add(group.onDidModelChange(e => {
+				if (e.kind === GroupModelChangeKind.EDITOR_OPEN) {
+					tabGroupAtOpen.push(group.getTabGroupForEditor(e.editor!)?.name);
+				}
+			}));
+			const replacement = input('x');
+
+			group.openEditor(replacement, { index: group.indexOf(b), replaces: b });
+			group.closeEditor(b, EditorCloseContext.REPLACE);
+
+			assert.deepStrictEqual({ layout: describeLayout(group), pinned: group.isPinned(replacement), tabGroupAtOpen, events, violations: findTabGroupViolations(group) }, {
+				layout: ['a', 'x:G', 'c:G', 'd', 'e'],
+				pinned: true,
+				tabGroupAtOpen: ['G'],
+				events: [],
+				violations: []
+			});
+		});
+
+		test('replacing the first or the last member of a tab group keeps the replacement in the group', () => {
+			const group = createEditorGroupModel();
+			const [, b, c, d] = openEditors(group, 5);
+			group.createTabGroup([b, c, d], 'G');
+
+			group.openEditor(input('x'), { index: group.indexOf(b), replaces: b });
+			group.closeEditor(b, EditorCloseContext.REPLACE);
+			group.openEditor(input('y'), { index: group.indexOf(d), replaces: d });
+			group.closeEditor(d, EditorCloseContext.REPLACE);
+
+			assert.deepStrictEqual({ layout: describeLayout(group), violations: findTabGroupViolations(group) }, {
+				layout: ['a', 'x:G', 'c:G', 'y:G', 'e'],
+				violations: []
+			});
+		});
+
+		test('replacing the only member of a tab group does not remove the tab group', () => {
+			const group = createEditorGroupModel();
+			const [, b] = openEditors(group, 3);
+			const tabGroup = group.createTabGroup([b], 'G', 'red', { saved: true })!;
+			const events = recordEvents(group);
+
+			group.openEditor(input('x'), { index: group.indexOf(b), replaces: b });
+			group.closeEditor(b, EditorCloseContext.REPLACE);
+
+			assert.deepStrictEqual({ layout: describeLayout(group), sameGroup: group.tabGroups[0] === tabGroup, saved: group.tabGroups[0]?.saved, events }, {
+				layout: ['a', 'x:G', 'c'],
+				sameGroup: true,
+				saved: true,
+				events: []
+			});
+		});
+
+		test('an editor that replaces an ungrouped editor next to a tab group does not join the group', () => {
+			const group = createEditorGroupModel();
+			const [a, b, c, d] = openEditors(group, 4);
+			group.createTabGroup([b, c], 'G');
+
+			group.openEditor(input('x'), { pinned: true, index: group.indexOf(a), replaces: a });
+			group.closeEditor(a, EditorCloseContext.REPLACE);
+			group.openEditor(input('y'), { pinned: true, index: group.indexOf(d), replaces: d });
+			group.closeEditor(d, EditorCloseContext.REPLACE);
+
+			assert.deepStrictEqual(describeLayout(group), ['x', 'b:G', 'c:G', 'y']);
+		});
+
+		test('an editor that is already open and replaces a grouped editor does not join the group', () => {
+			const group = createEditorGroupModel();
+			const [, b, c, d] = openEditors(group, 4);
+			group.createTabGroup([b, c], 'G');
+
+			group.openEditor(d, { index: group.indexOf(b), replaces: b });
+			group.closeEditor(b, EditorCloseContext.REPLACE);
+
+			assert.deepStrictEqual(describeLayout(group), ['a', 'd', 'c:G']);
+		});
+
+		test('an editor that replaces a grouped editor is pinned even when opened as a preview', () => {
+			const group = createEditorGroupModel();
+			const [, b, c] = openEditors(group, 3);
+			group.createTabGroup([b, c], 'G');
+			const replacement = input('x');
+
+			group.openEditor(replacement, { pinned: false, index: group.indexOf(b), replaces: b });
+			group.closeEditor(b, EditorCloseContext.REPLACE);
+
+			assert.deepStrictEqual({ layout: describeLayout(group), pinned: group.isPinned(replacement), preview: group.previewEditor }, {
+				layout: ['a', 'x:G', 'c:G'],
+				pinned: true,
+				preview: null
+			});
+		});
+
 		test('moving an editor in between the members of a tab group makes it join the group', () => {
 			const group = createEditorGroupModel();
 			const [a, , , , e] = openEditors(group, 5);
