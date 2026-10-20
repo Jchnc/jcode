@@ -50,6 +50,11 @@ export class TreePoller {
 	private readonly entries = new Map<string, SnapshotEntry>();
 	private readonly children = new Map<string, Set<string>>();
 	private readonly oversized = new Set<string>();
+	/**
+	 * Directories that were skipped for being over the limit, and the directories found below them
+	 * since. What they hold was never recorded, so reading them at last must not report it as new.
+	 */
+	private readonly unrecorded = new Set<string>();
 	private pending: string[] | undefined;
 	private baselined = false;
 	private maxEntries = 0;
@@ -104,6 +109,9 @@ export class TreePoller {
 		if (!current) {
 			return 0;
 		}
+		// Reading a skipped folder for the first time only records it, so its changes go nowhere.
+		const quiet = this.unrecorded.has(directory);
+		const found = quiet ? [] : changes;
 		const known = this.children.get(directory) ?? new Set<string>();
 		let projected = this.entries.size;
 		for (const path of current.keys()) {
@@ -114,22 +122,27 @@ export class TreePoller {
 		}
 		if (projected > this.maxEntries) {
 			this.oversized.add(directory);
+			this.unrecorded.add(directory);
 			limited.push(directory);
 			return current.size;
 		}
 		for (const path of known) {
 			if (!current.has(path)) {
-				this.forget(path, changes, true);
+				this.forget(path, found, true);
 			}
 		}
 		for (const [path, entry] of current) {
-			this.record(path, entry, changes);
+			this.record(path, entry, found);
 			// Linked directories are watched directly rather than followed, which avoids cycles.
 			if (this.recursive && entry.type === FileType.Directory) {
+				if (quiet) {
+					this.unrecorded.add(path);
+				}
 				pending.push(path);
 			}
 		}
 		this.children.set(directory, new Set(current.keys()));
+		this.unrecorded.delete(directory);
 		return current.size;
 	}
 
@@ -157,5 +170,6 @@ export class TreePoller {
 		}
 		this.children.delete(path);
 		this.oversized.delete(path);
+		this.unrecorded.delete(path);
 	}
 }

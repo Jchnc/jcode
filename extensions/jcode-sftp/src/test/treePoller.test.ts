@@ -130,21 +130,43 @@ describe('TreePoller', () => {
 		});
 	});
 
-	test('skips a folder over the entry limit and polls it again once the limit is raised', async () => {
+	test('skips a folder over the entry limit and records it without reporting once the limit is raised', async () => {
 		const remote = new FakeRemote(['/w/', '/w/small/', '/w/small/a.txt', '/w/big/', ...Array.from({ length: 10 }, (_, index) => `/w/big/f${index}.txt`)]);
 		const poller = new TreePoller('/w', true, () => false);
 		const tight: PollLimits = { maxEntries: 8, entriesPerStep: 5000 };
+		const roomier: PollLimits = { maxEntries: 100, entriesPerStep: 5000 };
 		const first = await remote.stepWith(poller, tight);
 		const second = await remote.stepWith(poller, tight);
-		const raised = await remote.stepWith(poller, { maxEntries: 100, entriesPerStep: 5000 });
-		assert.deepStrictEqual({ first, second, raised }, {
+		const raised = await remote.stepWith(poller, roomier);
+		remote.set('/w/big/f0.txt', 2);
+		remote.set('/w/big/f10.txt');
+		remote.remove('/w/big/f1.txt');
+		const afterwards = await remote.stepWith(poller, roomier);
+		assert.deepStrictEqual({ first, second, raised, afterwards }, {
 			first: { listed: ['/w', '/w/small', '/w/big'], changes: [], limited: ['/w/big'] },
 			second: { listed: ['/w', '/w/small'], changes: [], limited: [] },
-			raised: {
-				listed: ['/w', '/w/small', '/w/big'],
-				changes: Array.from({ length: 10 }, (_, index) => `Created /w/big/f${index}.txt`),
-				limited: []
-			}
+			raised: { listed: ['/w', '/w/small', '/w/big'], changes: [], limited: [] },
+			afterwards: { listed: ['/w', '/w/small', '/w/big'], changes: ['Changed /w/big/f0.txt', 'Created /w/big/f10.txt', 'Deleted /w/big/f1.txt'], limited: [] }
+		});
+	});
+
+	test('records the folders below a skipped folder without reporting them either', async () => {
+		const remote = new FakeRemote(['/w/', '/w/small/', '/w/small/a.txt', '/w/big/', '/w/big/one.txt', '/w/big/deep/', '/w/big/deep/x.txt', '/w/big/deep/y.txt', '/w/big/deep/inner/', '/w/big/deep/inner/z.txt']);
+		const poller = new TreePoller('/w', true, () => false);
+		const first = await remote.stepWith(poller, { maxEntries: 5, entriesPerStep: 5000 });
+		const raised = await remote.stepWith(poller, { maxEntries: 100, entriesPerStep: 5000 });
+		remote.set('/w/big/deep/x.txt', 2);
+		remote.set('/w/big/deep/inner/w.txt');
+		const afterwards = await remote.stepWith(poller, { maxEntries: 100, entriesPerStep: 5000 });
+		// A folder that appears later is news, even though a sibling was recorded quietly before.
+		remote.set('/w/fresh/');
+		remote.set('/w/fresh/new.txt');
+		const created = await remote.stepWith(poller, { maxEntries: 100, entriesPerStep: 5000 });
+		assert.deepStrictEqual({ first: first.limited, raised, afterwards: afterwards.changes, created: created.changes }, {
+			first: ['/w/big'],
+			raised: { listed: ['/w', '/w/small', '/w/big', '/w/big/deep', '/w/big/deep/inner'], changes: [], limited: [] },
+			afterwards: ['Changed /w/big/deep/x.txt', 'Created /w/big/deep/inner/w.txt'],
+			created: ['Created /w/fresh', 'Created /w/fresh/new.txt']
 		});
 	});
 });
