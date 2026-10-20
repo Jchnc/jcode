@@ -799,14 +799,33 @@
 	background-image: none !important;
 }
 
-/* Stop the rail short of the active tab's shoulders so it ends square instead of tapering under their curve. */
-.modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab.in-tab-group:not(.last-in-row):has(+ .tab.active) {
-	background-size: calc(100% - var(--modern-ui-connected-tab-shoulder-radius) - var(--vscode-spacing-size20)) var(--vscode-spacing-size20) !important;
+/*
+ * The active member carries its group in two places. A thin strip in the group color
+ * runs along its top edge inside the connected outline, and each shoulder that faces
+ * a visible member is drawn in the group color so the neighbours' rail flows through the
+ * curve and into the open tab with no gap.
+ */
+.modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab.in-tab-group.active:not(.connected-tab-upper-row) > .tab-fill {
+	background-image: linear-gradient(var(--tab-group-color), var(--tab-group-color));
+	background-repeat: no-repeat;
+	background-position: left top;
+	background-size: 100% var(--vscode-spacing-size20);
+	background-origin: padding-box;
+	background-clip: padding-box;
 }
 
-.modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab.active:not(.last-in-row) + .tab.in-tab-group {
-	background-position: right bottom !important;
-	background-size: calc(100% - var(--modern-ui-connected-tab-shoulder-radius) - var(--vscode-spacing-size20)) var(--vscode-spacing-size20) !important;
+.modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab.in-tab-group:not(.tab-group-last):not(.tab-group-collapsed) + .tab.in-tab-group.active:not(.connected-tab-upper-row) > .tab-fill::before {
+	bottom: var(--vscode-strokeThickness);
+	border-bottom-width: var(--vscode-spacing-size20);
+	border-bottom-color: var(--tab-group-color);
+	border-right-color: var(--tab-group-color);
+}
+
+.modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab.in-tab-group.active:not(.connected-tab-upper-row):has(+ .tab.in-tab-group:not(.tab-group-first):not(.tab-group-collapsed)) > .tab-fill::after {
+	bottom: var(--vscode-strokeThickness);
+	border-bottom-width: var(--vscode-spacing-size20);
+	border-bottom-color: var(--tab-group-color);
+	border-left-color: var(--tab-group-color);
 }
 
 /* No separators inside a group or against its edges; the shared rail and header already group the tabs. */

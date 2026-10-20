@@ -998,15 +998,17 @@ function createLayoutFixtures() {
 			ActiveFirst: defineComponentFixture({
 				render: render(true, { editors: tabGroupActiveEditorSpecs('first'), tabGroups: componentsTabGroup(false), width: 900 }),
 				additionalThemes: ['darkHighContrast', 'lightHighContrast'],
-				expectedVisualDescriptions: ['Connected tabs: the first Components tab is active and opens into the editor with intact shoulders and no rail; the other two members carry a thin orange rail and no separators.'],
+				expectedVisualDescriptions: ['Connected tabs: the first Components tab is active and opens into the editor with a thin orange strip along its top edge; the other two members carry a thin orange rail that flows into its right shoulder, with no separators.'],
 			}),
 			ActiveMiddle: defineComponentFixture({
 				render: render(true, { editors: tabGroupActiveEditorSpecs('middle'), tabGroups: componentsTabGroup(false), width: 900 }),
-				expectedVisualDescriptions: ['The middle Components tab is active and merges into the editor; the rail stops cleanly on both sides of it.'],
+				additionalThemes: ['darkHighContrast', 'lightHighContrast'],
+				expectedVisualDescriptions: ['The middle Components tab is active and merges into the editor with an orange top strip; the rail on both neighbours flows into its shoulders with no gap.'],
 			}),
 			ActiveLast: defineComponentFixture({
 				render: render(true, { editors: tabGroupActiveEditorSpecs('last'), tabGroups: componentsTabGroup(false), width: 900 }),
-				expectedVisualDescriptions: ['The last Components tab is active and merges into the editor; the rail runs under the earlier members.'],
+				additionalThemes: ['darkHighContrast', 'lightHighContrast'],
+				expectedVisualDescriptions: ['The last Components tab is active and merges into the editor with an orange top strip; the rail under the earlier members flows into its left shoulder.'],
 			}),
 			ActiveOutside: defineComponentFixture({
 				render: render(true, { editors: tabGroupActiveEditorSpecs('outside'), tabGroups: componentsTabGroup(false), width: 900 }),
@@ -1014,7 +1016,13 @@ function createLayoutFixtures() {
 			}),
 			Collapsed: defineComponentFixture({
 				render: render(true, { editors: tabGroupActiveEditorSpecs('outside'), tabGroups: componentsTabGroup(true), width: 900 }),
+				additionalThemes: ['darkHighContrast', 'lightHighContrast'],
 				expectedVisualDescriptions: ['The collapsed Components header pill is aligned with the tabs and has no underline.'],
+			}),
+			CollapsedActive: defineComponentFixture({
+				render: render(true, { editors: tabGroupActiveEditorSpecs('middle'), tabGroups: componentsTabGroup(true), width: 900 }),
+				additionalThemes: ['darkHighContrast', 'lightHighContrast'],
+				expectedVisualDescriptions: ['The active Components member is the only visible member of the collapsed group: it shows the group-colored top strip and opens into the editor.'],
 			}),
 			Wrapped: defineComponentFixture({
 				render: render(true, { editors: tabGroupActiveEditorSpecs('middle'), tabGroups: componentsTabGroup(false), width: 360, partOptions: { wrapTabs: true, editorActionsLocation: 'hidden' } }),
