@@ -9,7 +9,7 @@ import picomatch from 'picomatch';
 import { utils, type FileEntryWithStats, type SFTPWrapper, type Stats } from 'ssh2';
 import { EventEmitter, FileChangeType, FileSystemError, FileSystemProvider, FileStat, FileType, l10n, Uri, workspace, type Disposable, type FileChangeEvent, type LogOutputChannel } from 'vscode';
 import { SftpConnections } from './connection';
-import { planOwnership } from './saveStrategy';
+import { linkCountCommand, parseLinkCount, planOwnership } from './saveStrategy';
 
 interface SnapshotEntry {
 	type: FileType;
@@ -49,6 +49,11 @@ function isConnectionError(error: Error): boolean {
 	return code === String(utils.sftp.STATUS_CODE.NO_CONNECTION) || code === String(utils.sftp.STATUS_CODE.CONNECTION_LOST) ||
 		/^(?:ECONN|EPIPE|ETIMEDOUT)/.test(code) ||
 		/not connected|connection lost|connection (?:closed|ended)|no response from server|channel (?:is not open|closed)|socket (?:closed|ended)/i.test(error.message);
+}
+
+/** Identifies refusals that leave the destination untouched, so the caller can try another route. */
+function isPermissionDenied(error: Error): boolean {
+	return error instanceof FileSystemError && error.code === 'NoPermissions';
 }
 
 /** Resolves link targets, retaining link metadata for missing or inaccessible directory entries. */
@@ -161,45 +166,17 @@ export class SftpFileSystemProvider implements FileSystemProvider {
 			if (target?.isDirectory()) {
 				throw FileSystemError.FileIsADirectory(uri);
 			}
-			if (target) {
+			if (!target) {
+				await this.writeStaged(sftp, path, content);
+			} else {
 				// Replacing an inode must not bypass the existing file's write permissions.
 				const writable = await operation<Buffer>(callback => sftp.open(path, utils.sftp.OPEN_MODE.WRITE, callback));
 				await operation<void>(callback => sftp.close(writable, callback));
-			}
-			const temporary = siblingPath(path, 'tmp');
-			let handle: Buffer | undefined;
-			let staged = false;
-			let published = false;
-			try {
-				handle = await operation<Buffer>(callback => sftp.open(temporary, 'wx', target ? 0o600 : 0o666, callback));
-				staged = true;
-				const buffer = Buffer.from(content);
-				for (let offset = 0; offset < buffer.length;) {
-					const length = Math.min(64 * 1024, buffer.length - offset);
-					await operation<void>(callback => sftp.write(handle!, buffer, offset, length, offset, callback));
-					offset += length;
-				}
-				if (target) {
-					await this.restoreMetadata(sftp, handle, path, target);
-				}
-				await operation<void>(callback => sftp.close(handle!, callback));
-				handle = undefined;
-				await this.replace(sftp, temporary, path, target);
-				published = true;
-			} finally {
-				if (handle) {
-					try {
-						await operation<void>(callback => sftp.close(handle!, callback));
-					} catch (error) {
-						this.log.warn(`Could not close staged upload ${temporary}: ${String(error)}`);
-					}
-				}
-				if (staged && !published) {
-					try {
-						await operation<void>(callback => sftp.unlink(temporary, callback));
-					} catch (error) {
-						this.log.warn(`Could not remove staged upload ${temporary}: ${String(error)}`);
-					}
+				if (await this.hasMultipleLinks(uri.authority, path)) {
+					this.log.info(`Writing ${path} in place because it has more than one hard link.`);
+					await this.writeInPlace(sftp, path, content);
+				} else if (!await this.writeStaged(sftp, path, content, target)) {
+					await this.writeInPlace(sftp, path, content);
 				}
 			}
 			return !entry;
@@ -207,16 +184,121 @@ export class SftpFileSystemProvider implements FileSystemProvider {
 		this.changes.fire([{ type: created ? FileChangeType.Created : FileChangeType.Changed, uri }]);
 	}
 
-	/** Gives the staged file the original owner and mode. The content is already safe, so metadata failures are logged instead of failing the save. */
-	private async restoreMetadata(sftp: SFTPWrapper, handle: Buffer, path: string, original: Stats): Promise<void> {
+	/** Reads the hard link count with `stat`, assuming a single link when the server cannot report it. */
+	private async hasMultipleLinks(authority: string, path: string): Promise<boolean> {
+		return (parseLinkCount(await this.connections.exec(authority, linkCountCommand(path))) ?? 1) > 1;
+	}
+
+	/** Writes the content in chunks starting at the beginning of the file. */
+	private async writeChunks(sftp: SFTPWrapper, handle: Buffer, content: Uint8Array): Promise<void> {
+		const buffer = Buffer.from(content);
+		for (let offset = 0; offset < buffer.length;) {
+			const length = Math.min(64 * 1024, buffer.length - offset);
+			await operation<void>(callback => sftp.write(handle, buffer, offset, length, offset, callback));
+			offset += length;
+		}
+	}
+
+	/**
+	 * Uploads to a unique sibling and swaps it in, so readers never see a partial file. Returns false,
+	 * leaving the original untouched, when it has to be written in place instead: the directory does
+	 * not allow staging, or replacing the file would change its owner.
+	 */
+	private async writeStaged(sftp: SFTPWrapper, path: string, content: Uint8Array, original?: Stats): Promise<boolean> {
+		const temporary = siblingPath(path, 'tmp');
+		let handle: Buffer | undefined;
+		let staged = false;
+		let published = false;
+		try {
+			try {
+				handle = await operation<Buffer>(callback => sftp.open(temporary, 'wx', original ? 0o600 : 0o666, callback));
+			} catch (error) {
+				if (original && isPermissionDenied(error)) {
+					this.log.info(`Cannot create a staging file next to ${path}: ${String(error)}`);
+					return false;
+				}
+				throw error;
+			}
+			staged = true;
+			if (original && !await this.restoreOwner(sftp, handle, path, original)) {
+				return false;
+			}
+			await this.writeChunks(sftp, handle, content);
+			if (original) {
+				const staging = handle;
+				await this.tolerate(`restore the mode of ${path}`, () => operation<void>(callback => sftp.fchmod(staging, original.mode & 0o7777, callback)));
+			}
+			await operation<void>(callback => sftp.close(handle!, callback));
+			handle = undefined;
+			try {
+				await this.replace(sftp, temporary, path, original);
+			} catch (error) {
+				if (original && isPermissionDenied(error)) {
+					this.log.info(`Cannot replace ${path}: ${String(error)}`);
+					return false;
+				}
+				throw error;
+			}
+			published = true;
+			return true;
+		} finally {
+			if (handle) {
+				try {
+					await operation<void>(callback => sftp.close(handle!, callback));
+				} catch (error) {
+					this.log.warn(`Could not close staged upload ${temporary}: ${String(error)}`);
+				}
+			}
+			if (staged && !published) {
+				try {
+					await operation<void>(callback => sftp.unlink(temporary, callback));
+				} catch (error) {
+					this.log.warn(`Could not remove staged upload ${temporary}: ${String(error)}`);
+				}
+			}
+		}
+	}
+
+	/** Truncates and rewrites the file itself, keeping its inode, hard links, owner, mode and ACLs. */
+	private async writeInPlace(sftp: SFTPWrapper, path: string, content: Uint8Array): Promise<void> {
+		const handle = await operation<Buffer>(callback => sftp.open(path, utils.sftp.OPEN_MODE.WRITE | utils.sftp.OPEN_MODE.TRUNC, callback));
+		let closed = false;
+		try {
+			await this.writeChunks(sftp, handle, content);
+			closed = true;
+			await operation<void>(callback => sftp.close(handle, callback));
+		} finally {
+			if (!closed) {
+				try {
+					await operation<void>(callback => sftp.close(handle, callback));
+				} catch (error) {
+					this.log.warn(`Could not close ${path}: ${String(error)}`);
+				}
+			}
+		}
+	}
+
+	/** Gives the staged file the original owner. Returns false when that is impossible, so the caller keeps the original file. */
+	private async restoreOwner(sftp: SFTPWrapper, handle: Buffer, path: string, original: Stats): Promise<boolean> {
 		const created = await operation<Stats>(callback => sftp.fstat(handle, callback));
 		const plan = planOwnership(created, original);
-		if (plan.action === 'restore') {
-			await this.tolerate(`restore the owner of ${path}`, () => operation<void>(callback => sftp.fchown(handle, plan.owner.uid, plan.owner.gid, callback)));
-		} else if (plan.action === 'unrestorable') {
-			this.log.info(`Saved ${path} as ${created.uid}:${created.gid} because only root can restore the original owner ${original.uid}:${original.gid}.`);
+		if (plan.action === 'keep') {
+			return true;
 		}
-		await this.tolerate(`restore the mode of ${path}`, () => operation<void>(callback => sftp.fchmod(handle, original.mode & 0o7777, callback)));
+		if (plan.action === 'restore') {
+			try {
+				await operation<void>(callback => sftp.fchown(handle, plan.owner.uid, plan.owner.gid, callback));
+				return true;
+			} catch (error) {
+				if (!(error instanceof Error) || isConnectionError(error)) {
+					throw error;
+				}
+				this.log.info(`Could not restore the owner of ${path}: ${String(error)}`);
+				return false;
+			}
+		}
+		this.log.info(`${path} belongs to ${original.uid}:${original.gid}, and only root can restore that owner.`);
+		return false;
 	}
 
 	/** Runs a best-effort step, rethrowing transport failures so a dropped connection still fails the save. */

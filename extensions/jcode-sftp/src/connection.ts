@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { Client, type ConnectConfig, type SFTPWrapper } from 'ssh2';
+import { Client, type ClientChannel, type ConnectConfig, type SFTPWrapper } from 'ssh2';
 import { ExtensionContext, l10n, window } from 'vscode';
 
 export interface RemoteProfile {
@@ -24,6 +24,8 @@ export interface RemoteProfile {
 interface Connection {
 	client: Client;
 	sftp: SFTPWrapper;
+	/** Set once the server refuses or ignores command execution so it is not retried. */
+	execUnavailable?: boolean;
 }
 
 interface PendingConnection {
@@ -99,6 +101,56 @@ export class SftpConnections {
 			}).catch(() => undefined);
 		}
 		return (await pending.promise).sftp;
+	}
+
+	/**
+	 * Runs a short command beside the SFTP session and resolves its output, or undefined when the
+	 * server refuses it, it fails, or it takes longer than the timeout. Servers that do not allow
+	 * command execution are remembered so later calls return immediately.
+	 */
+	async exec(id: string, command: string, timeout = 5000): Promise<string | undefined> {
+		await this.sftp(id);
+		const connection = this.active.get(id);
+		if (!connection || connection.execUnavailable) {
+			return undefined;
+		}
+		return new Promise<string | undefined>(resolve => {
+			let output = '';
+			let channel: ClientChannel | undefined;
+			let timedOut = false;
+			const timer = setTimeout(() => {
+				timedOut = true;
+				connection.execUnavailable = true;
+				channel?.close();
+				resolve(undefined);
+			}, timeout);
+			const finish = (value: string | undefined) => {
+				clearTimeout(timer);
+				resolve(value);
+			};
+			try {
+				connection.client.exec(command, (error, stream) => {
+					if (error || timedOut) {
+						connection.execUnavailable = true;
+						stream?.close();
+						finish(undefined);
+						return;
+					}
+					channel = stream;
+					stream.on('data', (chunk: Buffer) => {
+						if (output.length < 1024) {
+							output += chunk.toString('utf8');
+						}
+					});
+					stream.stderr.on('data', () => undefined);
+					stream.once('close', (code: number | null) => finish(code === 0 ? output : undefined));
+					// Send EOF right away so a forced command that reads input (such as internal-sftp) exits instead of waiting for the timeout.
+					stream.end();
+				});
+			} catch {
+				finish(undefined);
+			}
+		});
 	}
 
 	reconnect(id: string): void {

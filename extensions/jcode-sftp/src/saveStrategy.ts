@@ -28,3 +28,23 @@ export function planOwnership(created: Partial<FileOwner>, original: Partial<Fil
 	}
 	return { action: 'unrestorable' };
 }
+
+/** Quotes a value as one POSIX shell word. */
+export function shellQuote(value: string): string {
+	return `'${value.replaceAll(`'`, `'\\''`)}'`;
+}
+
+/**
+ * Builds a command printing the hard link count of a file. SFTP attributes do not carry it, so
+ * it is read with `stat`, trying the GNU and busybox form first and the BSD and macOS form second.
+ */
+export function linkCountCommand(path: string): string {
+	const quoted = shellQuote(path);
+	return `stat -c %h -- ${quoted} || stat -f %l -- ${quoted}`;
+}
+
+/** Reads the output of {@link linkCountCommand}, returning undefined when it is not a count. */
+export function parseLinkCount(output: string | undefined): number | undefined {
+	const trimmed = output?.trim();
+	return trimmed && /^\d{1,9}$/.test(trimmed) ? Number(trimmed) : undefined;
+}
