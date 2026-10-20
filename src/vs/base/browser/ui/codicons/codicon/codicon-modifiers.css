@@ -25,6 +25,41 @@
 	transform-origin: center center;
 }
 
+/*
+ * Spinning icons stand still when motion is reduced, whether by the "workbench.reduceMotion" setting or by
+ * the system preference while the setting is left on auto. The icons stay visible, so what they stand for still
+ * shows. The animation is cleared with !important because the many places that spin an icon with a more
+ * specific selector must not override an accessibility preference.
+ */
+.monaco-workbench.monaco-reduce-motion .codicon-modifier-spin,
+.monaco-workbench.monaco-reduce-motion .codicon-modifier-spin::before,
+.monaco-workbench.monaco-reduce-motion .codicon-loading,
+.monaco-workbench.monaco-reduce-motion .codicon-loading::before,
+.monaco-workbench.monaco-reduce-motion .codicon-loading-compact,
+.monaco-workbench.monaco-reduce-motion .codicon-loading-compact::before,
+.monaco-workbench.monaco-reduce-motion .codicon-tree-item-loading,
+.monaco-workbench.monaco-reduce-motion .codicon-tree-item-loading::before,
+.monaco-workbench.monaco-reduce-motion .codicon-testing-loading-icon,
+.monaco-workbench.monaco-reduce-motion .codicon-testing-loading-icon::before {
+	animation: none !important;
+}
+
+/* The system preference alone, until the workbench has applied its own motion classes. An explicit "off" keeps motion. */
+@media (prefers-reduced-motion: reduce) {
+	.monaco-workbench:not(.monaco-enable-motion) .codicon-modifier-spin,
+	.monaco-workbench:not(.monaco-enable-motion) .codicon-modifier-spin::before,
+	.monaco-workbench:not(.monaco-enable-motion) .codicon-loading,
+	.monaco-workbench:not(.monaco-enable-motion) .codicon-loading::before,
+	.monaco-workbench:not(.monaco-enable-motion) .codicon-loading-compact,
+	.monaco-workbench:not(.monaco-enable-motion) .codicon-loading-compact::before,
+	.monaco-workbench:not(.monaco-enable-motion) .codicon-tree-item-loading,
+	.monaco-workbench:not(.monaco-enable-motion) .codicon-tree-item-loading::before,
+	.monaco-workbench:not(.monaco-enable-motion) .codicon-testing-loading-icon,
+	.monaco-workbench:not(.monaco-enable-motion) .codicon-testing-loading-icon::before {
+		animation: none !important;
+	}
+}
+
 .codicon-modifier-disabled {
 	opacity: 0.4;
 }
