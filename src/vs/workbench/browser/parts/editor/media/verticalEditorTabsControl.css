@@ -451,6 +451,24 @@
 	display: none;
 }
 
+/*
+ * The rail has nothing but the file icon to identify a tab. While the file icon theme
+ * has no file icons (`no-file-icons`) a codicon stands in for it.
+ */
+.monaco-workbench .part.editor > .content .vertical-tab-fallback-icon {
+	display: none;
+	flex: 0 0 auto;
+	color: inherit;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-body .vertical-tabs-and-actions-container.compact.no-file-icons .vertical-tab > .vertical-tab-label {
+	display: none;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-body .vertical-tabs-and-actions-container.compact.no-file-icons .vertical-tab > .vertical-tab-fallback-icon {
+	display: block;
+}
+
 .monaco-workbench .part.editor > .content .editor-group-container > .editor-group-body .vertical-tabs-and-actions-container.compact .vertical-tab.dirty > .vertical-tab-dirty-dot {
 	display: block;
 	position: absolute;

@@ -22,7 +22,7 @@ import { NullHoverService } from '../../../../../platform/hover/test/browser/nul
 import { SyncDescriptor } from '../../../../../platform/instantiation/common/descriptors.js';
 import { Registry } from '../../../../../platform/registry/common/platform.js';
 import { DEFAULT_EDITOR_PART_OPTIONS, IEditorGroupsView, IEditorGroupView, IEditorPartsView } from '../../../../browser/parts/editor/editor.js';
-import { computeVerticalTabsWidth, VerticalEditorTabsControl } from '../../../../browser/parts/editor/verticalEditorTabsControl.js';
+import { computeVerticalTabsWidth, isVerticalTabsWidthCompact, VerticalEditorTabsControl } from '../../../../browser/parts/editor/verticalEditorTabsControl.js';
 import { EditorExtensions, EditorInputCapabilities, EditorsOrder, IEditorFactoryRegistry, IEditorPartOptions } from '../../../../common/editor.js';
 import { EditorGroupModel } from '../../../../common/editor/editorGroupModel.js';
 import { EditorInput } from '../../../../common/editor/editorInput.js';
@@ -529,7 +529,7 @@ suite('VerticalEditorTabsControl', () => {
 		assert.deepStrictEqual({ opened, openedByNestedControl: openedEditors.map(editor => editor.getName()) }, { opened: ['file3.txt'], openedByNestedControl: [] });
 	});
 
-	test('the column width shrinks toward its minimum, then falls back to a compact rail, and leaves the editor room', () => {
+	test('the column width shrinks toward its minimum, then on to a compact rail without jumping, and leaves the editor room', () => {
 		const contentWidths = [1000, 460, 420, 360, 359, 300, 100, 60, 20, 0];
 
 		assert.deepStrictEqual({
@@ -537,9 +537,32 @@ suite('VerticalEditorTabsControl', () => {
 			withGapAndNoEditorMinimum: contentWidths.map(contentWidth => computeVerticalTabsWidth(contentWidth, 10, 240, 0)),
 			editorNeverCollapses: Array.from({ length: 2000 }, (_, index) => index + 1).every(contentWidth => contentWidth - computeVerticalTabsWidth(contentWidth, 0, 500, 0) >= 1)
 		}, {
-			regular: [240, 240, 200, 140, 48, 48, 48, 30, 10, 0],
-			withGapAndNoEditorMinimum: [240, 230, 190, 48, 48, 48, 45, 25, 5, 0],
+			regular: [240, 240, 200, 140, 139, 80, 48, 30, 10, 0],
+			withGapAndNoEditorMinimum: [240, 230, 190, 130, 129, 70, 45, 25, 5, 0],
 			editorNeverCollapses: true
+		});
+	});
+
+	test('a column only turns compact well below the labeled minimum and needs the whole minimum to get its labels back', () => {
+		const compactAlong = (wasCompact: boolean, widths: number[]) => widths.map(width => wasCompact = isVerticalTabsWidthCompact(width, wasCompact));
+		const root = container.querySelector('.vertical-tabs-and-actions-container')!;
+		const compactWhileLaidOutAt = (widths: number[]) => widths.map(width => {
+			layoutControl(600, width);
+			return root.classList.contains('compact');
+		});
+
+		assert.deepStrictEqual({
+			shrinking: compactAlong(false, [240, 140, 130, 120, 119, 48]),
+			growing: compactAlong(true, [48, 119, 139, 140, 240]),
+			resizedAroundTheMinimum: compactAlong(false, [150, 139, 125, 119, 125, 139, 141, 139, 125]),
+			hidden: compactAlong(true, [0]),
+			control: compactWhileLaidOutAt([240, 130, 110, 130, 139, 140, 130])
+		}, {
+			shrinking: [false, false, false, false, true, true],
+			growing: [true, true, true, false, false],
+			resizedAroundTheMinimum: [false, false, false, true, true, true, false, false, false],
+			hidden: [false],
+			control: [false, false, true, true, true, false, false]
 		});
 	});
 
@@ -596,6 +619,55 @@ suite('VerticalEditorTabsControl', () => {
 		layoutControl(600, 240);
 
 		assert.deepStrictEqual({ regular, compact, restored: hasIcon() }, { regular: false, compact: true, restored: false });
+	});
+
+	test('the compact rendering falls back to a codicon while the file icon theme has no file icons', () => {
+		const setFileIcons = (hasIcons: boolean) => {
+			const oldOptions = partOptions;
+			partOptions = { ...partOptions, hasIcons };
+			control.updateOptions(oldOptions, partOptions); // what the editor part does when the file icon theme changes
+		};
+		const describeIcon = () => {
+			const row = rows()[0];
+			const fallback = row.querySelector<HTMLElement>('.vertical-tab-fallback-icon')!;
+			return {
+				fallback: mainWindow.getComputedStyle(fallback).display !== 'none' ? Array.from(fallback.classList).filter(className => className.startsWith('codicon-')) : 'hidden',
+				label: mainWindow.getComputedStyle(row.querySelector('.vertical-tab-label')!).display !== 'none'
+			};
+		};
+
+		layoutControl(600, 240);
+		const labeledWithoutIcons = (setFileIcons(false), describeIcon());
+		layoutControl(600, 48);
+		const compactWithoutIcons = describeIcon();
+		setFileIcons(true);
+		const compactWithIcons = describeIcon();
+		setFileIcons(false);
+		layoutControl(600, 240);
+
+		assert.deepStrictEqual({ labeledWithoutIcons, compactWithoutIcons, compactWithIcons, restoredWithoutIcons: describeIcon() }, {
+			labeledWithoutIcons: { fallback: 'hidden', label: true },
+			compactWithoutIcons: { fallback: ['codicon-file'], label: false },
+			compactWithIcons: { fallback: 'hidden', label: true },
+			restoredWithoutIcons: { fallback: 'hidden', label: true }
+		});
+	});
+
+	test('the New Tab button describes itself through the hover service', () => {
+		const hovers = new Map<HTMLElement, string>();
+		instantiationService.stub(IHoverService, {
+			...NullHoverService,
+			setupManagedHover: (_delegate, target, content) => {
+				hovers.set(target, typeof content === 'string' ? content : '');
+				return { dispose: () => hovers.delete(target), show: () => { }, hide: () => { }, update: tooltip => { hovers.set(target, typeof tooltip === 'string' ? tooltip : ''); } };
+			}
+		});
+		control.dispose();
+		reset(container);
+		control = createControl();
+
+		const button = container.querySelector<HTMLButtonElement>('.vertical-tabs-new-tab')!;
+		assert.deepStrictEqual({ hover: hovers.get(button), nativeTitle: button.title, ariaLabel: button.getAttribute('aria-label') }, { hover: 'New Tab', nativeTitle: '', ariaLabel: 'New Tab' });
 	});
 
 	test('tab group headers describe themselves through the hover service', () => {
@@ -813,7 +885,7 @@ suite('EditorGroupView vertical tabs layout', () => {
 
 	ensureNoDisposablesAreLeakedInTestSuite();
 
-	test('narrow groups shrink the vertical tabs, then compact them, and keep the editor area visible', async () => {
+	test('narrow groups shrink the vertical tabs down to the compact rail without jumping, and keep the editor area visible', async () => {
 		instantiationService = workbenchInstantiationService(undefined, disposables);
 		instantiationService.invokeFunction(accessor => Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).start(accessor));
 		const part = await createEditorPart(instantiationService, disposables);
@@ -833,7 +905,7 @@ suite('EditorGroupView vertical tabs layout', () => {
 		assert.deepStrictEqual({
 			minimumWidthGrowsByTheCompactColumn: group.minimumWidth - topTabsMinimumWidth,
 			tabsPaintFileIcons: group.element.querySelector('.vertical-tabs-container')!.classList.contains('show-file-icons'),
-			layouts: [1000, 500, 400, 360, 359, 300, 100].map(layoutAt)
+			layouts: [1000, 500, 400, 360, 359, 300, 268, 250, 100].map(layoutAt)
 		}, {
 			minimumWidthGrowsByTheCompactColumn: 48,
 			tabsPaintFileIcons: true,
@@ -842,8 +914,10 @@ suite('EditorGroupView vertical tabs layout', () => {
 				{ width: 500, tabs: '240px', editor: '260px' },
 				{ width: 400, tabs: '180px', editor: '220px' },
 				{ width: 360, tabs: '140px', editor: '220px' },
-				{ width: 359, tabs: '48px', editor: '311px' },
-				{ width: 300, tabs: '48px', editor: '252px' },
+				{ width: 359, tabs: '139px', editor: '220px' },
+				{ width: 300, tabs: '80px', editor: '220px' },
+				{ width: 268, tabs: '48px', editor: '220px' },
+				{ width: 250, tabs: '48px', editor: '202px' },
 				{ width: 100, tabs: '48px', editor: '52px' }
 			]
 		});

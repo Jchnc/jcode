@@ -68,17 +68,25 @@ interface IVerticalTabGroupTransition {
 	readonly exitingRows: ReadonlyMap<EditorInput, HTMLElement>;
 }
 
-/** The narrowest width at which the vertical tab column still shows labels. */
+/** The narrowest width at which the vertical tab column is laid out with labels; a column that gets narrower shrinks on into the compact rendering. */
 export const VERTICAL_TABS_MIN_WIDTH = 140;
 
 /** The width of the icons-only column a group falls back to when it cannot fit the labeled one. */
 export const VERTICAL_TABS_COMPACT_WIDTH = 48;
 
 /**
+ * How far below {@link VERTICAL_TABS_MIN_WIDTH} a column that shows labels may shrink before it
+ * switches to the compact rendering. A compact column needs the whole minimum width to get its
+ * labels back, so a column that is resized around that width does not flicker between the two.
+ */
+const VERTICAL_TABS_COMPACT_HYSTERESIS = 20;
+
+/**
  * Computes the width of the vertical tab column of a group. The column shrinks from its
  * preferred width toward {@link VERTICAL_TABS_MIN_WIDTH} so that the editor keeps its minimum
- * width, and only once even that does not fit it collapses into the compact icons-only rail.
- * The editor always keeps at least half of a group too small for either.
+ * width. Once even that does not fit it keeps shrinking with the room it gets, down to the
+ * compact icons-only rail, so the column and the editor never jump when a group gets narrower.
+ * The editor always keeps at least half of a group too small for the rail.
  */
 export function computeVerticalTabsWidth(contentWidth: number, gap: number, preferredWidth: number, minimumEditorWidth: number): number {
 	const availableWidth = Math.max(0, contentWidth - gap);
@@ -87,13 +95,23 @@ export function computeVerticalTabsWidth(contentWidth: number, gap: number, pref
 		return Math.max(VERTICAL_TABS_MIN_WIDTH, Math.min(preferredWidth, roomForTabs));
 	}
 
-	return Math.min(VERTICAL_TABS_COMPACT_WIDTH, Math.floor(availableWidth / 2));
+	return Math.min(Math.max(VERTICAL_TABS_COMPACT_WIDTH, roomForTabs), Math.floor(availableWidth / 2));
+}
+
+/**
+ * Whether a column of the given width renders compact (icons only), given how it rendered
+ * before. Leaving the compact rendering takes more width than entering it does.
+ */
+export function isVerticalTabsWidthCompact(width: number, wasCompact: boolean): boolean {
+	return width > 0 && width < (wasCompact ? VERTICAL_TABS_MIN_WIDTH : VERTICAL_TABS_MIN_WIDTH - VERTICAL_TABS_COMPACT_HYSTERESIS);
 }
 
 /** The parts of a rendered tab row that non-structural updates touch. */
 interface IVerticalTab {
 	readonly element: HTMLElement;
 	readonly label: IResourceLabel;
+	/** Stands in for the file icon of the compact rendering while the file icon theme has none. */
+	readonly fallbackIcon: HTMLElement;
 	readonly actionBar: ActionBar;
 }
 
@@ -122,6 +140,7 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 	private lastSingleSelectSelectedEditor: EditorInput | undefined;
 	private tabStop: HTMLElement | undefined;
 	private compact = false;
+	private newTabAction: HTMLElement | undefined;
 	private emptyStateAction: HTMLElement | undefined;
 
 	/** Whether each tab group was collapsed when the list was last drawn, to tell which ones a model change collapses or expands. */
@@ -157,6 +176,9 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 	) {
 		super(parent, editorPartsView, groupsView, groupView, tabsModel, menuIds, breadcrumbsInHeader, useModernUITabs, contextMenuService, instantiationService, contextKeyService, keybindingService, notificationService, quickInputService, themeService, editorResolverService, hostService, menuService);
 
+		if (this.newTabAction) {
+			this._register(this.hoverService.setupManagedHover(getDefaultHoverDelegate('mouse'), this.newTabAction, localize('verticalTabs.newTab', "New Tab")));
+		}
 		if (this.emptyStateAction) {
 			this._register(this.hoverService.setupManagedHover(getDefaultHoverDelegate('mouse'), this.emptyStateAction, localize('verticalTabs.newFile', "New File")));
 		}
@@ -189,9 +211,9 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		const newTabButton = $<HTMLButtonElement>('button.vertical-tabs-new-tab');
 		newTabButton.classList.add(...ThemeIcon.asClassNameArray(Codicon.add));
 		newTabButton.type = 'button';
-		newTabButton.title = localize('verticalTabs.newTab', "New Tab");
-		newTabButton.setAttribute('aria-label', newTabButton.title);
+		newTabButton.setAttribute('aria-label', localize('verticalTabs.newTab', "New Tab"));
 		this.toolbar.appendChild(newTabButton);
+		this.newTabAction = newTabButton; // gets its hover once the services are injected
 		this._register(addDisposableListener(newTabButton, EventType.CLICK, event => {
 			EventHelper.stop(event, true);
 			this.openNewTab();
@@ -383,6 +405,7 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		}
 
 		this.root?.classList.toggle('empty', editors.length === 0);
+		this.root?.classList.toggle('no-file-icons', !this.groupsView.partOptions.hasIcons); // follows the file icon theme, which updates the part options and so redraws the list
 		this.updateEditorActionsToolbar();
 		this.layoutScrollbar();
 		this.revealActiveTab();
@@ -778,6 +801,8 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		}
 
 		const label = disposables.add(this.tabResourceLabels.create(row, { hoverTargetOverride: row }));
+		const fallbackIcon = $('span.vertical-tab-fallback-icon', { 'aria-hidden': 'true' });
+		row.appendChild(fallbackIcon);
 		// The row is the only Tab stop: its actions are reached with the keyboard through
 		// the Delete key and the context menu, so they stay out of the focus order and
 		// are not announced as nested controls.
@@ -797,7 +822,7 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		}));
 		actionBar.setFocusable(false);
 
-		const tab: IVerticalTab = { element: row, label, actionBar };
+		const tab: IVerticalTab = { element: row, label, fallbackIcon, actionBar };
 		this.tabs.set(editor, tab);
 		this.renderTabLabel(editor, tab);
 		this.renderTabActions(editor, tab);
@@ -822,6 +847,11 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 			icon: editor.getIcon(),
 			hideIcon: !this.groupsView.partOptions.showIcons && !this.compact // the compact rendering has nothing but the icon to identify a tab
 		});
+
+		// Without a file icon theme that has file icons the label paints no icon, which would leave
+		// compact rows blank. The fallback shows the icon of the editor, or a plain file.
+		const editorIcon = editor.getIcon();
+		tab.fallbackIcon.className = `vertical-tab-fallback-icon ${ThemeIcon.asClassName(ThemeIcon.isThemeIcon(editorIcon) ? editorIcon : Codicon.file)}`;
 
 		const resource = EditorResourceAccessor.getOriginalUri(editor, { supportSideBySide: SideBySideEditor.PRIMARY });
 		if (resource) {
@@ -1654,7 +1684,7 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 			this.root.style.width = `${this.dimensions.width}px`;
 			this.root.style.height = `${this.dimensions.height}px`;
 		}
-		this.updateCompact(this.dimensions.width > 0 && this.dimensions.width < VERTICAL_TABS_MIN_WIDTH);
+		this.updateCompact(isVerticalTabsWidthCompact(this.dimensions.width, this.compact));
 		this.layoutScrollbar();
 		this.revealActiveTab();
 		return this.dimensions;
