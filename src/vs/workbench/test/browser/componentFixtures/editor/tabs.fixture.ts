@@ -32,6 +32,7 @@ import { CodeEditorWidget } from '../../../../../editor/browser/widget/codeEdito
 import { EditorInput } from '../../../../common/editor/editorInput.js';
 import { EditorInputCapabilities, EditorsOrder, IEditorPartOptions, IToolbarActions, Verbosity } from '../../../../common/editor.js';
 import { EditorGroupModel } from '../../../../common/editor/editorGroupModel.js';
+import { IEditorTabGroupCreateOptions } from '../../../../common/editor/editorTabGroup.js';
 import {
 	EDITOR_BORDER,
 	EDITOR_GROUP_HEADER_NO_TABS_BACKGROUND,
@@ -158,6 +159,15 @@ interface IEditorSpec {
 	readonly active?: boolean;
 	/** Include this editor in the multi-selection (the active editor is always selected). */
 	readonly selected?: boolean;
+	/** The name of the {@link IEditorTabsFixtureOptions.tabGroups tab group} this editor belongs to. Sticky editors cannot be members. */
+	readonly tabGroup?: string;
+}
+
+/** A tab group to create from the editors that name it in {@link IEditorSpec.tabGroup}. */
+interface IFixtureTabGroup extends IEditorTabGroupCreateOptions {
+	readonly name: string;
+	/** A preset color identifier (see `EDITOR_TAB_GROUP_COLORS`) or any CSS color. */
+	readonly color: string;
 }
 
 function file(path: string): URI {
@@ -213,6 +223,28 @@ function multiSelectEditorSpecs(): IEditorSpec[] {
 		{ resource: file('/project/package.json'), icon: ThemeIcon.fromId(Codicon.json.id), pinned: true, dirty: true, active: true, selected: true },
 		{ resource: file('/project/src/app/components/button.tsx'), pinned: true },
 		{ resource: file('/project/tests/app/main.test.ts'), pinned: true, selected: true },
+	];
+}
+
+/** The tab groups of {@link tabGroupEditorSpecs}: one expanded around the active editor, one collapsed. */
+function twoTabGroups(): IFixtureTabGroup[] {
+	return [
+		{ name: 'Frontend', color: 'blue' },
+		{ name: 'Docs', color: 'green', collapsed: true },
+	];
+}
+
+/** Editors in two tab groups, with ungrouped editors before, between and after them. */
+function tabGroupEditorSpecs(): IEditorSpec[] {
+	return [
+		{ resource: file('/project/package.json'), icon: ThemeIcon.fromId(Codicon.json.id), pinned: true },
+		{ resource: file('/project/src/app/main.ts'), pinned: true, tabGroup: 'Frontend' },
+		{ resource: file('/project/src/app/index.ts'), pinned: true, tabGroup: 'Frontend', active: true },
+		{ resource: file('/project/src/app/components/button.tsx'), pinned: true, tabGroup: 'Frontend', dirty: true },
+		{ resource: file('/project/tests/app/main.test.ts'), pinned: true },
+		{ resource: file('/project/README.md'), icon: ThemeIcon.fromId(Codicon.markdown.id), pinned: true, tabGroup: 'Docs' },
+		{ resource: file('/project/docs/guide.md'), icon: ThemeIcon.fromId(Codicon.markdown.id), pinned: true, tabGroup: 'Docs' },
+		{ resource: file('/project/docs/changelog.md'), icon: ThemeIcon.fromId(Codicon.markdown.id), pinned: true, tabGroup: 'Docs' },
 	];
 }
 
@@ -287,6 +319,15 @@ export interface IEditorTabsFixtureOptions {
 	readonly partOptions?: Partial<IEditorPartOptions>;
 	readonly editorTabStyle?: ModernUIEditorTabStyle;
 	readonly editors?: IEditorSpec[];
+	/** Tab groups made of the editors that name them. Only tabs enabled by `partOptions.tabGroups` show them. */
+	readonly tabGroups?: readonly IFixtureTabGroup[];
+	/** Renders the tabs as a column beside the editor instead of a strip above it. */
+	readonly verticalTabs?: {
+		/** The width of the column. A column narrower than the labeled minimum renders compact. */
+		readonly width: number;
+		readonly height?: number;
+		readonly position?: 'left' | 'right';
+	};
 	readonly breadcrumbs?: {
 		readonly filePath?: 'on' | 'off' | 'last';
 		readonly icons?: boolean;
@@ -327,7 +368,7 @@ function createPartOptions(overrides?: Partial<IEditorPartOptions>): IEditorPart
 	};
 }
 
-function populateModel(model: EditorGroupModel, specs: IEditorSpec[], disposableStore: DisposableStore): void {
+function populateModel(model: EditorGroupModel, specs: IEditorSpec[], tabGroups: readonly IFixtureTabGroup[], disposableStore: DisposableStore): void {
 	// Open sticky editors first so their indices stay at the front.
 	const ordered = [...specs].sort((a, b) => (a.sticky === b.sticky) ? 0 : a.sticky ? -1 : 1);
 	const inputBySpec = new Map<IEditorSpec, FixtureEditorInput>();
@@ -347,6 +388,13 @@ function populateModel(model: EditorGroupModel, specs: IEditorSpec[], disposable
 		});
 	}
 
+	for (const { name, color, ...options } of tabGroups) {
+		const members = ordered.filter(spec => spec.tabGroup === name).map(spec => inputBySpec.get(spec)!);
+		if (!model.createTabGroup(members, name, color, options)) {
+			throw new Error(`The tab group "${name}" of the fixture has no editors to group`);
+		}
+	}
+
 	// Apply multi-selection: the active editor plus any additionally selected ones.
 	const inactiveSelected = ordered.filter(spec => spec.selected && !spec.active).map(spec => inputBySpec.get(spec)!);
 	if (inactiveSelected.length && model.activeEditor) {
@@ -359,7 +407,8 @@ export function renderEditorTabsFixture(ctx: ComponentFixtureContext, options: I
 
 	const width = options.width ?? 820;
 	const isGroupActive = options.active ?? true;
-	const partOptions = createPartOptions(options.partOptions);
+	const verticalTabs = options.verticalTabs;
+	const partOptions = createPartOptions(verticalTabs ? { showTabs: 'multiple', tabPosition: verticalTabs.position ?? 'left', verticalTabsWidth: verticalTabs.width, ...options.partOptions } : options.partOptions);
 
 	const configurationService = new TestConfigurationService();
 	configurationService.setUserConfiguration('breadcrumbs', {
@@ -415,7 +464,7 @@ export function renderEditorTabsFixture(ctx: ComponentFixtureContext, options: I
 
 	// Real editor group model populated with the fixture editors.
 	const model = disposableStore.add(instantiationService.createInstance(EditorGroupModel, undefined));
-	populateModel(model, options.editors ?? defaultEditorSpecs(), disposableStore);
+	populateModel(model, options.editors ?? defaultEditorSpecs(), options.tabGroups ?? [], disposableStore);
 
 	const createEditorActions = (disposables: DisposableStore, menuId: MenuId) => {
 		return { actions: createFixtureEditorTitleActions(disposables, menuId), onDidChange: Event.None };
@@ -439,6 +488,21 @@ export function renderEditorTabsFixture(ctx: ComponentFixtureContext, options: I
 		override isPinned(editorOrIndex: EditorInput | number) { return model.isPinned(editorOrIndex); }
 		override isSticky(editorOrIndex: EditorInput | number) { return model.isSticky(editorOrIndex); }
 		override isSelected(editorOrIndex: EditorInput | number) { return model.isSelected(editorOrIndex); }
+		override get tabGroups() { return model.tabGroups; }
+		override getTabGroupForEditor(editor: EditorInput) { return model.getTabGroupForEditor(editor); }
+		override createTabGroup(editors: EditorInput[], name?: string, color?: string, createOptions?: IEditorTabGroupCreateOptions) { return model.createTabGroup(editors, name, color, createOptions); }
+		override dissolveTabGroup(groupId: string) { model.dissolveTabGroup(groupId); }
+		override removeFromTabGroup(editors: EditorInput[]) { model.removeFromTabGroup(editors); }
+		override addToTabGroup(groupId: string, editors: EditorInput[]) { model.addToTabGroup(groupId, editors); }
+		override setTabGroupCollapsed(groupId: string, collapsed: boolean) { model.setTabGroupCollapsed(groupId, collapsed); }
+		override renameTabGroup(groupId: string, name: string) { model.renameTabGroup(groupId, name); }
+		override recolorTabGroup(groupId: string, color: string) { model.recolorTabGroup(groupId, color); }
+		override setTabGroupIcon(groupId: string, icon: string | undefined) { model.setTabGroupIcon(groupId, icon); }
+		override moveTabGroup(groupId: string, toIndex: number) { model.moveTabGroup(groupId, toIndex); }
+		override setTabGroupSaved(groupId: string, saved: boolean) { model.setTabGroupSaved(groupId, saved); }
+		override setTabGroupLocked(groupId: string, locked: boolean) { model.setTabGroupLocked(groupId, locked); }
+		override get canUndoTabGroupAction() { return model.canUndoTabGroupAction; }
+		override undoLastTabGroupAction() { return model.undoLastTabGroupAction(); }
 		override createEditorActions(disposables: DisposableStore, menuId = MenuId.EditorTitle) { return createEditorActions(disposables, menuId); }
 		override relayout() { this.relayoutFn(); }
 		override readonly onDidActiveEditorChange = Event.None;
@@ -473,7 +537,7 @@ export function renderEditorTabsFixture(ctx: ComponentFixtureContext, options: I
 	container.classList.toggle('modern-ui', options.modernUI);
 	container.classList.toggle('modern-ui-tabs', options.modernUI);
 	container.classList.toggle('modern-ui-connected-editor-tabs', options.modernUI && (options.editorTabStyle ?? ModernUIEditorTabStyle.Connected) === ModernUIEditorTabStyle.Connected);
-	titleContainer.classList.toggle('tabs', partOptions.showTabs === 'multiple');
+	titleContainer.classList.toggle('tabs', partOptions.showTabs === 'multiple' && !options.verticalTabs);
 	titleContainer.classList.toggle('show-file-icons', partOptions.showIcons);
 
 	const headerBackground = fixtureTheme.getColor(partOptions.showTabs === 'multiple' ? EDITOR_GROUP_HEADER_TABS_BACKGROUND : EDITOR_GROUP_HEADER_NO_TABS_BACKGROUND);
@@ -489,7 +553,21 @@ export function renderEditorTabsFixture(ctx: ComponentFixtureContext, options: I
 	editorPart.appendChild(content);
 	content.appendChild(groupContainer);
 	groupContainer.appendChild(titleContainer);
-	groupContainer.appendChild(editorContainer);
+	if (verticalTabs) {
+		// The column sits beside the editor, as the editor group view lays them out
+		const body = $(`.editor-group-body.vertical-tabs-${verticalTabs.position ?? 'left'}`);
+		groupContainer.classList.add('vertical-tabs');
+		verticalTabsContainer.classList.toggle('show-file-icons', partOptions.showIcons);
+		verticalTabsContainer.style.width = `${verticalTabs.width}px`;
+		verticalTabsContainer.style.height = `${verticalTabs.height ?? 320}px`;
+		verticalTabsContainer.style.backgroundColor = headerBackground?.toString() ?? '';
+		editorContainer.style.height = `${verticalTabs.height ?? 320}px`;
+		editorContainer.style.flex = '1 1 auto';
+		body.append(verticalTabsContainer, editorContainer);
+		groupContainer.appendChild(body);
+	} else {
+		groupContainer.appendChild(editorContainer);
+	}
 	container.classList.toggle('floating-panels', options.editorFrame ?? false);
 	const grid = $('.monaco-grid-view');
 	if (options.modernUI) {
@@ -535,6 +613,15 @@ export function renderEditorTabsFixture(ctx: ComponentFixtureContext, options: I
 	));
 
 	const layout = () => {
+		if (verticalTabs) {
+			const height = verticalTabs.height ?? 320;
+			titleControl.layout({
+				container: new Dimension(layoutWidth, height),
+				available: new Dimension(layoutWidth, height),
+			}, options.headerWidth, verticalTabs.width);
+			return;
+		}
+
 		titleControl.layout({
 			container: new Dimension(layoutWidth, titleControl.getHeight().total),
 			available: new Dimension(layoutWidth, 200),
@@ -853,6 +940,27 @@ function createLayoutFixtures() {
 		PinnedSeparateRow: defineComponentFixture({
 			render: renderPinnedSeparateRow(),
 			expectedVisualDescriptions: ['Pinned tabs appear in a separate row above ordinary tabs with balanced labels and actions.'],
+		}),
+		TabGroups: defineThemedFixtureGroup({
+			Top: defineComponentFixture({
+				render: render(true, { editors: tabGroupEditorSpecs(), tabGroups: twoTabGroups(), width: 900 }),
+				additionalThemes: ['darkHighContrast', 'lightHighContrast'],
+				expectedVisualDescriptions: ['Two tab groups share the strip: Frontend is expanded around the active tab and shows its three tabs under one colored underline, while the collapsed Docs group shows only its header with a count of three and a sideways chevron. Ungrouped tabs sit before, between, and after the groups.'],
+			}),
+			Vertical: defineComponentFixture({
+				render: render(true, { editors: tabGroupEditorSpecs(), tabGroups: twoTabGroups(), verticalTabs: { width: 240 } }),
+				additionalThemes: ['darkHighContrast', 'lightHighContrast'],
+				expectedVisualDescriptions: ['The vertical tab list shows the expanded Frontend group header with a downward chevron and its three indented rows (the active one highlighted, one with an unsaved dot), and the collapsed Docs group as a header with a sideways chevron and no rows. Ungrouped rows sit before, between, and after the groups.'],
+			}),
+			VerticalCompact: defineComponentFixture({
+				render: render(true, { editors: tabGroupEditorSpecs(), tabGroups: twoTabGroups(), verticalTabs: { width: 48 } }),
+				expectedVisualDescriptions: ['The icon-only rail shows a file icon per visible tab, the unsaved dot, and each group reduced to a color dot: a filled dot for Frontend and a ring for the collapsed Docs group.'],
+			}),
+			VerticalCompactWithoutFileIcons: defineComponentFixture({
+				fileIconTheme: 'none',
+				render: render(true, { editors: tabGroupEditorSpecs(), tabGroups: twoTabGroups(), verticalTabs: { width: 48 }, partOptions: { hasIcons: false } }),
+				expectedVisualDescriptions: ['Without a file icon theme the icon-only rail falls back to a codicon per tab instead of blank rows: the editor icon where it has one, a plain file otherwise.'],
+			}),
 		}),
 		ShowBreadCrumbs: defineComponentFixture({
 			render: render(true, {
