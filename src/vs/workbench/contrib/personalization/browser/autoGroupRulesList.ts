@@ -64,7 +64,7 @@ interface IRuleRow {
 }
 
 /** Example patterns that the empty fields suggest, one for each rule. */
-const PATTERN_EXAMPLES = ['src/api/**', '**/*.test.ts', 'docs/**/*.md', 'src/components/**'];
+const PATTERN_EXAMPLES = ['src/api', '**/*.test.ts', 'docs/**/*.md', 'src/components'];
 const NAME_EXAMPLES = ['API', 'Tests', 'Docs', 'Components'];
 
 /**

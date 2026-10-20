@@ -20,8 +20,7 @@ import { ITabSessionsService } from '../common/tabSessionsService.js';
  * Adds editors to tab groups when they are opened, as the rules of the
  * `workbench.editor.tabGroups.autoGroupRules` setting say.
  *
- * Rules only decide where an editor goes when it opens. They leave alone:
- * - editors in a preview, which are not part of a tab group until they are pinned,
+ * Rules apply when an editor opens, and to the open editors when the rules change. They leave alone:
  * - editors that are sticky or already in a tab group,
  * - tab groups that are locked, which the rule then does not apply to at all,
  * - files the user removed from the tab groups of the editor group, also when they are opened again later.
@@ -56,6 +55,7 @@ export class TabAutoGroupContribution extends Disposable implements IWorkbenchCo
 		this._register(this.configurationService.onDidChangeConfiguration(e => {
 			if (e.affectsConfiguration(TAB_AUTO_GROUP_RULES_SETTING)) {
 				this.rules = this.readRules();
+				this.applyToOpenEditors();
 			}
 		}));
 
@@ -195,12 +195,28 @@ export class TabAutoGroupContribution extends Disposable implements IWorkbenchCo
 		});
 	}
 
+	/** Applies the rules to the editors that are open, in their order, so that a new or changed rule takes effect right away. */
+	private applyToOpenEditors(): void {
+		if (this.rules.length === 0 || this.tabSessionsService.isRestoring) {
+			return;
+		}
+
+		for (const group of this.editorGroupsService.groups) {
+			if (isEditorGroupView(group)) {
+				for (const editor of group.editors) {
+					this.apply(group, editor);
+				}
+			}
+		}
+	}
+
 	private apply(group: IEditorGroupView, editor: EditorInput): void {
 		if (group.disposed || !this.editorGroupsService.partOptions.tabGroups.enabled || !group.contains(editor)) {
 			return;
 		}
 
-		if (!group.isPinned(editor) || group.isSticky(editor) || group.getTabGroupForEditor(editor)) {
+		// A preview editor joins too: joining a tab group pins it, as it does every member
+		if (group.isSticky(editor) || group.getTabGroupForEditor(editor)) {
 			return;
 		}
 

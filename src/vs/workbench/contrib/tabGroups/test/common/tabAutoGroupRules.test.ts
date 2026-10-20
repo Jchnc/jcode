@@ -72,6 +72,21 @@ suite('Tab Auto Group Rules', () => {
 			], ['Tests', 'Docs', 'Source', 'Root', undefined, 'Scripts', 'Scripts', undefined]);
 		});
 
+		test('matches a folder path as written, with either slash, a leading ./, a trailing slash and any case', () => {
+			const folderRules = [{ name: 'Components', pattern: 'src\\components' }, { name: 'Lib', pattern: './lib/' }];
+			const folderName = (path: string, ignoreCase?: boolean) => findTabAutoGroupRule(folderRules, file(path), ignoreCase)?.name;
+
+			assert.deepStrictEqual([
+				folderName('src/components/AuthButton.tsx'),
+				folderName('src/components/devtools/DevTools.tsx'),
+				folderName('src/components'),
+				folderName('src/componentsOld/Button.tsx'),
+				folderName('lib/util.ts'),
+				folderName('Src/Components/Footer.tsx', true),
+				folderName('Src/Components/Footer.tsx', false)
+			], ['Components', 'Components', 'Components', undefined, 'Lib', 'Components', undefined]);
+		});
+
 		test('applies the first rule that matches, not the most specific one', () => {
 			const resource = file('docs/api.test.ts');
 

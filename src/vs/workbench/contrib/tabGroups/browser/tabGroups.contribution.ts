@@ -33,7 +33,7 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 		[TAB_AUTO_GROUP_RULES_SETTING]: {
 			type: 'array',
 			default: [],
-			markdownDescription: localize('tabGroups.autoGroupRules', "Rules that add editors to tab groups when they are opened. The first rule whose `pattern` matches the file of an editor adds the editor to the tab group with the name of the rule in the editor group it opens in, and creates that tab group if there is none. Preview editors, sticky editors, editors that are in a tab group already and editors that the user removed from a tab group are left as they are, and so are locked tab groups. Applies when {0} is enabled.", '`#workbench.editor.tabGroups.enabled#`'),
+			markdownDescription: localize('tabGroups.autoGroupRules', "Rules that add editors to tab groups when they are opened, and the open editors when the rules change. The first rule whose `pattern` matches the file of an editor adds the editor to the tab group with the name of the rule in the editor group it is in, creates that tab group if there is none, and pins the editor. Sticky editors, editors that are in a tab group already and editors that the user removed from a tab group are left as they are, and so are locked tab groups. Applies when {0} is enabled.", '`#workbench.editor.tabGroups.enabled#`'),
 			items: {
 				type: 'object',
 				required: ['name', 'pattern'],
@@ -46,7 +46,7 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 					},
 					pattern: {
 						type: 'string',
-						markdownDescription: localize('tabGroups.autoGroupRules.pattern', "A glob pattern for the files to add to the tab group. Patterns are matched against the path of a file in its workspace folder, for example `**/*.test.ts` or `docs/**`, unless they are absolute paths, which are matched against the full path of a file."),
+						markdownDescription: localize('tabGroups.autoGroupRules.pattern', "The files to add to the tab group: a folder or file path such as `src/components`, which also covers everything in that folder, or a glob pattern such as `**/*.test.ts`. Paths are relative to the workspace folder of a file unless they are absolute, either slash separates folders, and case is ignored where the file system ignores it."),
 						minLength: 1
 					},
 					color: {

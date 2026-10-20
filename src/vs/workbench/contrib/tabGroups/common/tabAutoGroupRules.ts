@@ -6,6 +6,7 @@
 import { match } from '../../../../base/common/glob.js';
 import { ResourceSet } from '../../../../base/common/map.js';
 import { Schemas } from '../../../../base/common/network.js';
+import { isLinux } from '../../../../base/common/platform.js';
 import { relativePath } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { EDITOR_TAB_GROUP_COLORS } from '../../../common/editor/editorTabGroup.js';
@@ -88,21 +89,41 @@ function normalizeAbsolutePath(path: string): string {
 	return path.replace(/\\/g, '/').replace(/^[a-zA-Z]:/, drive => drive.toLowerCase());
 }
 
+const GLOB_CHARACTERS = /[*?[\]{}]/;
+
+/**
+ * Turns what a user typed into the glob patterns to match. Backslashes separate folders
+ * like slashes do, a leading `./` and trailing slashes are dropped, and a path without
+ * glob characters, such as `src\components`, stands for that file or folder and
+ * everything in it.
+ */
+export function toTabAutoGroupGlobs(pattern: string): string[] {
+	const path = pattern.trim().replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
+	if (!path) {
+		return [];
+	}
+
+	return GLOB_CHARACTERS.test(path) ? [path] : [path, `${path}/**`];
+}
+
 /**
  * Finds the rule that applies to a file: the first rule, in the order they are listed in,
  * with a pattern that matches. Patterns that start with a drive or a slash are matched
  * against the full path, all others against the path in the workspace folder (or
  * against the full path without its leading slash for files that are not in one).
+ * Case is ignored where the file system ignores it.
  */
-export function findTabAutoGroupRule(rules: readonly ITabAutoGroupRule[], resource: ITabAutoGroupResource): ITabAutoGroupRule | undefined {
+export function findTabAutoGroupRule(rules: readonly ITabAutoGroupRule[], resource: ITabAutoGroupResource, ignoreCase = !isLinux): ITabAutoGroupRule | undefined {
 	const absolutePath = normalizeAbsolutePath(resource.absolutePath);
+	const options = { ignoreCase };
 
 	return rules.find(rule => {
 		if (isAbsolutePattern(rule.pattern)) {
-			return match(normalizeAbsolutePath(rule.pattern), absolutePath);
+			return toTabAutoGroupGlobs(normalizeAbsolutePath(rule.pattern)).some(glob => match(glob, absolutePath, options));
 		}
 
-		return match(rule.pattern, resource.relativePath ?? absolutePath.replace(/^\//, ''));
+		const path = resource.relativePath ?? absolutePath.replace(/^\//, '');
+		return toTabAutoGroupGlobs(rule.pattern).some(glob => match(glob, path, options));
 	});
 }
 

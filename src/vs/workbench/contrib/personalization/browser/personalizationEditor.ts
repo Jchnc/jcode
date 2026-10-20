@@ -600,7 +600,7 @@ export class PersonalizationEditor extends EditorPane {
 		const text = append(row, $('.personalization-setting-text'));
 		const id = `personalization-control-${this.group.id}-${this.nextControlId++}`;
 		append(text, $('span.personalization-control-label', { id: `${id}-label` }, localize('personalization.rules', "Rules")));
-		append(text, $('p', { id: `${id}-description` }, localize('personalization.rulesDescription', "Files that match a pattern join the tab group with the name of its rule. Rules apply to files you open from now on.")));
+		append(text, $('p', { id: `${id}-description` }, localize('personalization.rulesDescription', "Files in a folder or matching a pattern join the tab group named by the rule, including tabs that are already open.")));
 		const hint = append(text, $('span.personalization-setting-hint'));
 		const field = append(row, $('.personalization-field.personalization-rules', { role: 'group', 'aria-labelledby': `${id}-label`, 'aria-describedby': `${id}-description ${id}-note` }));
 		const list = this.pageDisposables.add(new AutoGroupRulesList(field, id, {

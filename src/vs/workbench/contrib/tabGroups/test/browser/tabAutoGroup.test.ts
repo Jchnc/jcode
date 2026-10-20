@@ -132,22 +132,15 @@ suite('Tab Auto Group', () => {
 		return workbenchTeardown(instantiationService);
 	});
 
-	test('keeps preview editors out of tab groups until they are pinned', async () => {
+	test('adds preview editors to tab groups, which pins them', async () => {
 		const { instantiationService, part } = await setupAutoGroup();
 		const group = activeGroup(part);
 
 		const editor = createEditor('src/a.test.ts');
 		await group.openEditor(editor, { pinned: false });
 		await settle();
-		const asPreview = snapshot(group);
 
-		group.pinEditor(editor);
-		await settle();
-
-		assert.deepStrictEqual({ asPreview, pinned: snapshot(group) }, {
-			asPreview: { editors: ['a.test.ts'], tabGroups: [] },
-			pinned: { editors: ['a.test.ts'], tabGroups: ['Tests (red, beaker): a.test.ts'] }
-		});
+		assert.deepStrictEqual({ ...snapshot(group), pinned: group.isPinned(editor) }, { editors: ['a.test.ts'], tabGroups: ['Tests (red, beaker): a.test.ts'], pinned: true });
 
 		return workbenchTeardown(instantiationService);
 	});
@@ -281,7 +274,7 @@ suite('Tab Auto Group', () => {
 		return workbenchTeardown(instantiationService);
 	});
 
-	test('follows changes to the rules and ignores rules that are not valid', async () => {
+	test('follows changes to the rules, applies them to open editors and ignores rules that are not valid', async () => {
 		const { instantiationService, configurationService, part } = await setupAutoGroup({ rules: [{ name: 'Broken' }, 'rule'] });
 		const group = activeGroup(part);
 
@@ -290,7 +283,7 @@ suite('Tab Auto Group', () => {
 		configurationService.onDidChangeConfigurationEmitter.fire(upcastPartial<IConfigurationChangeEvent>({ affectsConfiguration: key => key === TAB_AUTO_GROUP_RULES_SETTING }));
 		await open(group, 'src/b.test.ts');
 
-		assert.deepStrictEqual(snapshot(group), { editors: ['a.test.ts', 'b.test.ts'], tabGroups: ['Fresh (teal): b.test.ts'] });
+		assert.deepStrictEqual(snapshot(group), { editors: ['a.test.ts', 'b.test.ts'], tabGroups: ['Fresh (teal): a.test.ts, b.test.ts'] });
 
 		return workbenchTeardown(instantiationService);
 	});
