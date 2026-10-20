@@ -106,7 +106,11 @@ export interface IHistoryService {
 	/** Saved tab groups that are currently closed in this workspace. */
 	getSavedTabGroups(): readonly ISavedEditorTabGroup[];
 
-	/** Stores a closed group so it can be reopened across workbench sessions. */
+	/**
+	 * Stores a closed group so it can be reopened across workbench sessions. Saved
+	 * groups are also recorded automatically whenever closing their tabs makes them
+	 * disappear, so callers only need this to record a group they closed themselves.
+	 */
 	saveClosedTabGroup(tabGroup: IEditorTabGroup, editors: readonly { editor: EditorInput; index: number }[]): void;
 
 	/** Reopens a saved tab group into the active editor group. */

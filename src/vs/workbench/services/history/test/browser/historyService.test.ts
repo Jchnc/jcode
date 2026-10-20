@@ -29,6 +29,7 @@ import { EditorPane } from '../../../../browser/parts/editor/editorPane.js';
 import { TestConfigurationService } from '../../../../../platform/configuration/test/common/testConfigurationService.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { SideBySideEditorInput } from '../../../../common/editor/sideBySideEditorInput.js';
+import { IEditorGroupView } from '../../../../browser/parts/editor/editor.js';
 
 suite('HistoryService', function () {
 
@@ -674,6 +675,75 @@ suite('HistoryService', function () {
 		assert.strictEqual(part.activeGroup.count, 3);
 		const reopened = part.activeGroup.editors.map(editor => editor.resource?.toString()).sort();
 		assert.deepStrictEqual(reopened, [resource1, resource2, resource3].map(resource => resource.toString()).sort());
+
+		return workbenchTeardown(instantiationService);
+	});
+
+	async function createTabGroupWithSavedFlag(part: EditorPart, saved: boolean): Promise<{ group: IEditorGroupView; members: EditorInput[]; other: EditorInput }> {
+		const group = part.activeGroup;
+		const members = ['foo://tab1', 'foo://tab2', 'foo://tab3'].map(resource => disposables.add(new TestFileEditorInput(URI.parse(resource), TEST_EDITOR_INPUT_ID)));
+		const other = disposables.add(new TestFileEditorInput(URI.parse('foo://other'), TEST_EDITOR_INPUT_ID));
+		for (const input of [...members, other]) {
+			await group.openEditor(input, { pinned: true });
+		}
+		group.createTabGroup(members, 'Work', 'blue', { saved, icon: 'rocket', metadata: { source: 'test' } });
+
+		return { group, members, other };
+	}
+
+	function getSavedTabGroupSnapshots(historyService: HistoryService) {
+		return historyService.getSavedTabGroups().map(({ name, color, icon, metadata, editors }) => ({
+			name,
+			color,
+			icon,
+			metadata,
+			editors: editors.map(({ editor, index }) => ({ resource: isResourceEditorInput(editor) ? editor.resource.toString() : undefined, index }))
+		}));
+	}
+
+	const allSavedTabs = [{ resource: 'foo://tab1', index: 0 }, { resource: 'foo://tab2', index: 1 }, { resource: 'foo://tab3', index: 2 }];
+	for (const flow of [
+		{ name: 'closing the tabs one by one', close: async (group: IEditorGroupView, members: EditorInput[]) => { for (const member of members) { await group.closeEditor(member); } }, expected: [{ resource: 'foo://tab3', index: 0 }] },
+		{ name: 'close all', close: (group: IEditorGroupView) => group.closeAllEditors(), expected: allSavedTabs },
+		{ name: 'close others', close: (group: IEditorGroupView, _members: EditorInput[], other: EditorInput) => group.closeEditors({ except: other }), expected: allSavedTabs },
+		{ name: 'close all after closing one tab', close: async (group: IEditorGroupView, members: EditorInput[]) => { await group.closeEditor(members[1]); await group.closeAllEditors(); }, expected: [{ resource: 'foo://tab1', index: 0 }, { resource: 'foo://tab3', index: 1 }] }
+	]) {
+		test(`saved tab groups are kept when their tabs are closed: ${flow.name}`, async () => {
+			const [part, historyService, , , instantiationService] = await createServices();
+			const { group, members, other } = await createTabGroupWithSavedFlag(part, true);
+
+			await flow.close(group, members, other);
+
+			assert.deepStrictEqual(getSavedTabGroupSnapshots(historyService), [{
+				name: 'Work',
+				color: 'blue',
+				icon: 'rocket',
+				metadata: { source: 'test' },
+				editors: flow.expected
+			}]);
+
+			return workbenchTeardown(instantiationService);
+		});
+	}
+
+	test('saved tab groups are not kept when they are ungrouped, not saved or moved', async () => {
+		const [part, historyService, , , instantiationService] = await createServices();
+
+		// Not saved
+		const unsaved = await createTabGroupWithSavedFlag(part, false);
+		await unsaved.group.closeAllEditors();
+
+		// Ungrouped before the tabs are closed
+		const ungrouped = await createTabGroupWithSavedFlag(part, true);
+		ungrouped.group.dissolveTabGroup(ungrouped.group.tabGroups[0].id);
+		await ungrouped.group.closeAllEditors();
+
+		// Moved to another editor group
+		const moved = await createTabGroupWithSavedFlag(part, true);
+		const targetGroup = part.addGroup(moved.group, GroupDirection.RIGHT);
+		moved.group.moveEditors(moved.members.map(editor => ({ editor })), targetGroup);
+
+		assert.deepStrictEqual(getSavedTabGroupSnapshots(historyService), []);
 
 		return workbenchTeardown(instantiationService);
 	});

@@ -19,7 +19,7 @@ import { IConfigurationService } from '../../../../platform/configuration/common
 import { IEditorGroup, IEditorGroupsService } from '../../editor/common/editorGroupsService.js';
 import { getExcludes, ISearchConfiguration, SEARCH_EXCLUDE_CONFIG } from '../../search/common/search.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
-import { EditorServiceImpl, isEditorGroupView } from '../../../browser/parts/editor/editor.js';
+import { EditorServiceImpl, IEditorGroupView, isEditorGroupView } from '../../../browser/parts/editor/editor.js';
 import { IWorkbenchLayoutService } from '../../layout/browser/layoutService.js';
 import { IContextKey, IContextKeyService, RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
 import { coalesce } from '../../../../base/common/arrays.js';
@@ -36,6 +36,7 @@ import { ILogService, LogLevel } from '../../../../platform/log/common/log.js';
 import { mainWindow } from '../../../../base/browser/window.js';
 import { parse, stringify } from '../../../../base/common/marshalling.js';
 import { IEditorTabGroup } from '../../../common/editor/editorTabGroup.js';
+import { IGroupModelChangeEvent, isGroupEditorCloseEvent } from '../../../common/editor/editorGroupModel.js';
 
 interface ISerializedEditorHistoryEntry {
 	readonly editor: Omit<IResourceEditorInput, 'resource'> & { resource: string };
@@ -59,6 +60,14 @@ interface IRecentlyClosedEditor {
 	readonly batchId: number;
 }
 
+/** The state of an open saved tab group, recorded when the group disappears because its tabs were closed. */
+interface ISavedTabGroupSnapshot {
+	readonly savedGroup: ISavedEditorTabGroup;
+
+	/** The editors that were members of the group when the snapshot was taken. */
+	readonly members: readonly EditorInput[];
+}
+
 export class HistoryService extends Disposable implements IHistoryService {
 
 	declare readonly _serviceBrand: undefined;
@@ -71,6 +80,22 @@ export class HistoryService extends Disposable implements IHistoryService {
 
 	private readonly editorHelper: EditorHelper;
 	private savedTabGroups: ISavedEditorTabGroup[] = [];
+
+	/** Listeners on the editor groups whose saved tab groups are tracked. */
+	private readonly savedTabGroupTrackers = this._register(new DisposableMap<GroupIdentifier>());
+
+	/**
+	 * Last known state of every saved tab group per editor group. The members of a
+	 * tab group are already gone when it is removed, so closing the last tab of a
+	 * saved group can only be recorded from this snapshot.
+	 */
+	private readonly savedTabGroupSnapshots = new Map<GroupIdentifier, Map<string, ISavedTabGroupSnapshot>>();
+
+	/** Editor groups whose snapshots are refreshed once the editors that are closing together are closed. */
+	private readonly pendingSavedTabGroupSnapshotUpdates = new Set<GroupIdentifier>();
+
+	/** Snapshots of saved tab groups that were removed, until we know whether closing an editor caused it. */
+	private readonly removedSavedTabGroupSnapshots = new Map<GroupIdentifier, ISavedTabGroupSnapshot[]>();
 
 	constructor(
 		@IEditorService private readonly editorService: EditorServiceImpl,
@@ -125,7 +150,10 @@ export class HistoryService extends Disposable implements IHistoryService {
 		this._register(this.editorService.onDidMostRecentlyActiveEditorsChange(() => this.handleEditorEventInRecentEditorsStack()));
 
 		// Editor group changes
+		this._register(this.editorGroupService.onDidAddGroup(e => this.onDidAddGroup(e)));
 		this._register(this.editorGroupService.onDidRemoveGroup(e => this.onDidRemoveGroup(e)));
+		this.trackSavedTabGroupsOfAllGroups();
+		this.editorGroupService.whenReady.then(() => this.trackSavedTabGroupsOfAllGroups()); // groups that are restored on startup are not announced as added
 
 		// File changes
 		this._register(this.fileService.onDidFilesChange(event => this.onDidFilesChange(event)));
@@ -196,8 +224,13 @@ export class HistoryService extends Disposable implements IHistoryService {
 		}
 	}
 
+	private onDidAddGroup(group: IEditorGroup): void {
+		this.trackSavedTabGroups(group);
+	}
+
 	private onDidRemoveGroup(group: IEditorGroup): void {
 		this.handleEditorGroupRemoveInNavigationStacks(group);
+		this.untrackSavedTabGroups(group);
 	}
 
 	private onDidActiveEditorChange(): void {
@@ -759,6 +792,13 @@ export class HistoryService extends Disposable implements IHistoryService {
 	}
 
 	saveClosedTabGroup(tabGroup: IEditorTabGroup, editors: readonly { editor: EditorInput; index: number }[]): void {
+		const savedGroup = this.toSavedTabGroup(tabGroup, editors);
+		if (savedGroup) {
+			this.addSavedTabGroup(savedGroup);
+		}
+	}
+
+	private toSavedTabGroup(tabGroup: IEditorTabGroup, editors: readonly { editor: EditorInput; index: number }[]): ISavedEditorTabGroup | undefined {
 		const reopenableEditors = coalesce(editors.map(({ editor, index }) => {
 			if (!editor.canReopen()) {
 				return undefined;
@@ -767,11 +807,10 @@ export class HistoryService extends Disposable implements IHistoryService {
 			return untypedEditor ? { editor: untypedEditor, index } : undefined;
 		}));
 		if (reopenableEditors.length === 0) {
-			return;
+			return undefined;
 		}
 
-		this.savedTabGroups = this.savedTabGroups.filter(group => group.id !== tabGroup.id);
-		this.savedTabGroups.push({
+		return {
 			id: tabGroup.id,
 			name: tabGroup.name,
 			color: tabGroup.color,
@@ -780,8 +819,140 @@ export class HistoryService extends Disposable implements IHistoryService {
 			icon: tabGroup.icon,
 			metadata: tabGroup.metadata,
 			editors: reopenableEditors
-		});
+		};
+	}
+
+	private addSavedTabGroup(savedGroup: ISavedEditorTabGroup): void {
+		this.savedTabGroups = this.savedTabGroups.filter(group => group.id !== savedGroup.id);
+		this.savedTabGroups.push(savedGroup);
 		this.persistSavedTabGroups();
+	}
+
+	private trackSavedTabGroupsOfAllGroups(): void {
+		if (this._store.isDisposed) {
+			return;
+		}
+
+		for (const group of this.editorGroupService.groups) {
+			this.trackSavedTabGroups(group);
+		}
+	}
+
+	private trackSavedTabGroups(group: IEditorGroup): void {
+		if (!isEditorGroupView(group) || this.savedTabGroupTrackers.has(group.id)) {
+			return;
+		}
+
+		this.savedTabGroupTrackers.set(group.id, group.onDidModelChange(e => this.onDidChangeTabGroupsOfEditorGroup(group, e)));
+		this.updateSavedTabGroupSnapshots(group);
+	}
+
+	private untrackSavedTabGroups(group: IEditorGroup): void {
+		this.savedTabGroupTrackers.deleteAndDispose(group.id);
+		this.savedTabGroupSnapshots.delete(group.id);
+		this.pendingSavedTabGroupSnapshotUpdates.delete(group.id);
+		this.removedSavedTabGroupSnapshots.delete(group.id);
+	}
+
+	private onDidChangeTabGroupsOfEditorGroup(group: IEditorGroupView, e: IGroupModelChangeEvent): void {
+		switch (e.kind) {
+
+			// Keep the snapshot in sync with changes to the group
+			case GroupModelChangeKind.TAB_GROUP_CREATED:
+			case GroupModelChangeKind.TAB_GROUP_CHANGED:
+			case GroupModelChangeKind.EDITOR_MOVE:
+				this.updateSavedTabGroupSnapshots(group);
+				break;
+
+			// A tab group is removed when it is ungrouped, merged into another group or
+			// when its last member is closed. Only the latter is followed by the close
+			// event of that member, so wait for it before recording the group.
+			case GroupModelChangeKind.TAB_GROUP_REMOVED:
+				this.stageRemovedSavedTabGroup(group, e.tabGroup);
+				break;
+
+			// Editors that are closed together (Close All, Close Others) close one after
+			// the other in the same turn. The snapshot must keep all of them until the
+			// last one is closed, so it only catches up once they are all closed.
+			case GroupModelChangeKind.EDITOR_CLOSE:
+				this.recordRemovedSavedTabGroups(group, e);
+				this.scheduleSavedTabGroupSnapshotsUpdate(group);
+				break;
+		}
+	}
+
+	private scheduleSavedTabGroupSnapshotsUpdate(group: IEditorGroupView): void {
+		if (this.pendingSavedTabGroupSnapshotUpdates.has(group.id)) {
+			return;
+		}
+
+		this.pendingSavedTabGroupSnapshotUpdates.add(group.id);
+		queueMicrotask(() => {
+			if (this.pendingSavedTabGroupSnapshotUpdates.delete(group.id) && this.savedTabGroupTrackers.has(group.id)) {
+				this.updateSavedTabGroupSnapshots(group);
+			}
+		});
+	}
+
+	private updateSavedTabGroupSnapshots(group: IEditorGroupView): void {
+		const savedTabGroups = group.tabGroups.filter(tabGroup => tabGroup.saved);
+		if (savedTabGroups.length === 0) {
+			this.savedTabGroupSnapshots.delete(group.id);
+			return;
+		}
+
+		const editors = group.getEditors(EditorsOrder.SEQUENTIAL);
+		const snapshots = new Map<string, ISavedTabGroupSnapshot>();
+		for (const tabGroup of savedTabGroups) {
+			const members = editors.filter(editor => group.getTabGroupForEditor(editor)?.id === tabGroup.id);
+			const savedGroup = this.toSavedTabGroup(tabGroup, members.map(editor => ({ editor, index: group.getIndexOfEditor(editor) })));
+			if (savedGroup) {
+				snapshots.set(tabGroup.id, { savedGroup, members });
+			}
+		}
+
+		this.savedTabGroupSnapshots.set(group.id, snapshots);
+	}
+
+	private stageRemovedSavedTabGroup(group: IEditorGroupView, removedTabGroup: IEditorTabGroup | undefined): void {
+		const snapshots = this.savedTabGroupSnapshots.get(group.id);
+		const snapshot = removedTabGroup && snapshots?.get(removedTabGroup.id);
+		if (!snapshots || !snapshot) {
+			return;
+		}
+
+		snapshots.delete(snapshot.savedGroup.id);
+
+		// The close event of the last member follows synchronously, so anything
+		// that is still staged afterwards was removed for another reason
+		const staged = this.removedSavedTabGroupSnapshots.get(group.id);
+		if (staged) {
+			staged.push(snapshot);
+		} else {
+			this.removedSavedTabGroupSnapshots.set(group.id, [snapshot]);
+			queueMicrotask(() => this.removedSavedTabGroupSnapshots.delete(group.id));
+		}
+	}
+
+	private recordRemovedSavedTabGroups(group: IEditorGroupView, e: IGroupModelChangeEvent): void {
+		const staged = this.removedSavedTabGroupSnapshots.get(group.id);
+		if (!staged) {
+			return;
+		}
+
+		this.removedSavedTabGroupSnapshots.delete(group.id);
+
+		// Editors that move to another group or are replaced are still open
+		if (!isGroupEditorCloseEvent(e) || e.context === EditorCloseContext.MOVE || e.context === EditorCloseContext.REPLACE) {
+			return;
+		}
+
+		// Only a group whose last member is the editor that closed disappeared because of it
+		for (const snapshot of staged) {
+			if (snapshot.members.includes(e.editor)) {
+				this.addSavedTabGroup(snapshot.savedGroup);
+			}
+		}
 	}
 
 	async reopenSavedTabGroup(id: string): Promise<void> {
