@@ -1288,12 +1288,16 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 			}
 		}
 
-		// Keep every group's editors together when the selection spans tabs or groups.
-		const firstIndex = this.indexOf(candidates[0]);
-		if (affectedGroups.size > 0 || candidates.some((editor, index) => this.indexOf(editor) !== firstIndex + index)) {
-			const selected = new Set(candidates);
-			this.editors.splice(0, this.editors.length, ...this.editors.filter(editor => !selected.has(editor)), ...candidates);
+		// Keep the editors of the new group together at the position of the first one
+		// when the selection spans tabs or groups, without splitting any other group.
+		const gatheredEditors = new Set(candidates);
+		const otherEditors = this.editors.filter(editor => !gatheredEditors.has(editor));
+		let gatherIndex = this.indexOf(candidates[0]);
+		const enclosingGroupId = this.getEnclosingTabGroupId(otherEditors, gatherIndex);
+		if (enclosingGroupId) {
+			gatherIndex = this.getTabGroupRange(otherEditors, enclosingGroupId).last + 1;
 		}
+		this.editors.splice(0, this.editors.length, ...otherEditors.toSpliced(gatherIndex, 0, ...candidates));
 
 		const group: IEditorTabGroup = {
 			id,
@@ -1351,8 +1355,40 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 		}
 
 		this.pushTabGroupUndoState();
-		const selected = new Set(removableEditors);
-		this.editors.splice(0, this.editors.length, ...this.editors.filter(editor => !selected.has(editor)), ...this.editors.filter(editor => selected.has(editor)));
+
+		// Removed editors stay next to the group they leave, in their current order:
+		// the ones in front of every remaining member stay where they are (in front
+		// of the group) and the others go right after the members that remain. If
+		// no member remains, the editors stay where they are.
+		const removed = new Set(removableEditors);
+		const lastRemainingMembers = new Map<string, EditorInput>();
+		const editorsMovingAfterGroup = new Map<string, EditorInput[]>();
+		for (const editor of this.editors) {
+			const groupId = this.editorTabGroups.get(editor);
+			if (!groupId) {
+				continue;
+			}
+
+			if (!removed.has(editor)) {
+				lastRemainingMembers.set(groupId, editor);
+			} else if (lastRemainingMembers.has(groupId)) {
+				editorsMovingAfterGroup.set(groupId, [...(editorsMovingAfterGroup.get(groupId) ?? []), editor]);
+			}
+		}
+
+		const movingEditors = new Set(Array.from(editorsMovingAfterGroup.values()).flat());
+		const reorderedEditors: EditorInput[] = [];
+		for (const editor of this.editors) {
+			if (!movingEditors.has(editor)) {
+				reorderedEditors.push(editor);
+			}
+
+			const groupId = this.editorTabGroups.get(editor);
+			if (groupId !== undefined && lastRemainingMembers.get(groupId) === editor) {
+				reorderedEditors.push(...editorsMovingAfterGroup.get(groupId) ?? []);
+			}
+		}
+		this.editors.splice(0, this.editors.length, ...reorderedEditors);
 
 		for (const editor of removableEditors) {
 			const group = this.getTabGroupForEditor(editor);

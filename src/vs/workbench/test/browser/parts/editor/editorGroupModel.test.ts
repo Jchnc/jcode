@@ -846,6 +846,110 @@ suite('EditorGroupModel', () => {
 			});
 		});
 
+		test('creating a tab group gathers a non-adjacent selection at the position of its first editor', () => {
+			const group = createEditorGroupModel();
+			const [a, b, c, d, e, f] = openEditors(group, 6);
+
+			group.createTabGroup([e, b, d], 'G');
+			const afterFirstGroup = describeLayout(group);
+			group.createTabGroup([a, f], 'H');
+
+			assert.deepStrictEqual({ afterFirstGroup, afterSecondGroup: describeLayout(group), unrelated: group.getTabGroupForEditor(c) }, {
+				afterFirstGroup: ['a', 'b:G', 'd:G', 'e:G', 'c', 'f'],
+				afterSecondGroup: ['a:H', 'f:H', 'b:G', 'd:G', 'e:G', 'c'],
+				unrelated: undefined
+			});
+		});
+
+		test('creating a tab group from a selection spanning other groups leaves those groups together', () => {
+			const group = createEditorGroupModel();
+			const [, b, c, , e, f] = openEditors(group, 6);
+			group.createTabGroup([b, c], 'H1');
+			group.createTabGroup([e, f], 'H2');
+			const events = recordEvents(group);
+
+			group.createTabGroup([c, e], 'G');
+
+			assert.deepStrictEqual({ layout: describeLayout(group), events, violations: findTabGroupViolations(group) }, {
+				layout: ['a', 'b:H1', 'c:G', 'e:G', 'd', 'f:H2'],
+				events: ['changed:H1', 'changed:H2', 'created:G'],
+				violations: []
+			});
+		});
+
+		test('creating a tab group from an editor in the middle of a group places it after that group', () => {
+			const group = createEditorGroupModel();
+			const [, b, c, d, e] = openEditors(group, 6);
+			group.createTabGroup([b, c, d, e], 'H');
+
+			group.createTabGroup([c], 'G');
+
+			assert.deepStrictEqual({ layout: describeLayout(group), violations: findTabGroupViolations(group) }, {
+				layout: ['a', 'b:H', 'd:H', 'e:H', 'c:G', 'f'],
+				violations: []
+			});
+		});
+
+		test('creating a tab group leaves sticky editors out and in place', () => {
+			const group = createEditorGroupModel();
+			const [a, , c, , e] = openEditors(group, 6);
+			group.stick(a);
+
+			group.createTabGroup([a, e, c], 'G');
+
+			assert.deepStrictEqual({ layout: describeLayout(group), stickyCount: group.stickyCount, sticky: group.isSticky(a) }, {
+				layout: ['a', 'b', 'c:G', 'e:G', 'd', 'f'],
+				stickyCount: 1,
+				sticky: true
+			});
+		});
+
+		test('removing editors from a tab group keeps them next to the remaining members of the group', () => {
+			const group = createEditorGroupModel();
+			const [, b, c, d, e] = openEditors(group, 6);
+			group.createTabGroup([b, c, d, e], 'H');
+
+			group.removeFromTabGroup([c]);
+			const afterMiddle = describeLayout(group);
+			group.removeFromTabGroup([b]);
+			const afterFirst = describeLayout(group);
+			group.removeFromTabGroup([e, d]);
+
+			assert.deepStrictEqual({ afterMiddle, afterFirst, afterLast: describeLayout(group), tabGroups: group.tabGroups.length }, {
+				afterMiddle: ['a', 'b:H', 'd:H', 'e:H', 'c', 'f'],
+				afterFirst: ['a', 'b', 'd:H', 'e:H', 'c', 'f'],
+				afterLast: ['a', 'b', 'd', 'e', 'c', 'f'],
+				tabGroups: 0
+			});
+		});
+
+		test('removing editors from several tab groups keeps each next to its own group', () => {
+			const group = createEditorGroupModel();
+			const [a, b, c, d, e, f] = openEditors(group, 6);
+			group.createTabGroup([a, b, c], 'H1');
+			group.createTabGroup([d, e, f], 'H2');
+			const events = recordEvents(group);
+
+			group.removeFromTabGroup([b, d]);
+
+			assert.deepStrictEqual({ layout: describeLayout(group), events }, {
+				layout: ['a:H1', 'c:H1', 'b', 'd', 'e:H2', 'f:H2'],
+				events: ['changed:H1', 'changed:H2']
+			});
+		});
+
+		test('an editor moved in front of its tab group and then removed from it stays in front of the group', () => {
+			const group = createEditorGroupModel();
+			const [, b, c, d] = openEditors(group, 5);
+			group.createTabGroup([b, c, d], 'G');
+
+			// Dropping a tab in front of its own group: the tabs control moves the editor, then removes it from the group
+			group.moveEditor(d, 1);
+			group.removeFromTabGroup([d]);
+
+			assert.deepStrictEqual(describeLayout(group), ['a', 'd', 'b:G', 'c:G', 'e']);
+		});
+
 		test('tab groups stay contiguous and free of sticky editors across random operations', () => {
 			const group = createEditorGroupModel();
 			const editors = openEditors(group, 8);
