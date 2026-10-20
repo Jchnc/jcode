@@ -3189,7 +3189,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 
 		if (group.locked) {
 			const lockIndicator = $('span.tab-group-lock');
-			lockIndicator.classList.add(...ThemeIcon.asClassNameArray(Codicon.lockSmall));
+			lockIndicator.classList.add(...ThemeIcon.asClassNameArray(Codicon.lock));
 			lockIndicator.setAttribute('aria-hidden', 'true');
 			header.appendChild(lockIndicator);
 		}

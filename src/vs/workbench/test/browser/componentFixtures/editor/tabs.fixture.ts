@@ -226,11 +226,11 @@ function multiSelectEditorSpecs(): IEditorSpec[] {
 	];
 }
 
-/** The tab groups of {@link tabGroupEditorSpecs}: one expanded around the active editor, one collapsed. */
+/** The tab groups of {@link tabGroupEditorSpecs}: one expanded around the active editor and saved, one collapsed and locked, both with an icon. */
 function twoTabGroups(): IFixtureTabGroup[] {
 	return [
-		{ name: 'Frontend', color: 'blue' },
-		{ name: 'Docs', color: 'green', collapsed: true },
+		{ name: 'Frontend', color: 'blue', icon: 'code', saved: true },
+		{ name: 'Docs', color: 'green', icon: 'book', locked: true, collapsed: true },
 	];
 }
 
@@ -954,14 +954,14 @@ function createLayoutFixtures() {
 		}),
 		TabGroups: defineThemedFixtureGroup({
 			Top: defineComponentFixture({
-				render: render(true, { editors: tabGroupEditorSpecs(), tabGroups: twoTabGroups(), width: 900 }),
+				render: render(true, { editors: tabGroupEditorSpecs(), tabGroups: twoTabGroups(), width: 1000 }),
 				additionalThemes: ['darkHighContrast', 'lightHighContrast'],
-				expectedVisualDescriptions: ['Two tab groups share the strip: Frontend is expanded around the active tab and shows its three tabs under one colored underline, while the collapsed Docs group shows only its header with a count of three and a sideways chevron. Ungrouped tabs sit before, between, and after the groups.'],
+				expectedVisualDescriptions: ['Two tab groups share the strip: Frontend is expanded around the active tab and shows its three tabs under one colored underline, while the collapsed Docs group shows only its header with a count of three and a sideways chevron. The headers show the chevron, a code or book icon, a bookmark for the saved Frontend group, an unsaved dot for Frontend and a lock for the locked Docs group, all the same size and vertically centered. Ungrouped tabs sit before, between, and after the groups.'],
 			}),
 			Vertical: defineComponentFixture({
 				render: render(true, { editors: tabGroupEditorSpecs(), tabGroups: twoTabGroups(), verticalTabs: { width: 240 } }),
 				additionalThemes: ['darkHighContrast', 'lightHighContrast'],
-				expectedVisualDescriptions: ['The vertical tab list shows the expanded Frontend group header with a downward chevron and its three indented rows (the active one highlighted, one with an unsaved dot), and the collapsed Docs group as a header with a sideways chevron and no rows. Ungrouped rows sit before, between, and after the groups.'],
+				expectedVisualDescriptions: ['The vertical tab list shows the expanded Frontend group header with a downward chevron and its three indented rows (the active one highlighted, one with an unsaved dot), and the collapsed Docs group as a header with a sideways chevron and no rows. The headers show the chevron, a code or book icon, a bookmark for the saved Frontend group, an unsaved dot for Frontend and a lock for the locked Docs group, all the same size and vertically centered. Ungrouped rows sit before, between, and after the groups.'],
 			}),
 			VerticalFiltered: defineComponentFixture({
 				render: render(true, { editors: tabGroupEditorSpecs(), tabGroups: twoTabGroups(), verticalTabs: { width: 240, filter: 'md' } }),

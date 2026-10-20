@@ -86,7 +86,6 @@
 	justify-content: center;
 	flex: 0 0 auto;
 	color: inherit;
-	font-size: var(--vscode-fontSize-label3);
 	opacity: 0.72;
 	transition: transform 160ms cubic-bezier(0.2, 0, 0, 1), opacity 120ms cubic-bezier(0.2, 0, 0, 1);
 }
@@ -101,7 +100,6 @@
 }
 
 .monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header > .tab-group-icon {
-	font-size: var(--vscode-fontSize-label1);
 	color: inherit;
 	flex: 0 0 auto;
 }
@@ -122,8 +120,9 @@
 	color: inherit;
 	font-size: var(--vscode-fontSize-label3);
 	font-weight: var(--vscode-fontWeight-regular);
+	font-variant-numeric: tabular-nums;
 	line-height: 1;
-	opacity: 0.58;
+	opacity: 0.72;
 	transition: opacity 120ms cubic-bezier(0.2, 0, 0, 1);
 }
 
@@ -137,25 +136,36 @@
 	align-items: center;
 	justify-content: center;
 	color: var(--vscode-tab-activeModifiedBorder, var(--tab-group-color));
-	font-size: 7px;
+	font-size: 8px;
 	line-height: 1;
 }
 
-.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header > .tab-group-saved {
+/*
+ * Every indicator in the header (twistie, icon, saved, lock) shares one glyph size and box,
+ * so they line up on the same baseline. They are muted by default and brighten with the header.
+ */
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header > :is(.tab-group-twistie, .tab-group-icon, .tab-group-saved, .tab-group-lock) {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
+	flex: 0 0 auto;
+	width: 16px;
+	height: 16px;
+	font-size: 14px;
+	line-height: 16px;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header:is(:hover, :focus-visible) > :is(.tab-group-saved, .tab-group-lock) {
+	opacity: 1;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header > .tab-group-saved {
 	color: inherit;
-	font-size: var(--vscode-fontSize-label3);
-	opacity: 0.82;
+	opacity: 0.72;
 }
 
 .monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header > .tab-group-lock {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
 	color: inherit;
-	font-size: var(--vscode-fontSize-label3);
 	opacity: 0.72;
 }
 

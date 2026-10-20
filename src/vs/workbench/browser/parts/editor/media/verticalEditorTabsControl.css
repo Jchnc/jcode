@@ -51,6 +51,9 @@
 	border-radius: var(--vscode-cornerRadius-small);
 	background: transparent;
 	color: var(--vscode-icon-foreground);
+	font-size: 16px;
+	line-height: 24px;
+	text-align: center;
 	cursor: pointer;
 }
 
@@ -395,11 +398,37 @@
 	font-weight: inherit;
 }
 
-.monaco-workbench .part.editor > .content .vertical-tab-group-saved,
-.monaco-workbench .part.editor > .content .vertical-tab-group-dirty,
-.monaco-workbench .part.editor > .content .vertical-tab-group-lock {
+/*
+ * Mirrors the top tabs: every indicator shares one glyph size and box, is muted by default and
+ * brightens with the header, and the count is the same muted tone.
+ */
+.monaco-workbench .part.editor > .content .vertical-tab-group-header > :is(.vertical-tab-group-twistie, .vertical-tab-group-icon, .vertical-tab-group-saved, .vertical-tab-group-lock) {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
 	flex: 0 0 auto;
-	font-size: var(--vscode-fontSize-label2);
+	width: 16px;
+	height: 16px;
+	font-size: 14px;
+	line-height: 16px;
+}
+
+.monaco-workbench .part.editor > .content .vertical-tab-group-header > :is(.vertical-tab-group-twistie, .vertical-tab-group-saved, .vertical-tab-group-lock) {
+	opacity: 0.72;
+}
+
+.monaco-workbench .part.editor > .content .vertical-tab-group-header:is(:hover, :focus-visible) > :is(.vertical-tab-group-twistie, .vertical-tab-group-saved, .vertical-tab-group-lock) {
+	opacity: 1;
+}
+
+.monaco-workbench .part.editor > .content .vertical-tab-group-header > .vertical-tab-group-dirty {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+	color: var(--vscode-tab-activeModifiedBorder, var(--tab-group-color));
+	font-size: 8px;
+	line-height: 1;
 }
 
 .monaco-workbench .part.editor > .content .vertical-tab-group-count {
@@ -407,7 +436,7 @@
 	font-size: var(--vscode-fontSize-label3);
 	color: inherit;
 	font-variant-numeric: tabular-nums;
-	opacity: 0.58;
+	opacity: 0.72;
 }
 
 /* Modern UI keeps the list dense while giving active rows a distinct surface. */

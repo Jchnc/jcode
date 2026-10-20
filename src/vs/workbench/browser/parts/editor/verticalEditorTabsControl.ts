@@ -861,7 +861,7 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		let lockIndicator: HTMLElement | undefined;
 		if (group.locked) {
 			lockIndicator = $('span.vertical-tab-group-lock');
-			lockIndicator.classList.add(...ThemeIcon.asClassNameArray(Codicon.lockSmall));
+			lockIndicator.classList.add(...ThemeIcon.asClassNameArray(Codicon.lock));
 			lockIndicator.setAttribute('aria-hidden', 'true');
 			header.appendChild(lockIndicator);
 		}
