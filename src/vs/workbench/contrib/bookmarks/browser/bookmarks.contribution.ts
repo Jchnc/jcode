@@ -7,16 +7,17 @@ import './media/bookmarks.css';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { URI } from '../../../../base/common/uri.js';
 import { ICodeEditor, isCodeEditor, isDiffEditor } from '../../../../editor/browser/editorBrowser.js';
-import { Range } from '../../../../editor/common/core/range.js';
+import { EditorContributionInstantiation, registerEditorContribution } from '../../../../editor/browser/editorExtensions.js';
 import { EditorContextKeys } from '../../../../editor/common/editorContextKeys.js';
 import { ILocalizedString, localize, localize2 } from '../../../../nls.js';
 import { Action2, MenuId, registerAction2 } from '../../../../platform/actions/common/actions.js';
 import { CommandsRegistry } from '../../../../platform/commands/common/commands.js';
 import { IAccessibilityService } from '../../../../platform/accessibility/common/accessibility.js';
+import { Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
 import { ContextKeyExpr } from '../../../../platform/contextkey/common/contextkey.js';
 import { IDialogService } from '../../../../platform/dialogs/common/dialogs.js';
 import { SyncDescriptor } from '../../../../platform/instantiation/common/descriptors.js';
-import { ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
+import { IInstantiationService, ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { KeyChord, KeyCode, KeyMod } from '../../../../base/common/keyCodes.js';
 import { KeybindingWeight } from '../../../../platform/keybinding/common/keybindingsRegistry.js';
 import { ILabelService } from '../../../../platform/label/common/label.js';
@@ -33,7 +34,9 @@ import { VIEW_CONTAINER } from '../../files/browser/explorerViewlet.js';
 import { IUriIdentityService } from '../../../../platform/uriIdentity/common/uriIdentity.js';
 import { FocusedViewContext } from '../../../common/contextkeys.js';
 import { BOOKMARKS_VIEW_ITEM_INLINE_MENU, BOOKMARKS_VIEW_ITEM_MENU, BookmarkItemKind, CONTEXT_CODE_BOOKMARK_ITEM_KIND, CONTEXT_CODE_BOOKMARKS_PRESENT, CONTEXT_CODE_BOOKMARKS_STALE_PRESENT, findAdjacentBookmark, getBookmarkLabel, ICodeBookmark, ICodeBookmarksService, isBookmarkActionContext } from '../common/bookmarks.js';
-import { getBookmarkFileOrder } from './bookmarksOrder.js';
+import { ALT_CLICK_TOGGLES_BOOKMARK_SETTING, BookmarkGlyphMarginContribution } from './bookmarksGlyphMargin.js';
+import { getBookmarkFileOrder, openBookmark } from './bookmarksNavigation.js';
+import { showBookmarksQuickPick } from './bookmarksQuickPick.js';
 import { CodeBookmarksService } from './bookmarksService.js';
 import { BookmarksView } from './bookmarksView.js';
 
@@ -45,6 +48,7 @@ const SHOW_BOOKMARKS_ID = 'jcode.bookmarks.show';
 const REMOVE_ALL_BOOKMARKS_ID = 'jcode.bookmarks.removeAll';
 const REMOVE_STALE_BOOKMARKS_ID = 'jcode.bookmarks.removeStale';
 const RELOCATE_BOOKMARK_ID = 'jcode.bookmarks.relocate';
+const GO_TO_BOOKMARK_ID = 'jcode.bookmarks.goTo';
 const EDIT_BOOKMARK_NOTE_ID = 'jcode.bookmarks.editNote';
 const REMOVE_BOOKMARK_ID = 'jcode.bookmarks.remove';
 
@@ -61,6 +65,22 @@ class CodeBookmarksContribution implements IWorkbenchContribution {
 }
 
 registerWorkbenchContribution2(CodeBookmarksContribution.ID, CodeBookmarksContribution, WorkbenchPhase.AfterRestored);
+
+registerEditorContribution(BookmarkGlyphMarginContribution.ID, BookmarkGlyphMarginContribution, EditorContributionInstantiation.AfterFirstRender);
+
+Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).registerConfiguration({
+	id: 'jcodeBookmarks',
+	order: 100,
+	title: localize('bookmarksConfigurationTitle', "Bookmarks"),
+	type: 'object',
+	properties: {
+		[ALT_CLICK_TOGGLES_BOOKMARK_SETTING]: {
+			type: 'boolean',
+			default: true,
+			markdownDescription: localize('toggleOnAltClick', "Controls whether holding `Alt` while clicking the editor glyph margin toggles a bookmark on that line. Glyphs that belong to other features, such as breakpoints, keep their own `Alt` + click behavior, but while this is enabled `Alt` + click on an empty glyph margin no longer opens the conditional breakpoint editor.")
+		}
+	}
+});
 
 Registry.as<IViewsRegistry>(ViewExtensions.ViewsRegistry).registerViews([{
 	id: BookmarksView.ID,
@@ -230,6 +250,36 @@ registerAction2(class extends Action2 {
 	}
 });
 
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: GO_TO_BOOKMARK_ID,
+			title: localize2('goToBookmark', "Go to Bookmark..."),
+			icon: Codicon.search,
+			f1: true,
+			precondition: CONTEXT_CODE_BOOKMARKS_PRESENT,
+			menu: {
+				id: MenuId.ViewTitle,
+				group: 'navigation',
+				order: 0,
+				when: ContextKeyExpr.and(ContextKeyExpr.equals('view', BookmarksView.ID), CONTEXT_CODE_BOOKMARKS_PRESENT)
+			}
+		});
+	}
+
+	run(accessor: ServicesAccessor): Promise<void> {
+		return showBookmarksQuickPick({
+			bookmarksService: accessor.get(ICodeBookmarksService),
+			quickInputService: accessor.get(IQuickInputService),
+			editorService: accessor.get(IEditorService),
+			instantiationService: accessor.get(IInstantiationService),
+			notificationService: accessor.get(INotificationService),
+			labelService: accessor.get(ILabelService),
+			uriIdentityService: accessor.get(IUriIdentityService)
+		});
+	}
+});
+
 registerNavigationAction(NEXT_BOOKMARK_ID, localize2('nextBookmark', "Go to Next Bookmark"), 1);
 registerNavigationAction(PREVIOUS_BOOKMARK_ID, localize2('previousBookmark', "Go to Previous Bookmark"), -1);
 
@@ -381,11 +431,4 @@ function getActiveCodeEditor(editorService: IEditorService): ICodeEditor | undef
 		return control.getModifiedEditor();
 	}
 	return isCodeEditor(control) ? control : undefined;
-}
-
-async function openBookmark(editorService: IEditorService, bookmark: ICodeBookmark): Promise<void> {
-	await editorService.openEditor({
-		resource: bookmark.resource,
-		options: { pinned: true, selection: new Range(bookmark.lineNumber, bookmark.column, bookmark.lineNumber, bookmark.column) }
-	});
 }

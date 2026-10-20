@@ -29,7 +29,7 @@ import { WorkbenchObjectTree } from '../../../../platform/list/browser/listServi
 import { defaultCountBadgeStyles, IStyleOverride } from '../../../../platform/theme/browser/defaultStyles.js';
 import { IUriIdentityService } from '../../../../platform/uriIdentity/common/uriIdentity.js';
 import { IResourceLabel, ResourceLabels } from '../../../browser/labels.js';
-import { getBookmarkFileOrder } from './bookmarksOrder.js';
+import { getBookmarkFileOrder } from './bookmarksNavigation.js';
 import { BOOKMARKS_VIEW_ITEM_INLINE_MENU, BookmarkItemKind, CONTEXT_CODE_BOOKMARK_ITEM_KIND, getBookmarkLabel, IBookmarkActionContext, IBookmarkFileGroup, ICodeBookmark, groupBookmarksByFile } from '../common/bookmarks.js';
 
 const FILE_ROW_HEIGHT = 22;
