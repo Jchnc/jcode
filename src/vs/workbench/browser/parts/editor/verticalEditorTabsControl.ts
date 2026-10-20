@@ -276,24 +276,44 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		return element;
 	}
 
+	/**
+	 * A plain wheel always scrolls the list natively while it overflows, so a long
+	 * list stays reachable. Tabs only switch when there is nothing to scroll (and
+	 * the setting asks for it) or while Shift is held.
+	 */
+	private shouldSwitchTabsOnWheel(shiftKey: boolean): boolean {
+		return shiftKey || (this.groupsView.partOptions.scrollToSwitchTabs && !this.isListOverflowing());
+	}
+
+	private isListOverflowing(): boolean {
+		if (!this.tabsScrollbar) {
+			return false;
+		}
+
+		const { height, scrollHeight } = this.tabsScrollbar.getScrollDimensions();
+		return scrollHeight > height;
+	}
+
 	private onTabsMouseWheel(event: WheelEvent): void {
 		const activeEditor = this.groupView.activeEditor;
 		if (!activeEditor || this.groupView.count < 2) {
 			return;
 		}
 
-		if ((this.groupsView.partOptions.scrollToSwitchTabs && event.shiftKey) || (!this.groupsView.partOptions.scrollToSwitchTabs && !event.shiftKey)) {
+		if (!this.shouldSwitchTabsOnWheel(event.shiftKey)) {
 			return;
 		}
 
+		// Chromium reports a Shift+wheel as a horizontal scroll, so both axes count
+		const delta = event.deltaX + event.deltaY;
 		const now = Date.now();
-		if (now - this.lastMouseWheelEventTime < 150 - 2 * (Math.abs(event.deltaX) + Math.abs(event.deltaY)) || Math.abs(event.deltaY) <= 1.5) {
+		if (now - this.lastMouseWheelEventTime < 150 - 2 * (Math.abs(event.deltaX) + Math.abs(event.deltaY)) || Math.abs(delta) <= 1.5) {
 			return;
 		}
 		this.lastMouseWheelEventTime = now;
 
 		const visibleEditors = this.getVisibleEditors();
-		const target = visibleEditors[visibleEditors.indexOf(activeEditor) + (event.deltaY < 0 ? -1 : 1)];
+		const target = visibleEditors[visibleEditors.indexOf(activeEditor) + (delta < 0 ? -1 : 1)];
 		if (target) {
 			EventHelper.stop(event, true);
 			void this.groupView.openEditor(target);
