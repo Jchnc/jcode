@@ -1003,7 +1003,7 @@ function createLayoutFixtures() {
 			ActiveMiddle: defineComponentFixture({
 				render: render(true, { editors: tabGroupActiveEditorSpecs('middle'), tabGroups: componentsTabGroup(false), width: 900 }),
 				additionalThemes: ['darkHighContrast', 'lightHighContrast'],
-				expectedVisualDescriptions: ['The middle Components tab is active and merges into the editor with an orange top strip; the rail on both neighbours flows into its shoulders with no gap.'],
+				expectedVisualDescriptions: ['The middle Components tab is active and merges into the editor with an orange top strip and orange sides; the rail under the header and both neighbours flows into its shoulders with no gap.'],
 			}),
 			ActiveLast: defineComponentFixture({
 				render: render(true, { editors: tabGroupActiveEditorSpecs('last'), tabGroups: componentsTabGroup(false), width: 900 }),
@@ -1017,7 +1017,7 @@ function createLayoutFixtures() {
 			Collapsed: defineComponentFixture({
 				render: render(true, { editors: tabGroupActiveEditorSpecs('outside'), tabGroups: componentsTabGroup(true), width: 900 }),
 				additionalThemes: ['darkHighContrast', 'lightHighContrast'],
-				expectedVisualDescriptions: ['The collapsed Components header pill is aligned with the tabs and has no underline.'],
+				expectedVisualDescriptions: ['The collapsed Components header pill is aligned with the tabs and carries the orange group rail along its bottom.'],
 			}),
 			CollapsedActive: defineComponentFixture({
 				render: render(true, { editors: tabGroupActiveEditorSpecs('middle'), tabGroups: componentsTabGroup(true), width: 900 }),

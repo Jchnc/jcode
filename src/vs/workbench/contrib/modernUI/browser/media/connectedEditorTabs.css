@@ -814,6 +814,19 @@
 	background-clip: padding-box;
 }
 
+/* The active member's outline takes the group color, so its sides frame the top strip and run into the shoulders. */
+.modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab.in-tab-group.active:not(.connected-tab-upper-row) > .tab-connected-edge {
+	border-color: var(--tab-group-color);
+}
+
+.modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab.in-tab-group.active:not(.connected-tab-upper-row) > .tab-fill::before {
+	border-right-color: var(--tab-group-color);
+}
+
+.modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab.in-tab-group.active:not(.connected-tab-upper-row) > .tab-fill::after {
+	border-left-color: var(--tab-group-color);
+}
+
 .modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab.in-tab-group:not(.tab-group-last):not(.tab-group-collapsed) + .tab.in-tab-group.active:not(.connected-tab-upper-row) > .tab-fill::before {
 	bottom: var(--vscode-strokeThickness);
 	border-bottom-width: var(--vscode-spacing-size20);
@@ -842,9 +855,16 @@
 	margin-bottom: 0;
 }
 
-/* The rail starts at the first member, so the header carries no underline. */
+/* The header carries the same rail as its members, on the same baseline, so the group reads as one shape. */
 .modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab-group-header::before {
-	display: none;
+	left: 0;
+	right: calc(-1 * var(--vscode-spacing-size20));
+	bottom: calc(-1 * var(--modern-ui-connected-tab-fill-block-inset));
+	height: var(--vscode-spacing-size20);
+}
+
+.modern-ui-tabs.modern-ui-connected-editor-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs .tabs-container > .tab-group-header.collapsed::before {
+	right: 0;
 }
 
 /* High contrast frames every tab fill, so the header pill takes a frame in its group color to match. */
