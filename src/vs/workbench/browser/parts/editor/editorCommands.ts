@@ -21,6 +21,7 @@ import { canMoveModalEditorToEditorArea, EditorResolution, IEditorOptions, IReso
 import { IInstantiationService, ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { KeybindingWeight, KeybindingsRegistry } from '../../../../platform/keybinding/common/keybindingsRegistry.js';
 import { IListService, IOpenEvent, RawWorkbenchListFocusContextKey, WorkbenchTreeFindOpen, WorkbenchTreeStickyScrollFocused } from '../../../../platform/list/browser/listService.js';
+import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { IOpenerService } from '../../../../platform/opener/common/opener.js';
 import { IQuickInputButton, IQuickInputService, IQuickPickItem } from '../../../../platform/quickinput/common/quickInput.js';
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
@@ -53,6 +54,7 @@ import { coalesce } from '../../../../base/common/arrays.js';
 import { escapeIcons } from '../../../../base/common/iconLabels.js';
 import { DisposableStore } from '../../../../base/common/lifecycle.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
+import Severity from '../../../../base/common/severity.js';
 
 export const CLOSE_SAVED_EDITORS_COMMAND_ID = 'workbench.action.closeUnmodifiedEditors';
 export const CLOSE_EDITORS_IN_GROUP_COMMAND_ID = 'workbench.action.closeEditorsInGroup';
@@ -1633,13 +1635,33 @@ export function createSavedTabGroupPicks(groups: readonly ISavedEditorTabGroup[]
 	}).reverse();
 }
 
+/**
+ * Deletes a saved tab group. Closed tabs cannot be brought back otherwise, so the
+ * user gets to undo the deletion from a notification.
+ */
+function deleteSavedTabGroup(historyService: IHistoryService, notificationService: INotificationService, groupId: string): void {
+	const savedGroups = historyService.getSavedTabGroups();
+	const index = savedGroups.findIndex(group => group.id === groupId);
+	const deletedGroup = savedGroups[index];
+	if (!deletedGroup) {
+		return;
+	}
+
+	historyService.deleteSavedTabGroup(groupId);
+	notificationService.prompt(
+		Severity.Info,
+		localize('savedTabGroup.deleted', "Deleted the saved tab group \"{0}\".", deletedGroup.name),
+		[{ label: localize('savedTabGroup.undoDelete', "Undo"), run: () => historyService.restoreSavedTabGroup(deletedGroup, index) }]
+	);
+}
+
 type SavedTabGroupSelection = { readonly action: 'open' | 'rename'; readonly groupId: string };
 
 /**
  * Shows the saved tab groups until the user opens or renames one. Deleting a group
  * updates the list in place.
  */
-async function pickSavedTabGroup(quickInputService: IQuickInputService, historyService: IHistoryService, activeSavedGroupId?: string): Promise<SavedTabGroupSelection | undefined> {
+async function pickSavedTabGroup(quickInputService: IQuickInputService, historyService: IHistoryService, notificationService: INotificationService, activeSavedGroupId?: string): Promise<SavedTabGroupSelection | undefined> {
 	const disposables = new DisposableStore();
 	const buttons = createSavedTabGroupButtons();
 	const picker = disposables.add(quickInputService.createQuickPick<ISavedTabGroupPick>());
@@ -1673,7 +1695,7 @@ async function pickSavedTabGroup(quickInputService: IQuickInputService, historyS
 
 			// Keep the focus in place, on the group that takes the place of the deleted one
 			const index = picker.items.indexOf(item);
-			historyService.deleteSavedTabGroup(item.groupId);
+			deleteSavedTabGroup(historyService, notificationService, item.groupId);
 			updatePicks(picks => picks.at(Math.min(Math.max(index, 0), picks.length - 1)));
 		}
 	}));
@@ -1691,8 +1713,8 @@ async function pickSavedTabGroup(quickInputService: IQuickInputService, historyS
  * Lets the user open, rename and delete saved tab groups. A group that is opened is
  * restored into the given editor group.
  */
-export async function showSavedTabGroups(quickInputService: IQuickInputService, historyService: IHistoryService, targetGroupId: GroupIdentifier): Promise<void> {
-	let selection = await pickSavedTabGroup(quickInputService, historyService);
+export async function showSavedTabGroups(quickInputService: IQuickInputService, historyService: IHistoryService, notificationService: INotificationService, targetGroupId: GroupIdentifier): Promise<void> {
+	let selection = await pickSavedTabGroup(quickInputService, historyService, notificationService);
 	while (selection?.action === 'rename') {
 		const { groupId } = selection;
 		const savedGroup = historyService.getSavedTabGroups().find(group => group.id === groupId);
@@ -1701,7 +1723,7 @@ export async function showSavedTabGroups(quickInputService: IQuickInputService, 
 			historyService.renameSavedTabGroup(groupId, name);
 		}
 
-		selection = await pickSavedTabGroup(quickInputService, historyService, groupId);
+		selection = await pickSavedTabGroup(quickInputService, historyService, notificationService, groupId);
 	}
 
 	if (selection) {
@@ -1835,23 +1857,24 @@ function registerTabGroupCommands(): void {
 				const resolvedContext = resolveCommandsContext(args, accessor.get(IEditorService), accessor.get(IEditorGroupsService), accessor.get(IListService));
 				const targetGroup = resolvedContext.groupedEditors[0]?.group ?? accessor.get(IEditorGroupsService).activeGroup;
 
-				await showSavedTabGroups(accessor.get(IQuickInputService), accessor.get(IHistoryService), targetGroup.id);
+				await showSavedTabGroups(accessor.get(IQuickInputService), accessor.get(IHistoryService), accessor.get(INotificationService), targetGroup.id);
 			}
 		});
 	}
 
 	registerAction2(class extends Action2 {
 		constructor() {
-			super({ id: DELETE_SAVED_TAB_GROUP_COMMAND_ID, title: localize2('deleteSavedTabGroup', 'Delete Saved Tab Group…'), category: Categories.View, f1: true, precondition: tabGroupsEnabled });
+			super({ id: DELETE_SAVED_TAB_GROUP_COMMAND_ID, title: localize2('deleteSavedTabGroup', "Delete Saved Tab Group…"), category: Categories.View, f1: true, precondition: tabGroupsEnabled });
 		}
 		async run(accessor: ServicesAccessor): Promise<void> {
 			const historyService = accessor.get(IHistoryService);
+			const notificationService = accessor.get(INotificationService);
 			const groups = historyService.getSavedTabGroups();
 			const pick = await accessor.get(IQuickInputService).pick(groups.map(group => ({ label: group.name, groupId: group.id })), {
-				placeHolder: groups.length ? localize('deleteSavedTabGroupPlaceholder', 'Select a saved tab group to delete') : localize('noSavedTabGroups', "There are no closed saved tab groups")
+				placeHolder: groups.length ? localize('deleteSavedTabGroupPlaceholder', "Select a saved tab group to delete") : localize('noSavedTabGroups', "There are no closed saved tab groups")
 			});
 			if (pick) {
-				historyService.deleteSavedTabGroup(pick.groupId);
+				deleteSavedTabGroup(historyService, notificationService, pick.groupId);
 			}
 		}
 	});

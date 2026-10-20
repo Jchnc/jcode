@@ -185,6 +185,7 @@ export class TestHistoryService implements IHistoryService {
 	async reopenSavedTabGroup(_id: string): Promise<void> { }
 	renameSavedTabGroup(_id: string, _name: string): void { }
 	deleteSavedTabGroup(_id: string): void { }
+	restoreSavedTabGroup(_group: ISavedEditorTabGroup, _index?: number): void { }
 	async goForward(): Promise<void> { }
 	async goBack(): Promise<void> { }
 	async goPrevious(): Promise<void> { }

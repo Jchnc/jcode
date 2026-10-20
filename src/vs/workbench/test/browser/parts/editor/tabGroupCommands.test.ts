@@ -7,9 +7,11 @@ import assert from 'assert';
 import { Emitter } from '../../../../../base/common/event.js';
 import { DisposableStore } from '../../../../../base/common/lifecycle.js';
 import { URI } from '../../../../../base/common/uri.js';
+import Severity from '../../../../../base/common/severity.js';
 import { mock } from '../../../../../base/test/common/mock.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { SyncDescriptor } from '../../../../../platform/instantiation/common/descriptors.js';
+import { INotificationHandle, INotificationService, IPromptChoice, NoOpNotification } from '../../../../../platform/notification/common/notification.js';
 import { IQuickInputHideEvent, IQuickPick, IQuickPickDidAcceptEvent, IQuickPickItem, IQuickPickItemButtonEvent, QuickInputHideReason } from '../../../../../platform/quickinput/common/quickInput.js';
 import { closeTabGroup, createSavedTabGroupPicks, focusAdjacentTabGroup, showSavedTabGroups } from '../../../../browser/parts/editor/editorCommands.js';
 import { IEditorGroupView } from '../../../../browser/parts/editor/editor.js';
@@ -26,6 +28,18 @@ interface IFakePickerController {
 	readonly activeLabels: readonly string[];
 	accept(label: string): void;
 	triggerButton(label: string, buttonIndex: number): void;
+	hide(): void;
+}
+
+/** Notification service that records the prompts that are shown. */
+class FakeNotificationService extends mock<INotificationService>() {
+
+	readonly prompts: { severity: Severity; message: string; choices: IPromptChoice[] }[] = [];
+
+	override prompt(severity: Severity, message: string, choices: IPromptChoice[]): INotificationHandle {
+		this.prompts.push({ severity, message, choices });
+		return new NoOpNotification();
+	}
 }
 
 /** Quick pick service that lets a script drive every quick pick that is shown. */
@@ -73,7 +87,8 @@ class FakeQuickInputService extends TestQuickInputService {
 			triggerButton: (label, buttonIndex) => {
 				const item = findItem(label);
 				onDidTriggerItemButton.fire({ item, button: item.buttons![buttonIndex] });
-			}
+			},
+			hide: () => picker.hide()
 		};
 
 		return picker;
@@ -192,6 +207,7 @@ suite('Tab Group Commands', () => {
 			}
 			override async reopenSavedTabGroup(id: string, groupId?: number) { calls.push(`open ${id} in group ${groupId}`); }
 		};
+		const notificationService = new FakeNotificationService();
 
 		const trace: string[] = [];
 		const quickInputService = new FakeQuickInputService([
@@ -207,7 +223,7 @@ suite('Tab Group Commands', () => {
 			}
 		], ['Gamma']);
 
-		await showSavedTabGroups(quickInputService, historyService, 7);
+		await showSavedTabGroups(quickInputService, historyService, notificationService, 7);
 
 		assert.deepStrictEqual({ trace, calls }, {
 			trace: [
@@ -216,6 +232,36 @@ suite('Tab Group Commands', () => {
 				'pick 2: $(rocket) Gamma, active: $(rocket) Gamma'
 			],
 			calls: ['delete beta', 'rename alpha to Gamma', 'open alpha in group 7']
+		});
+	});
+
+	test('deleting a saved tab group from the quick pick can be undone', async () => {
+		const alpha = createSavedGroup('alpha', 'Alpha', 'blue', ['a.ts']);
+		const beta = createSavedGroup('beta', 'Beta', 'red', ['b.ts']);
+		const gamma = createSavedGroup('gamma', 'Gamma', 'green', ['c.ts']);
+		let savedGroups = [alpha, beta, gamma];
+		const historyService = new class extends mock<IHistoryService>() {
+			override getSavedTabGroups() { return savedGroups; }
+			override deleteSavedTabGroup(id: string) { savedGroups = savedGroups.filter(group => group.id !== id); }
+			override restoreSavedTabGroup(group: ISavedEditorTabGroup, index = savedGroups.length) { savedGroups = savedGroups.toSpliced(index, 0, group); }
+		};
+		const notificationService = new FakeNotificationService();
+		const quickInputService = new FakeQuickInputService([picker => {
+			picker.triggerButton('Beta', 1);
+			picker.hide();
+		}], []);
+
+		await showSavedTabGroups(quickInputService, historyService, notificationService, 7);
+		const afterDelete = savedGroups.map(group => group.id);
+		const [{ severity, message, choices }] = notificationService.prompts;
+		choices[0].run();
+
+		assert.deepStrictEqual({ afterDelete, severity, message, choices: choices.map(choice => choice.label), afterUndo: savedGroups.map(group => group.id) }, {
+			afterDelete: ['alpha', 'gamma'],
+			severity: Severity.Info,
+			message: 'Deleted the saved tab group "Beta".',
+			choices: ['Undo'],
+			afterUndo: ['alpha', 'beta', 'gamma']
 		});
 	});
 

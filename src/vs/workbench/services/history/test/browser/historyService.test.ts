@@ -31,6 +31,7 @@ import { IConfigurationService } from '../../../../../platform/configuration/com
 import { SideBySideEditorInput } from '../../../../common/editor/sideBySideEditorInput.js';
 import { IEditorGroupView } from '../../../../browser/parts/editor/editor.js';
 import { IEditorTabGroupCreateOptions } from '../../../../common/editor/editorTabGroup.js';
+import { IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
 
 suite('HistoryService', function () {
 
@@ -911,6 +912,41 @@ suite('HistoryService', function () {
 		historyService.deleteSavedTabGroup(savedGroupId);
 
 		assert.deepStrictEqual({ namesAfterRename, namesAfterDelete: getSavedTabGroupSnapshots(historyService).map(({ name }) => name) }, { namesAfterRename: ['Docs'], namesAfterDelete: [] });
+
+		return workbenchTeardown(instantiationService);
+	});
+
+	test('saved tab groups can be restored after they are deleted', async () => {
+		const [part, historyService, , , instantiationService] = await createServices();
+		const contextKeyService = instantiationService.invokeFunction(accessor => accessor.get(IContextKeyService));
+		const hasSavedTabGroups = () => contextKeyService.getContextKeyValue('hasSavedTabGroups');
+		const names = () => historyService.getSavedTabGroups().map(({ name }) => name);
+
+		const initialContext = hasSavedTabGroups();
+		const first = await createTabGroupWithSavedFlag(part, true);
+		await first.group.closeAllEditors();
+		const second = await createTabGroupWithSavedFlag(part, true);
+		second.group.renameTabGroup(second.group.tabGroups[0].id, 'Docs');
+		await second.group.closeAllEditors();
+		const [firstGroup, secondGroup] = historyService.getSavedTabGroups();
+		const contextWithGroups = hasSavedTabGroups();
+
+		historyService.deleteSavedTabGroup(firstGroup.id);
+		historyService.deleteSavedTabGroup(secondGroup.id);
+		const contextAfterDelete = hasSavedTabGroups();
+
+		historyService.restoreSavedTabGroup(secondGroup);
+		historyService.restoreSavedTabGroup(firstGroup, 0);
+		historyService.restoreSavedTabGroup({ ...firstGroup, name: 'Other' }, 0); // the group exists already
+		const contextAfterRestore = hasSavedTabGroups();
+
+		assert.deepStrictEqual({ initialContext, contextWithGroups, contextAfterDelete, contextAfterRestore, restored: names() }, {
+			initialContext: false,
+			contextWithGroups: true,
+			contextAfterDelete: false,
+			contextAfterRestore: true,
+			restored: ['Work', 'Docs']
+		});
 
 		return workbenchTeardown(instantiationService);
 	});

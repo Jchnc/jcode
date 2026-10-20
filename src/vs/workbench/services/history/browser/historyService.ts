@@ -37,6 +37,7 @@ import { mainWindow } from '../../../../base/browser/window.js';
 import { parse, stringify } from '../../../../base/common/marshalling.js';
 import { IEditorTabGroup } from '../../../common/editor/editorTabGroup.js';
 import { IGroupModelChangeEvent, isGroupEditorCloseEvent } from '../../../common/editor/editorGroupModel.js';
+import { HasSavedTabGroupsContext } from '../../../common/contextkeys.js';
 
 interface ISerializedEditorHistoryEntry {
 	readonly editor: Omit<IResourceEditorInput, 'resource'> & { resource: string };
@@ -97,6 +98,7 @@ export class HistoryService extends Disposable implements IHistoryService {
 
 	private readonly editorHelper: EditorHelper;
 	private savedTabGroups: ISavedEditorTabGroup[] = [];
+	private readonly hasSavedTabGroupsContextKey: IContextKey<boolean>;
 
 	/** Listeners on the editor groups whose saved tab groups are tracked. */
 	private readonly savedTabGroupTrackers = this._register(new DisposableMap<GroupIdentifier>());
@@ -134,6 +136,8 @@ export class HistoryService extends Disposable implements IHistoryService {
 
 		this.editorHelper = this.instantiationService.createInstance(EditorHelper);
 		this.savedTabGroups = this.loadSavedTabGroups();
+		this.hasSavedTabGroupsContextKey = HasSavedTabGroupsContext.bindTo(this.contextKeyService);
+		this.hasSavedTabGroupsContextKey.set(this.savedTabGroups.length > 0);
 
 		this.canNavigateBackContextKey = (new RawContextKey<boolean>('canNavigateBack', false, localize('canNavigateBack', "Whether it is possible to navigate back in editor history"))).bindTo(this.contextKeyService);
 		this.canNavigateForwardContextKey = (new RawContextKey<boolean>('canNavigateForward', false, localize('canNavigateForward', "Whether it is possible to navigate forward in editor history"))).bindTo(this.contextKeyService);
@@ -845,7 +849,7 @@ export class HistoryService extends Disposable implements IHistoryService {
 	private addSavedTabGroup(savedGroup: ISavedEditorTabGroup): void {
 		this.savedTabGroups = this.savedTabGroups.filter(group => group.id !== savedGroup.id);
 		this.savedTabGroups.push(savedGroup);
-		this.persistSavedTabGroups();
+		this.onDidChangeSavedTabGroups();
 	}
 
 	private trackSavedTabGroupsOfAllGroups(): void {
@@ -1130,7 +1134,7 @@ export class HistoryService extends Disposable implements IHistoryService {
 		const newName = name.trim();
 		if (newName && this.savedTabGroups.some(group => group.id === id && group.name !== newName)) {
 			this.savedTabGroups = this.savedTabGroups.map(group => group.id === id ? { ...group, name: newName } : group);
-			this.persistSavedTabGroups();
+			this.onDidChangeSavedTabGroups();
 		}
 	}
 
@@ -1138,7 +1142,14 @@ export class HistoryService extends Disposable implements IHistoryService {
 		const remainingGroups = this.savedTabGroups.filter(group => group.id !== id);
 		if (remainingGroups.length !== this.savedTabGroups.length) {
 			this.savedTabGroups = remainingGroups;
-			this.persistSavedTabGroups();
+			this.onDidChangeSavedTabGroups();
+		}
+	}
+
+	restoreSavedTabGroup(savedGroup: ISavedEditorTabGroup, index = this.savedTabGroups.length): void {
+		if (!this.savedTabGroups.some(group => group.id === savedGroup.id)) {
+			this.savedTabGroups = this.savedTabGroups.toSpliced(index, 0, savedGroup);
+			this.onDidChangeSavedTabGroups();
 		}
 	}
 
@@ -1156,7 +1167,8 @@ export class HistoryService extends Disposable implements IHistoryService {
 		}
 	}
 
-	private persistSavedTabGroups(): void {
+	private onDidChangeSavedTabGroups(): void {
+		this.hasSavedTabGroupsContextKey.set(this.savedTabGroups.length > 0);
 		this.storageService.store(HistoryService.SAVED_TAB_GROUPS_STORAGE_KEY, stringify(this.savedTabGroups), StorageScope.WORKSPACE, StorageTarget.MACHINE);
 	}
 

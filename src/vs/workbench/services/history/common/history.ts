@@ -126,6 +126,13 @@ export interface IHistoryService {
 	deleteSavedTabGroup(id: string): void;
 
 	/**
+	 * Puts a deleted saved tab group back, at the given position among the saved tab
+	 * groups or last if there is none. Nothing happens if a saved tab group with the
+	 * same identifier exists already, as it is more recent than the deleted one.
+	 */
+	restoreSavedTabGroup(group: ISavedEditorTabGroup, index?: number): void;
+
+	/**
 	 * Get the entire history of editors that were opened.
 	 */
 	getHistory(): readonly (EditorInput | IResourceEditorInput)[];

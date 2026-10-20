@@ -12,7 +12,7 @@ import {
 	EditorPartMultipleEditorGroupsContext, ActiveEditorDirtyContext, ActiveEditorGroupLockedContext, ActiveEditorCanSplitInGroupContext, SideBySideEditorActiveContext,
 	EditorTabsVisibleContext, ActiveEditorLastInGroupContext, EditorPartMaximizedEditorGroupContext, MultipleEditorGroupsContext, InEditorZenModeContext,
 	IsAuxiliaryWindowContext, ActiveCompareEditorCanSwapContext, MultipleEditorsSelectedInGroupContext, SplitEditorsVertically, ActiveEditorCannotCloseContext,
-	IsSessionsWindowContext, ActiveCustomEditorDiffCanToggleLayoutContext, ActiveCustomEditorTextDiffContext, EditorPartModalContext, ActiveEditorInTabGroupContext
+	IsSessionsWindowContext, ActiveCustomEditorDiffCanToggleLayoutContext, ActiveCustomEditorTextDiffContext, EditorPartModalContext, ActiveEditorInTabGroupContext, HasSavedTabGroupsContext
 } from '../../../common/contextkeys.js';
 import { SideBySideEditorInput, SideBySideEditorInputSerializer } from '../../../common/editor/sideBySideEditorInput.js';
 import { TextResourceEditor } from './textResourceEditor.js';
@@ -419,7 +419,7 @@ MenuRegistry.appendMenuItem(MenuId.EditorTitleContext, { submenu: MenuId.EditorT
 // Editor Title Context Menu: Tab Groups
 const tabGroupsEnabledContext = ContextKeyExpr.equals('config.workbench.editor.tabGroups.enabled', true);
 MenuRegistry.appendMenuItem(MenuId.EditorTitleContext, { command: { id: ADD_TO_NEW_TAB_GROUP_COMMAND_ID, title: localize('addToNewTabGroup', "Add to New Tab Group") }, group: '4_tabgroup', order: 10, when: ContextKeyExpr.and(tabGroupsEnabledContext, ActiveEditorStickyContext.toNegated()) });
-MenuRegistry.appendMenuItem(MenuId.EditorTitleContext, { command: { id: MOVE_TO_TAB_GROUP_COMMAND_ID, title: localize('moveToTabGroup', "Move to Tab Group...") }, group: '4_tabgroup', order: 20, when: ContextKeyExpr.and(tabGroupsEnabledContext, ActiveEditorStickyContext.toNegated()) });
+MenuRegistry.appendMenuItem(MenuId.EditorTitleContext, { command: { id: MOVE_TO_TAB_GROUP_COMMAND_ID, title: localize('moveToTabGroup', "Move to Tab Group…") }, group: '4_tabgroup', order: 20, when: ContextKeyExpr.and(tabGroupsEnabledContext, ActiveEditorStickyContext.toNegated()) });
 MenuRegistry.appendMenuItem(MenuId.EditorTitleContext, { command: { id: REMOVE_FROM_TAB_GROUP_COMMAND_ID, title: localize('removeFromTabGroup', "Remove from Tab Group") }, group: '4_tabgroup', order: 30, when: ContextKeyExpr.and(tabGroupsEnabledContext, ActiveEditorInTabGroupContext) });
 MenuRegistry.appendMenuItem(MenuId.EditorTitleContext, { command: { id: RENAME_TAB_GROUP_COMMAND_ID, title: localize('renameTabGroup', "Rename Group") }, group: '4_tabgroup', order: 40, when: ContextKeyExpr.and(tabGroupsEnabledContext, ActiveEditorInTabGroupContext) });
 MenuRegistry.appendMenuItem(MenuId.EditorTitleContext, { command: { id: RECOLOR_TAB_GROUP_COMMAND_ID, title: localize('recolorTabGroup', "Change Group Color") }, group: '4_tabgroup', order: 50, when: ContextKeyExpr.and(tabGroupsEnabledContext, ActiveEditorInTabGroupContext) });
@@ -504,7 +504,7 @@ MenuRegistry.appendMenuItem(MenuId.DiffEditorViewSubmenu, {
 	when: EditorContextKeys.diffEditorTemporaryInlineMode,
 });
 MenuRegistry.appendMenuItem(MenuId.EditorTitle, { command: { id: SHOW_EDITORS_IN_GROUP, title: localize('showOpenedEditors', "Show Opened Editors") }, group: '3_open', order: 10, when: EditorPartModalContext.toNegated() /* not applicable to modal editor */ });
-MenuRegistry.appendMenuItem(MenuId.EditorTitle, { command: { id: SHOW_SAVED_TAB_GROUPS_COMMAND_ID, title: localize('savedTabGroups', "Saved Tab Groups...") }, group: '3_open', order: 20, when: ContextKeyExpr.and(tabGroupsEnabledContext, EditorPartModalContext.toNegated() /* not applicable to modal editor */) });
+MenuRegistry.appendMenuItem(MenuId.EditorTitle, { command: { id: SHOW_SAVED_TAB_GROUPS_COMMAND_ID, title: localize('savedTabGroups', "Saved Tab Groups…") }, group: '3_open', order: 20, when: ContextKeyExpr.and(tabGroupsEnabledContext, HasSavedTabGroupsContext, EditorPartModalContext.toNegated() /* not applicable to modal editor */) });
 MenuRegistry.appendMenuItem(MenuId.EditorTitle, { command: { id: CLOSE_EDITORS_IN_GROUP_COMMAND_ID, title: localize('closeAll', "Close All") }, group: '5_close', order: 10, when: EditorPartModalContext.toNegated() /* not applicable to modal editor */ });
 MenuRegistry.appendMenuItem(MenuId.EditorTitle, { command: { id: CLOSE_SAVED_EDITORS_COMMAND_ID, title: localize('closeAllSaved', "Close Saved") }, group: '5_close', order: 20, when: EditorPartModalContext.toNegated() /* not applicable to modal editor */ });
 MenuRegistry.appendMenuItem(MenuId.EditorTitle, { command: { id: TOGGLE_KEEP_EDITORS_COMMAND_ID, title: localize('togglePreviewMode', "Enable Preview Editors"), toggled: ContextKeyExpr.has('config.workbench.editor.enablePreview') }, group: '7_settings', order: 10, when: EditorPartModalContext.toNegated() /* not applicable to modal editor */ });
