@@ -144,6 +144,16 @@ Open the **Remote** view or run **JCode Remote: Manage SSH/SFTP Connections...**
 
 This feature provides an SFTP virtual workspace. Remote terminals and server-side language tooling require separate support. See the [SSH/SFTP guide](extensions/jcode-sftp/README.md) for authentication, host verification, the status bar item, jump hosts, SSH config import, save behavior, polling, and profile import/export, including how exported credentials are handled.
 
+### AI Features
+
+AI features (Chat, inline suggestions and the Copilot sign-in) are turned off by default. They are still included: to turn them on, open Settings and clear **Chat: Disable AI Features**, or set:
+
+```json
+{
+	"chat.disableAIFeatures": false
+}
+```
+
 ## Build and Run
 
 Use the Node.js version in [.nvmrc](.nvmrc), npm below version 13, Git, and your operating system's native build toolchain. The [upstream contribution guide](https://github.com/microsoft/vscode/wiki/How-to-Contribute) documents platform-specific prerequisites. A [development container](.devcontainer/README.md) is also included.
