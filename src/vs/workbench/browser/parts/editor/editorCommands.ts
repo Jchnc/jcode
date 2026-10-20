@@ -1505,9 +1505,10 @@ function getTabGroupsInDisplayOrder(groupView: IEditorGroupView): { readonly tab
 }
 
 /**
- * Activates the first editor of the tab group after or before the active editor,
- * wrapping around at the ends of the tab bar. A collapsed target group is expanded
- * first so that the editor that gets activated is visible.
+ * Activates an editor of the tab group after or before the active editor, wrapping
+ * around at the ends of the tab bar: the first editor of an expanded group and the
+ * last active one of a collapsed group. A collapsed group stays collapsed, because
+ * the editor that gets activated remains visible as its only tab.
  */
 export async function focusAdjacentTabGroup(groupView: IEditorGroupView, editorService: IEditorService, direction: 'next' | 'previous'): Promise<void> {
 	const tabGroups = getTabGroupsInDisplayOrder(groupView);
@@ -1527,11 +1528,9 @@ export async function focusAdjacentTabGroup(groupView: IEditorGroupView, editorS
 		return; // already in the only tab group
 	}
 
-	if (target.tabGroup.collapsed) {
-		groupView.setTabGroupCollapsed(target.tabGroup.id, false);
-	}
+	const lastActiveEditor = target.tabGroup.collapsed ? groupView.getEditors(EditorsOrder.MOST_RECENTLY_ACTIVE).find(editor => target.editors.includes(editor)) : undefined;
 
-	await editorService.openEditor(target.editors[0], undefined, groupView);
+	await editorService.openEditor(lastActiveEditor ?? target.editors[0], undefined, groupView);
 }
 
 /**

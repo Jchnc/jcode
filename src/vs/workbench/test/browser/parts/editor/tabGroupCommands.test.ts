@@ -265,7 +265,7 @@ suite('Tab Group Commands', () => {
 		});
 	});
 
-	test('focus next and previous tab group activate the first editor of the group and wrap around', async () => {
+	test('focus next and previous tab group activate the first editor of an expanded group, the last active editor of a collapsed group and wrap around', async () => {
 		const instantiationService = workbenchInstantiationService(undefined, disposables);
 		const part = await createEditorPart(instantiationService, disposables);
 		instantiationService.stub(IEditorGroupsService, part);
@@ -284,6 +284,8 @@ suite('Tab Group Commands', () => {
 		const collapsedGroup = group.createTabGroup([editors.get('c1')!, editors.get('c2')!], 'C', 'red', { collapsed: true });
 		assert.ok(collapsedGroup);
 
+		await group.openEditor(editors.get('c1')!); // the last active editor of the collapsed group
+
 		const results: { from: string; direction: 'next' | 'previous'; active: string | undefined; collapsed: boolean }[] = [];
 		for (const [from, direction] of [['b', 'next'], ['c2', 'next'], ['a2', 'previous'], ['b', 'previous'], ['a1', 'next'], ['c1', 'previous']] as const) {
 			await group.openEditor(editors.get(from)!);
@@ -292,12 +294,12 @@ suite('Tab Group Commands', () => {
 		}
 
 		assert.deepStrictEqual(results, [
-			{ from: 'b', direction: 'next', active: 'c1', collapsed: false },
-			{ from: 'c2', direction: 'next', active: 'a1', collapsed: false },
-			{ from: 'a2', direction: 'previous', active: 'c1', collapsed: false },
-			{ from: 'b', direction: 'previous', active: 'a1', collapsed: false },
-			{ from: 'a1', direction: 'next', active: 'c1', collapsed: false },
-			{ from: 'c1', direction: 'previous', active: 'a1', collapsed: false }
+			{ from: 'b', direction: 'next', active: 'c1', collapsed: true },
+			{ from: 'c2', direction: 'next', active: 'a1', collapsed: true },
+			{ from: 'a2', direction: 'previous', active: 'c2', collapsed: true },
+			{ from: 'b', direction: 'previous', active: 'a1', collapsed: true },
+			{ from: 'a1', direction: 'next', active: 'c2', collapsed: true },
+			{ from: 'c1', direction: 'previous', active: 'a1', collapsed: true }
 		]);
 
 		return workbenchTeardown(instantiationService);
