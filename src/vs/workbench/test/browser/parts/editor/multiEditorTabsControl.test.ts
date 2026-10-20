@@ -4,7 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
-import { $, Dimension, EventType, ModifierKeyEmitter, reset, scheduleAtNextAnimationFrame } from '../../../../../base/browser/dom.js';
+import sinon from 'sinon';
+import { $, addDisposableListener, Dimension, EventType, ModifierKeyEmitter, reset, scheduleAtNextAnimationFrame } from '../../../../../base/browser/dom.js';
 import { mainWindow } from '../../../../../base/browser/window.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { DisposableStore, toDisposable } from '../../../../../base/common/lifecycle.js';
@@ -514,6 +515,89 @@ suite('MultiEditorTabsControl', () => {
 			renamed: ['file0.txt, tab group Review, collapsed', 'file1.txt, tab group Review, collapsed'],
 			disabled: ['file0.txt', 'file1.txt']
 		});
+	});
+
+	async function settleAnimations(element: HTMLElement): Promise<void> {
+		await Promise.all(element.getAnimations().map(animation => animation.finished.catch(() => undefined)));
+	}
+
+	/**
+	 * Resolves when the transition of a tab ends. Listens on an ancestor of the tabs
+	 * so that the tabs control, which listens on the tabs container, handles it first.
+	 */
+	async function whenTabTransitionEnds(tab: HTMLElement, propertyName: string): Promise<void> {
+		await new Promise<void>(resolve => {
+			const timeout = setTimeout(resolve, 2000);
+			const listener = addDisposableListener(container, 'transitionend', event => {
+				if (event.target === tab && event.propertyName === propertyName) {
+					clearTimeout(timeout);
+					listener.dispose();
+					resolve();
+				}
+			});
+			disposables.add(listener);
+		});
+	}
+
+	test('collapsing and expanding a tab group fades its tabs and lays out once they left', async () => {
+		const group = connectedGroup();
+		const [first, second] = model.getEditors(EditorsOrder.SEQUENTIAL);
+		const tabGroup = model.createTabGroup([first, second], 'Work', 'blue');
+		assert.ok(tabGroup);
+		await layoutConnectedGroup(group, 600);
+
+		const [activeTab, otherTab] = Array.from(container.querySelectorAll<HTMLElement>('.tabs-container > .tab'));
+		await settleAnimations(otherTab);
+		const layout = sinon.spy(control, 'layout');
+		disposables.add(toDisposable(() => layout.restore()));
+		const describeMotion = () => ({
+			displayed: mainWindow.getComputedStyle(otherTab).display !== 'none',
+			fading: mainWindow.getComputedStyle(otherTab).opacity !== (otherTab.classList.contains('tab-group-collapsed') ? '0' : '1'),
+			clickable: mainWindow.getComputedStyle(otherTab).pointerEvents !== 'none',
+			activeTabFading: mainWindow.getComputedStyle(activeTab).opacity !== '1'
+		});
+
+		model.setTabGroupCollapsed(tabGroup.id, true);
+		const collapsing = describeMotion();
+		layout.resetHistory();
+		await whenTabTransitionEnds(otherTab, 'display');
+		const collapsed = describeMotion();
+		const laidOutAfterFade = layout.called;
+
+		model.setTabGroupCollapsed(tabGroup.id, false);
+		const expanding = describeMotion();
+		await settleAnimations(otherTab);
+		const expanded = describeMotion();
+
+		assert.deepStrictEqual({ collapsing, collapsed, laidOutAfterFade, expanding, expanded }, {
+			collapsing: { displayed: true, fading: true, clickable: false, activeTabFading: false },
+			collapsed: { displayed: false, fading: false, clickable: false, activeTabFading: false },
+			laidOutAfterFade: true,
+			expanding: { displayed: true, fading: true, clickable: true, activeTabFading: false },
+			expanded: { displayed: true, fading: false, clickable: true, activeTabFading: false }
+		});
+	});
+
+	test('tab group motion is off when motion is reduced', async () => {
+		const group = connectedGroup();
+		group.closest('.monaco-workbench')!.classList.add('monaco-reduce-motion');
+		const [first, second] = model.getEditors(EditorsOrder.SEQUENTIAL);
+		const tabGroup = model.createTabGroup([first, second], 'Work', 'blue');
+		assert.ok(tabGroup);
+		await layoutConnectedGroup(group, 600);
+
+		const otherTab = container.querySelectorAll<HTMLElement>('.tabs-container > .tab')[1];
+		const header = tabGroupHeaders()[0];
+		const describeMotion = () => ({
+			displayed: mainWindow.getComputedStyle(otherTab).display !== 'none',
+			tabTransition: mainWindow.getComputedStyle(otherTab).transitionDuration,
+			headerTransition: mainWindow.getComputedStyle(header).transitionDuration
+		});
+
+		model.setTabGroupCollapsed(tabGroup.id, true);
+		const collapsed = describeMotion();
+
+		assert.deepStrictEqual(collapsed, { displayed: false, tabTransition: '0s', headerTransition: '0s' });
 	});
 
 	function connectedGroup(): HTMLElement {

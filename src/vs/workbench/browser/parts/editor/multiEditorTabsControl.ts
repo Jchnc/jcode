@@ -530,6 +530,14 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 			this.setHoveredTab(undefined);
 		}));
 
+		// The tabs of a collapsed tab group fade out before they leave the layout (see
+		// tabgroups.css), so lay out once more when they are gone to measure the final geometry
+		this._register(addDisposableListener(tabsContainer, 'transitionend', (e: TransitionEvent) => {
+			if (isHTMLElement(e.target) && e.target.classList.contains('tab-group-collapsed')) {
+				this.layout(this.dimensions, { forceRevealActiveTab: true });
+			}
+		}));
+
 		// Re-validate the Alt state from mouse events over the tabs: the `keyup` for
 		// Alt may have been missed while another application had focus, in which case
 		// the tab action would otherwise remain swapped to "Close Others". Listen in

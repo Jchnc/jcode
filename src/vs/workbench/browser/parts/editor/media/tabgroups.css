@@ -8,6 +8,14 @@
  * members continue it as one uninterrupted underline.
  */
 
+/*
+ * Motion. Tab groups only animate paint (colors and opacity), with a 120ms hover
+ * and a 160ms expand and collapse on a standard easing curve. The geometry that
+ * the tabs control measures to reveal the active tab never animates, so layout
+ * always measures settled positions. Reduced motion turns it all off (see the
+ * end of this file).
+ */
+
 .monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header {
 	display: inline-flex;
 	align-items: center;
@@ -30,7 +38,7 @@
 	user-select: none;
 	position: relative;
 	isolation: isolate;
-	transition: background-color 120ms ease, color 120ms ease;
+	transition: background-color 120ms cubic-bezier(0.2, 0, 0, 1), color 120ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 /* Bridge the header's spacing so the underline reads as one continuous stroke. */
@@ -95,6 +103,12 @@
 	font-weight: var(--vscode-fontWeight-regular);
 	line-height: 1;
 	opacity: 0.58;
+	transition: opacity 120ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header:hover > .tab-group-count,
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header:focus-visible > .tab-group-count {
+	opacity: 0.82;
 }
 
 .monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header > .tab-group-dirty-indicator {
@@ -185,8 +199,27 @@
 	right: 0;
 }
 
+/*
+ * Tabs fade as their group expands and collapses. A revealed tab takes its final
+ * place at once and only fades in. A collapsed tab stays in place while it fades
+ * out and leaves the layout when it is done, which the tabs control picks up to
+ * lay out again. The active tab never animates because layout measures its bounds.
+ */
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab.in-tab-group:not(.active):not(.tab-group-collapsed) {
+	transition: opacity 160ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+@starting-style {
+	.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab.in-tab-group:not(.active):not(.tab-group-collapsed) {
+		opacity: 0;
+	}
+}
+
 .monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab.tab-group-collapsed {
 	display: none;
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 160ms cubic-bezier(0.2, 0, 0, 1), display 160ms allow-discrete;
 }
 
 /*
@@ -372,12 +405,18 @@
 	border-top: var(--vscode-strokeThickness) solid var(--vscode-menu-separatorBackground);
 }
 
-@media (prefers-reduced-motion: reduce) {
-	.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header {
-		transition: none;
-	}
+/* Reduced motion. These selectors outrank the rules that declare the transitions above. */
+.monaco-workbench.monaco-reduce-motion .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header,
+.monaco-workbench.monaco-reduce-motion .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header > .tab-group-count,
+.monaco-workbench.monaco-reduce-motion .part.editor > .content .editor-group-container > .title .tabs-container > .tab.in-tab-group:not(.active):not(.tab-group-collapsed),
+.monaco-workbench.monaco-reduce-motion .part.editor > .content .editor-group-container > .title .tabs-container > .tab.tab-group-collapsed {
+	transition: none;
+}
 
-	.context-view.tab-group-context-view .tab-group-menu-color:hover {
-		transform: none;
-	}
+.monaco-reduce-motion .context-view.tab-group-context-view .tab-group-menu-color {
+	transition: none;
+}
+
+.monaco-reduce-motion .context-view.tab-group-context-view .tab-group-menu-color:hover {
+	transform: none;
 }
