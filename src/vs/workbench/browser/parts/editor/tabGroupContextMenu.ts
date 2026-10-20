@@ -99,33 +99,9 @@ export class TabGroupContextMenu {
 					swatch.style.backgroundColor = color.value;
 					swatch.setAttribute('role', 'radio');
 					swatch.setAttribute('aria-label', colorLabels.get(color.id) ?? color.id);
-					const selected = color.id === group.color;
-					swatch.classList.toggle('selected', selected);
-					swatch.setAttribute('aria-checked', String(selected));
-					swatch.tabIndex = selected || (!EDITOR_TAB_GROUP_COLORS.some(candidate => candidate.id === group.color) && swatches.length === 0) ? 0 : -1;
 					swatches.push(swatch);
-
-					disposables.add(addDisposableListener(swatch, EventType.CLICK, event => {
-						EventHelper.stop(event);
-						this.groupView.recolorTabGroup(group.id, color.id);
-						for (const candidate of swatches) {
-							const isSelected = candidate === swatch;
-							candidate.classList.toggle('selected', isSelected);
-							candidate.setAttribute('aria-checked', String(isSelected));
-							candidate.tabIndex = isSelected ? 0 : -1;
-						}
-					}));
-					disposables.add(addDisposableListener(swatch, EventType.KEY_DOWN, event => {
-						const keyboardEvent = event as KeyboardEvent;
-						const direction = keyboardEvent.key === 'ArrowRight' || keyboardEvent.key === 'ArrowDown' ? 1 : keyboardEvent.key === 'ArrowLeft' || keyboardEvent.key === 'ArrowUp' ? -1 : 0;
-						if (direction !== 0) {
-							EventHelper.stop(keyboardEvent);
-							const nextIndex = (swatches.indexOf(swatch) + direction + swatches.length) % swatches.length;
-							swatches[nextIndex].focus();
-							swatches[nextIndex].click();
-						}
-					}));
 				}
+				registerRadioGroup(disposables, swatches, EDITOR_TAB_GROUP_COLORS.findIndex(color => color.id === group.color), index => this.groupView.recolorTabGroup(group.id, EDITOR_TAB_GROUP_COLORS[index].id));
 
 				const iconOptions: readonly { readonly icon: ThemeIcon | undefined; readonly label: string }[] = [
 					{ icon: undefined, label: localize('tabGroup.iconNone', 'No Icon') },
@@ -156,33 +132,9 @@ export class TabGroupContextMenu {
 					button.setAttribute('aria-label', option.label);
 					button.title = option.label;
 					button.classList.add(...ThemeIcon.asClassNameArray(option.icon ?? Codicon.circleSlash));
-					const selected = group.icon === option.icon?.id;
-					button.classList.toggle('selected', selected);
-					button.setAttribute('aria-checked', String(selected));
-					button.tabIndex = selected ? 0 : -1;
 					iconButtons.push(button);
-
-					disposables.add(addDisposableListener(button, EventType.CLICK, event => {
-						EventHelper.stop(event);
-						this.groupView.setTabGroupIcon(group.id, option.icon?.id);
-						for (const candidate of iconButtons) {
-							const isSelected = candidate === button;
-							candidate.classList.toggle('selected', isSelected);
-							candidate.setAttribute('aria-checked', String(isSelected));
-							candidate.tabIndex = isSelected ? 0 : -1;
-						}
-					}));
-					disposables.add(addDisposableListener(button, EventType.KEY_DOWN, event => {
-						const keyboardEvent = event as KeyboardEvent;
-						const columns = 8;
-						const direction = keyboardEvent.key === 'ArrowRight' ? 1 : keyboardEvent.key === 'ArrowLeft' ? -1 : keyboardEvent.key === 'ArrowDown' ? columns : keyboardEvent.key === 'ArrowUp' ? -columns : 0;
-						if (direction !== 0) {
-							EventHelper.stop(keyboardEvent);
-							const nextIndex = (iconButtons.indexOf(button) + direction + iconButtons.length) % iconButtons.length;
-							iconButtons[nextIndex].focus();
-						}
-					}));
 				}
+				registerRadioGroup(disposables, iconButtons, iconOptions.findIndex(option => group.icon === option.icon?.id), index => this.groupView.setTabGroupIcon(group.id, iconOptions[index].icon?.id), ICON_PICKER_COLUMNS);
 
 				const actionList = menu.appendChild($('.tab-group-menu-actions'));
 				actionList.setAttribute('role', 'menu');
@@ -309,4 +261,73 @@ export class TabGroupContextMenu {
 		auxiliaryEditorPart.activeGroup.focus();
 	}
 
+}
+
+/** The number of icon buttons per row, which is also how far the Up and Down arrow keys move. */
+const ICON_PICKER_COLUMNS = 8;
+
+/**
+ * Makes a group of radio buttons keyboard friendly with a roving tab index. The arrow
+ * keys, Home and End only move focus so that browsing the options has no side effects,
+ * whereas Enter, Space and click select the focused option.
+ *
+ * @param selectedIndex The index of the initially selected option, or `-1` if there is none.
+ * @param onSelect Invoked when the user selects an option.
+ * @param columns The number of options per row: Left and Right move by one option, Up and Down by a row.
+ */
+function registerRadioGroup(disposables: DisposableStore, radios: readonly HTMLButtonElement[], selectedIndex: number, onSelect: (index: number) => void, columns = 1): void {
+	let checkedIndex = selectedIndex;
+	let focusableIndex = Math.max(0, selectedIndex);
+
+	const updateRadios = () => {
+		radios.forEach((radio, index) => {
+			radio.classList.toggle('selected', index === checkedIndex);
+			radio.setAttribute('aria-checked', String(index === checkedIndex));
+			radio.tabIndex = index === focusableIndex ? 0 : -1;
+		});
+	};
+	updateRadios();
+
+	const moveFocus = (index: number) => {
+		focusableIndex = index;
+		updateRadios();
+		radios[index].focus();
+	};
+
+	radios.forEach((radio, index) => {
+		disposables.add(addDisposableListener(radio, EventType.FOCUS, () => {
+			if (focusableIndex !== index) {
+				focusableIndex = index;
+				updateRadios();
+			}
+		}));
+		disposables.add(addDisposableListener(radio, EventType.CLICK, event => {
+			EventHelper.stop(event);
+			checkedIndex = index;
+			focusableIndex = index;
+			updateRadios();
+			onSelect(index);
+		}));
+		disposables.add(addDisposableListener(radio, EventType.KEY_DOWN, event => {
+			let targetIndex: number;
+			switch (event.key) {
+				case 'ArrowRight': targetIndex = index + 1; break;
+				case 'ArrowLeft': targetIndex = index - 1; break;
+				case 'ArrowDown': targetIndex = index + columns; break;
+				case 'ArrowUp': targetIndex = index - columns; break;
+				case 'Home': targetIndex = 0; break;
+				case 'End': targetIndex = radios.length - 1; break;
+				case 'Enter':
+				case ' ':
+					EventHelper.stop(event);
+					radio.click();
+					return;
+				default:
+					return;
+			}
+
+			EventHelper.stop(event);
+			moveFocus((targetIndex + radios.length) % radios.length);
+		}));
+	});
 }

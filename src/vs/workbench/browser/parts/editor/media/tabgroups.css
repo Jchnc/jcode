@@ -266,10 +266,17 @@
 	transform: scale(1.12);
 }
 
-.context-view.tab-group-context-view .tab-group-menu-color.selected,
+/*
+ * Arrow keys move focus without choosing a color, so the chosen color keeps a ring
+ * of its own that stays visible while the focus ring browses the other colors.
+ */
+.context-view.tab-group-context-view .tab-group-menu-color.selected {
+	box-shadow: 0 0 0 var(--vscode-strokeThickness) var(--vscode-menu-background), 0 0 0 calc(var(--vscode-strokeThickness) * 2) var(--vscode-menu-foreground);
+}
+
 .context-view.tab-group-context-view .tab-group-menu-color:focus-visible {
 	outline: var(--vscode-strokeThickness) solid var(--vscode-focusBorder);
-	outline-offset: 2px;
+	outline-offset: calc(var(--vscode-strokeThickness) * 3);
 }
 
 .context-view.tab-group-context-view .tab-group-menu-icons {

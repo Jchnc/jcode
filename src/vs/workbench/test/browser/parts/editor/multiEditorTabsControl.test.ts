@@ -402,6 +402,87 @@ suite('MultiEditorTabsControl', () => {
 		assert.deepStrictEqual({ headers: tabGroupHeaders().length, headerListenerStillActive: click.defaultPrevented }, { headers: 0, headerListenerStillActive: false });
 	});
 
+	function openTabGroupMenu(): HTMLElement {
+		tabGroupHeaders()[0].dispatchEvent(new MouseEvent(EventType.CONTEXT_MENU, { bubbles: true, cancelable: true, button: 2 }));
+		const menus = mainWindow.document.querySelectorAll<HTMLElement>('.context-view.tab-group-context-view .tab-group-context-menu');
+		return menus[menus.length - 1];
+	}
+
+	function pressKey(key: string): void {
+		mainWindow.document.activeElement?.dispatchEvent(new KeyboardEvent(EventType.KEY_DOWN, { key, bubbles: true, cancelable: true }));
+	}
+
+	test('tab group color swatches only move focus on arrow keys and apply on Enter, Space and click', () => {
+		const tabGroup = model.createTabGroup(model.getEditors(EditorsOrder.SEQUENTIAL), 'Work', 'blue');
+		assert.ok(tabGroup);
+
+		const swatches = Array.from(openTabGroupMenu().querySelectorAll<HTMLButtonElement>('.tab-group-menu-color'));
+		const labelOf = (element: Element | null) => element?.getAttribute('aria-label');
+		const describeStep = (action: string) => ({
+			action,
+			color: tabGroup.color,
+			focused: labelOf(mainWindow.document.activeElement),
+			checked: swatches.filter(swatch => swatch.getAttribute('aria-checked') === 'true').map(labelOf),
+			tabbable: swatches.filter(swatch => swatch.tabIndex === 0).map(labelOf)
+		});
+		const steps: ReturnType<typeof describeStep>[] = [];
+		const record = (action: string, run: () => void) => {
+			run();
+			steps.push(describeStep(action));
+		};
+
+		record('start', () => swatches[1].focus());
+		record('ArrowRight', () => pressKey('ArrowRight'));
+		record('ArrowDown', () => pressKey('ArrowDown'));
+		record('End', () => pressKey('End'));
+		record('ArrowRight wraps', () => pressKey('ArrowRight'));
+		record('Enter', () => pressKey('Enter'));
+		record('ArrowRight', () => pressKey('ArrowRight'));
+		record('Space', () => pressKey(' '));
+		record('ArrowLeft', () => pressKey('ArrowLeft'));
+		record('click', () => swatches[2].click());
+
+		assert.deepStrictEqual({ roles: [swatches[0].getAttribute('role'), swatches[0].parentElement?.getAttribute('role')], steps }, {
+			roles: ['radio', 'radiogroup'],
+			steps: [
+				{ action: 'start', color: 'blue', focused: 'Blue', checked: ['Blue'], tabbable: ['Blue'] },
+				{ action: 'ArrowRight', color: 'blue', focused: 'Cyan', checked: ['Blue'], tabbable: ['Cyan'] },
+				{ action: 'ArrowDown', color: 'blue', focused: 'Teal', checked: ['Blue'], tabbable: ['Teal'] },
+				{ action: 'End', color: 'blue', focused: 'Indigo', checked: ['Blue'], tabbable: ['Indigo'] },
+				{ action: 'ArrowRight wraps', color: 'blue', focused: 'Slate', checked: ['Blue'], tabbable: ['Slate'] },
+				{ action: 'Enter', color: 'grey', focused: 'Slate', checked: ['Slate'], tabbable: ['Slate'] },
+				{ action: 'ArrowRight', color: 'grey', focused: 'Blue', checked: ['Slate'], tabbable: ['Blue'] },
+				{ action: 'Space', color: 'blue', focused: 'Blue', checked: ['Blue'], tabbable: ['Blue'] },
+				{ action: 'ArrowLeft', color: 'blue', focused: 'Slate', checked: ['Blue'], tabbable: ['Slate'] },
+				{ action: 'click', color: 'cyan', focused: 'Slate', checked: ['Cyan'], tabbable: ['Cyan'] }
+			]
+		});
+	});
+
+	test('tab group icon buttons only move focus on arrow keys and apply on Enter', () => {
+		const tabGroup = model.createTabGroup(model.getEditors(EditorsOrder.SEQUENTIAL), 'Work', 'blue');
+		assert.ok(tabGroup);
+
+		const icons = Array.from(openTabGroupMenu().querySelectorAll<HTMLButtonElement>('.tab-group-menu-icon'));
+		const describeIcons = () => ({
+			icon: tabGroup.icon,
+			focused: mainWindow.document.activeElement?.getAttribute('aria-label'),
+			checked: icons.filter(icon => icon.getAttribute('aria-checked') === 'true').map(icon => icon.getAttribute('aria-label')),
+			tabbable: icons.filter(icon => icon.tabIndex === 0).map(icon => icon.getAttribute('aria-label'))
+		});
+
+		icons[0].focus();
+		pressKey('ArrowDown');
+		const afterArrow = describeIcons();
+		pressKey('Enter');
+		const afterEnter = describeIcons();
+
+		assert.deepStrictEqual({ afterArrow, afterEnter }, {
+			afterArrow: { icon: undefined, focused: 'Rocket', checked: ['No Icon'], tabbable: ['Rocket'] },
+			afterEnter: { icon: 'rocket', focused: 'Rocket', checked: ['Rocket'], tabbable: ['Rocket'] }
+		});
+	});
+
 	function connectedGroup(): HTMLElement {
 		const root = $('.monaco-workbench.modern-ui.modern-ui-tabs.modern-ui-connected-editor-tabs.floating-panels');
 		root.style.cssText = '--vscode-spacing-size20: 2px; --vscode-spacing-size40: 4px; --vscode-spacing-size60: 6px; --vscode-spacing-size80: 8px; --vscode-spacing-size160: 16px; --vscode-spacing-size200: 20px; --vscode-spacing-size280: 28px; --vscode-strokeThickness: 1px; --vscode-cornerRadius-small: 4px; --vscode-cornerRadius-medium: 6px; --vscode-cornerRadius-large: 8px; --vscode-fontSize-body1: 13px; --vscode-fontWeight-regular: 400;';
