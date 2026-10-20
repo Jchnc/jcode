@@ -380,7 +380,7 @@ suite('VerticalEditorTabsControl', () => {
 			return {
 				header: header.getAttribute('aria-label'),
 				expanded: header.getAttribute('aria-expanded'),
-				rows: rows().slice(0, 2).map(row => row.getAttribute('aria-label'))
+				rows: rows().filter(row => !row.classList.contains('exiting')).slice(0, 2).map(row => row.getAttribute('aria-label'))
 			};
 		};
 
@@ -700,6 +700,63 @@ suite('VerticalEditorTabsControl', () => {
 		assert.deepStrictEqual(log, {
 			collapse: { collapsed: true, headerClass: true, exitingRows: 3, exitingAreHidden: true, realRows: 9 },
 			expand: { collapsed: false, headerClass: true, enteringRows: 3, realRows: 12 }
+		});
+	});
+
+	test('collapsing and expanding a tab group through the model animates it just like a header click, with a twistie that turns', async () => {
+		const tabGroup = model.createTabGroup(model.getEditors(EditorsOrder.SEQUENTIAL).slice(2, 5), 'Work', 'blue')!;
+		const header = () => container.querySelector<HTMLElement>('.vertical-tab-group-header')!;
+		const twistie = () => header().querySelector<HTMLElement>('.vertical-tab-group-twistie')!;
+		const count = (selector: string) => container.querySelectorAll(selector).length;
+		const rotation = () => {
+			const matrix = new DOMMatrix(mainWindow.getComputedStyle(twistie()).transform);
+			return Math.round(Math.atan2(matrix.b, matrix.a) * 180 / Math.PI) + 0;
+		};
+		const describe = () => ({
+			collapsed: tabGroup.collapsed,
+			headerClass: ['expanding', 'collapsing'].filter(className => header().classList.contains(className)),
+			exitingRows: count('.vertical-tab.exiting'),
+			enteringRows: count('.vertical-tab.entering'),
+			chevronDown: twistie().classList.contains('codicon-chevron-down')
+		});
+		const log: Record<string, unknown> = {};
+
+		model.setTabGroupCollapsed(tabGroup.id, true); // as the context menu and the commands do
+		log.collapse = describe();
+		await waitUntil(() => count('.vertical-tab.exiting') === 0 && twistie().getAnimations().length === 0, 'the collapse to finish');
+		log.collapsed = { rotation: rotation(), ...describe() };
+
+		model.setTabGroupCollapsed(tabGroup.id, false);
+		log.expand = describe();
+		await waitUntil(() => count('.vertical-tab.entering') === 0 && twistie().getAnimations().length === 0, 'the expansion to finish');
+		log.expanded = { rotation: rotation(), ...describe() };
+
+		assert.deepStrictEqual(log, {
+			collapse: { collapsed: true, headerClass: ['collapsing'], exitingRows: 3, enteringRows: 0, chevronDown: true },
+			collapsed: { rotation: -90, collapsed: true, headerClass: ['collapsing'], exitingRows: 0, enteringRows: 0, chevronDown: true },
+			expand: { collapsed: false, headerClass: ['expanding'], exitingRows: 0, enteringRows: 3, chevronDown: true },
+			expanded: { rotation: 0, collapsed: false, headerClass: ['expanding'], exitingRows: 0, enteringRows: 0, chevronDown: true }
+		});
+	});
+
+	test('animations only run for the tab group whose collapsed state changed', async () => {
+		const [first, second] = [
+			model.createTabGroup(model.getEditors(EditorsOrder.SEQUENTIAL).slice(2, 4), 'First', 'blue')!,
+			model.createTabGroup(model.getEditors(EditorsOrder.SEQUENTIAL).slice(6, 8), 'Second', 'red')!
+		];
+		const headers = () => Array.from(container.querySelectorAll<HTMLElement>('.vertical-tab-group-header'));
+		const describe = () => ({ exitingRows: container.querySelectorAll('.vertical-tab.exiting').length, headerClasses: headers().map(header => header.className.replace('vertical-tab-group-header', '').trim()) });
+
+		model.setTabGroupCollapsed(second.id, true);
+		const collapseSecond = describe();
+		await waitUntil(() => container.querySelectorAll('.vertical-tab.exiting').length === 0, 'the collapse to finish');
+
+		model.renameTabGroup(first.id, 'Renamed'); // not a change of the collapsed state
+		const rename = describe();
+
+		assert.deepStrictEqual({ collapseSecond, rename }, {
+			collapseSecond: { exitingRows: 2, headerClasses: ['', 'collapsed collapsing'] },
+			rename: { exitingRows: 0, headerClasses: ['', 'collapsed'] }
 		});
 	});
 

@@ -104,6 +104,7 @@ interface ITabGroupRenderState {
 	readonly editors: readonly EditorInput[];
 	readonly tabGroupIds: readonly (string | undefined)[];
 	readonly tabGroups: string;
+	readonly collapsedTabGroupIds: ReadonlySet<string>;
 }
 
 function isSameTabGroupRenderState(a: ITabGroupRenderState, b: ITabGroupRenderState): boolean {
@@ -1970,7 +1971,13 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		tabContainer.classList.toggle('in-tab-group', !!tabGroup);
 		if (tabGroup) {
 			tabContainer.style.setProperty('--tab-group-color', getEditorTabGroupColor(tabGroup.color));
-			tabContainer.classList.toggle('tab-group-collapsed', this.isHiddenByCollapsedTabGroup(editor));
+
+			// Hiding a tab fades it out only when its tab group gets collapsed right now (see tabgroups.css)
+			const hidden = this.isHiddenByCollapsedTabGroup(editor);
+			if (hidden !== tabContainer.classList.contains('tab-group-collapsed')) {
+				tabContainer.classList.toggle('tab-group-collapsed', hidden);
+				tabContainer.classList.toggle('tab-group-collapsing', hidden && this.collapsingTabGroupIds.has(tabGroup.id));
+			}
 
 			const previousEditor = tabIndex > 0 ? this.tabsModel.getEditorByIndex(tabIndex - 1) : undefined;
 			const nextEditor = this.tabsModel.getEditorByIndex(tabIndex + 1);
@@ -1980,7 +1987,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 			tabContainer.classList.toggle('tab-group-last', isLastInGroup);
 		} else {
 			tabContainer.style.removeProperty('--tab-group-color');
-			tabContainer.classList.remove('tab-group-collapsed', 'tab-group-first', 'tab-group-last');
+			tabContainer.classList.remove('tab-group-collapsed', 'tab-group-collapsing', 'tab-group-first', 'tab-group-last');
 		}
 
 		// Borders / outline
@@ -2818,6 +2825,16 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 	private renderedTabGroupState: ITabGroupRenderState | undefined;
 
 	/**
+	 * The tab groups that the change being drawn collapses. Only their tabs fade out: tab
+	 * elements are bound to a position, so a tab that merely takes over a hidden editor
+	 * (e.g. after opening an editor before a collapsed group) should not fade.
+	 */
+	private collapsingTabGroupIds: ReadonlySet<string> = new Set();
+
+	/** The fade of each tab that an expanding tab group reveals, to end it when the group collapses again. */
+	private readonly tabFadeIns = new WeakMap<HTMLElement, Animation>();
+
+	/**
 	 * Applies a change to the tab groups (create, rename, recolor, collapse, move,
 	 * remove) to the existing tab elements instead of rebuilding the tab strip.
 	 */
@@ -2841,7 +2858,71 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		// without an editor move event. Labels follow the order, so recompute them.
 		this.computeTabLabels();
 
-		this.redraw({ forceRevealActiveTab: true });
+		// Whichever way a tab group got collapsed or expanded (header, context menu, command),
+		// it arrives here as a change of the model, which is what drives the fades
+		const { collapsed, expanded } = this.getCollapsedStateChanges();
+		this.endTabFadeIns(collapsed);
+		this.collapsingTabGroupIds = new Set(collapsed.map(group => group.id));
+		try {
+			this.redraw({ forceRevealActiveTab: true });
+		} finally {
+			this.collapsingTabGroupIds = new Set();
+		}
+		this.fadeInTabs(expanded);
+	}
+
+	/**
+	 * The tab groups that were drawn expanded and are collapsed now, and the other way
+	 * around. A tab group that was not drawn before is neither of them.
+	 */
+	private getCollapsedStateChanges(): { readonly collapsed: IEditorTabGroup[]; readonly expanded: IEditorTabGroup[] } {
+		const rendered = this.renderedTabGroupState;
+		const collapsed: IEditorTabGroup[] = [];
+		const expanded: IEditorTabGroup[] = [];
+		if (!rendered?.enabled || !this.groupsView.partOptions.tabGroups.enabled) {
+			return { collapsed, expanded };
+		}
+
+		const renderedGroupIds = new Set(rendered.tabGroupIds);
+		for (const group of this.tabsModel.tabGroups) {
+			if (renderedGroupIds.has(group.id) && group.collapsed !== rendered.collapsedTabGroupIds.has(group.id)) {
+				(group.collapsed ? collapsed : expanded).push(group);
+			}
+		}
+
+		return { collapsed, expanded };
+	}
+
+	/**
+	 * Fades in the tabs that expanding tab groups reveal. The animation only changes
+	 * paint, so layout, which measures the tabs to reveal the active one, is not disturbed
+	 * by it. The tab that stays visible while a group is collapsed does not fade.
+	 */
+	private fadeInTabs(expandedGroups: readonly IEditorTabGroup[]): void {
+		if (expandedGroups.length === 0 || this.isMotionReduced()) {
+			return;
+		}
+
+		const expandedGroupIds = new Set(expandedGroups.map(group => group.id));
+		this.tabsModel.getEditors(EditorsOrder.SEQUENTIAL).forEach((editor, tabIndex) => {
+			const tabGroup = this.tabsModel.getTabGroupForEditor(editor);
+			const tab = tabGroup && expandedGroupIds.has(tabGroup.id) && !this.groupView.isActive(editor) ? this.getTabAtIndex(tabIndex) : undefined;
+			if (tab) {
+				this.tabFadeIns.set(tab, tab.animate({ opacity: [0, 1] }, { duration: 160, easing: 'cubic-bezier(0.2, 0, 0, 1)' }));
+			}
+		});
+	}
+
+	/** Ends the fades of the tabs of tab groups that are about to collapse, before they would hold back the fade out. */
+	private endTabFadeIns(collapsedGroups: readonly IEditorTabGroup[]): void {
+		const collapsedGroupIds = new Set(collapsedGroups.map(group => group.id));
+		this.tabsModel.getEditors(EditorsOrder.SEQUENTIAL).forEach((editor, tabIndex) => {
+			const tabGroup = this.tabsModel.getTabGroupForEditor(editor);
+			const tab = tabGroup && collapsedGroupIds.has(tabGroup.id) ? this.getTabAtIndex(tabIndex) : undefined;
+			if (tab) {
+				this.tabFadeIns.get(tab)?.cancel();
+			}
+		});
 	}
 
 	private getTabGroupRenderState(): ITabGroupRenderState {
@@ -2852,7 +2933,8 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 			activeEditor: this.tabsModel.activeEditor,
 			editors,
 			tabGroupIds: editors.map(editor => this.tabsModel.getTabGroupForEditor(editor)?.id),
-			tabGroups: JSON.stringify(this.tabsModel.tabGroups.map(({ id, name, color, collapsed, saved, locked, icon }) => [id, name, color, collapsed, saved, locked, icon]))
+			tabGroups: JSON.stringify(this.tabsModel.tabGroups.map(({ id, name, color, collapsed, saved, locked, icon }) => [id, name, color, collapsed, saved, locked, icon])),
+			collapsedTabGroupIds: new Set(this.tabsModel.tabGroups.filter(group => group.collapsed).map(group => group.id))
 		};
 	}
 

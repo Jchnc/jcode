@@ -221,25 +221,20 @@
 }
 
 /*
- * Tabs fade as their group expands and collapses. A revealed tab takes its final
- * place at once and only fades in. A collapsed tab stays in place while it fades
- * out and leaves the layout when it is done, which the tabs control picks up to
- * lay out again. The active tab never animates because layout measures its bounds.
+ * Tabs fade as their group expands and collapses, when the model says so. The tabs
+ * control fades in the tabs that an expanding group reveals (they take their final
+ * place at once), so tab elements that are new, or that only take over another editor,
+ * never fade in. A tab that a collapsing group hides stays in place while it fades out
+ * (`tab-group-collapsing`) and leaves the layout when it is done, which the tabs control
+ * picks up to lay out again. The active tab never animates because layout measures its bounds.
  */
-.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab.in-tab-group:not(.active):not(.tab-group-collapsed) {
-	transition: opacity 160ms cubic-bezier(0.2, 0, 0, 1);
-}
-
-@starting-style {
-	.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab.in-tab-group:not(.active):not(.tab-group-collapsed) {
-		opacity: 0;
-	}
-}
-
 .monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab.tab-group-collapsed {
 	display: none;
 	opacity: 0;
 	pointer-events: none;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab.tab-group-collapsed.tab-group-collapsing {
 	transition: opacity 160ms cubic-bezier(0.2, 0, 0, 1), display 160ms allow-discrete;
 }
 
@@ -430,8 +425,7 @@
 .monaco-workbench.monaco-reduce-motion .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header,
 .monaco-workbench.monaco-reduce-motion .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header > .tab-group-count,
 .monaco-workbench.monaco-reduce-motion .part.editor > .content .editor-group-container > .title .tabs-container > .tab-group-header > .tab-group-twistie,
-.monaco-workbench.monaco-reduce-motion .part.editor > .content .editor-group-container > .title .tabs-container > .tab.in-tab-group:not(.active):not(.tab-group-collapsed),
-.monaco-workbench.monaco-reduce-motion .part.editor > .content .editor-group-container > .title .tabs-container > .tab.tab-group-collapsed {
+.monaco-workbench.monaco-reduce-motion .part.editor > .content .editor-group-container > .title .tabs-container > .tab.tab-group-collapsed.tab-group-collapsing {
 	transition: none;
 }
 

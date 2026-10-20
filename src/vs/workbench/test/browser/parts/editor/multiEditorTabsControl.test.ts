@@ -615,6 +615,91 @@ suite('MultiEditorTabsControl', () => {
 		});
 	});
 
+	function createNamedEditor(name: string): TestFileEditorInput {
+		return disposables.add(new class extends TestFileEditorInput {
+			override getName(): string { return name; }
+		}(URI.file(`/workspace/project/src/${name}`), 'testEditorInput'));
+	}
+
+	function describeTabAnimations(): Record<string, string[]> {
+		const animations: Record<string, string[]> = {};
+		for (const tab of Array.from(container.querySelectorAll<HTMLElement>('.tabs-container > .tab'))) {
+			const running = tab.getAnimations().map(animation => animation instanceof CSSTransition ? `transition ${animation.transitionProperty}` : 'animation');
+			if (running.length > 0) {
+				animations[tab.querySelector('.label-name')!.textContent!] = running;
+			}
+		}
+
+		return animations;
+	}
+
+	test('tab elements that are new or take over another editor do not fade in', async () => {
+		const group = connectedGroup();
+		const [first, , third, fourth] = openNamedEditors(['a.ts', 'b.ts', 'c.ts', 'd.ts']);
+		model.createTabGroup([third, fourth], 'Work', 'blue');
+		model.openEditor(first, { active: true });
+		control.openEditor(first);
+		await layoutConnectedGroup(group, 600);
+		await Promise.all(Array.from(container.querySelectorAll<HTMLElement>('.tabs-container > .tab')).map(settleAnimations));
+
+		// The tab element for the last position is new and takes over the editor that the new one pushes along
+		const fresh = createNamedEditor('e.ts');
+		model.openEditor(fresh, { index: 1, pinned: true, active: false });
+		control.openEditor(fresh);
+
+		assert.deepStrictEqual({ strip: describeTabStrip(), animations: describeTabAnimations() }, {
+			strip: ['a.ts', 'e.ts', 'b.ts', '[Work]', 'c.ts', 'd.ts'],
+			animations: {}
+		});
+	});
+
+	test('an expanding tab group fades in the tabs it reveals and a collapse ends that fade', async () => {
+		const group = connectedGroup();
+		const [, second, third] = openNamedEditors(['a.ts', 'b.ts', 'c.ts']);
+		const tabGroup = model.createTabGroup([second, third], 'Work', 'blue');
+		assert.ok(tabGroup);
+		model.setTabGroupCollapsed(tabGroup.id, true);
+		await layoutConnectedGroup(group, 600);
+		await Promise.all(Array.from(container.querySelectorAll<HTMLElement>('.tabs-container > .tab')).map(settleAnimations));
+
+		model.setTabGroupCollapsed(tabGroup.id, false);
+		const expanding = describeTabAnimations(); // the active tab c.ts is visible all along and does not fade
+		model.setTabGroupCollapsed(tabGroup.id, true);
+		const fadeInRunsOn = Object.entries(describeTabAnimations()).filter(([, running]) => running.includes('animation')).map(([name]) => name); // it would hold back the fade out
+
+		assert.deepStrictEqual({ expanding, fadeInRunsOn }, {
+			expanding: { 'b.ts': ['animation'] },
+			fadeInRunsOn: []
+		});
+	});
+
+	test('only a tab group that collapses fades its tabs out, not a tab that takes over a hidden editor', async () => {
+		const group = connectedGroup();
+		const [first, second, third] = openNamedEditors(['a.ts', 'b.ts', 'c.ts', 'd.ts']);
+		const tabGroup = model.createTabGroup([second, third], 'Work', 'blue');
+		assert.ok(tabGroup);
+		model.openEditor(first, { active: true });
+		control.openEditor(first);
+		await layoutConnectedGroup(group, 600);
+		const tabs = () => Array.from(container.querySelectorAll<HTMLElement>('.tabs-container > .tab'));
+		const displayed = () => tabs().map(tab => `${tab.querySelector('.label-name')!.textContent}${mainWindow.getComputedStyle(tab).display === 'none' ? ' (removed)' : ''}`);
+
+		model.setTabGroupCollapsed(tabGroup.id, true);
+		const whileCollapsing = displayed();
+		await whenTabTransitionEnds(tabs()[1], 'display');
+		const collapsed = displayed();
+
+		// The tab element at the fourth position shows d.ts and now takes over the hidden c.ts
+		model.openEditor(createNamedEditor('e.ts'), { index: 0, pinned: true, active: false });
+		control.openEditor(model.getEditorByIndex(0)!);
+
+		assert.deepStrictEqual({ whileCollapsing, collapsed, afterOpening: displayed() }, {
+			whileCollapsing: ['a.ts', 'b.ts', 'c.ts', 'd.ts'],
+			collapsed: ['a.ts', 'b.ts (removed)', 'c.ts (removed)', 'd.ts'],
+			afterOpening: ['e.ts', 'a.ts', 'b.ts (removed)', 'c.ts (removed)', 'd.ts']
+		});
+	});
+
 	test('tab group motion is off when motion is reduced', async () => {
 		const group = connectedGroup();
 		group.closest('.monaco-workbench')!.classList.add('monaco-reduce-motion');
@@ -633,8 +718,16 @@ suite('MultiEditorTabsControl', () => {
 
 		model.setTabGroupCollapsed(tabGroup.id, true);
 		const collapsed = describeMotion();
+		const animationsWhileCollapsing = describeTabAnimations();
 
-		assert.deepStrictEqual(collapsed, { displayed: false, tabTransition: '0s', headerTransition: '0s' });
+		model.setTabGroupCollapsed(tabGroup.id, false);
+		const animationsWhileExpanding = describeTabAnimations();
+
+		assert.deepStrictEqual({ collapsed, animationsWhileCollapsing, animationsWhileExpanding }, {
+			collapsed: { displayed: false, tabTransition: '0s', headerTransition: '0s' },
+			animationsWhileCollapsing: {},
+			animationsWhileExpanding: {}
+		});
 	});
 
 	test('tab group headers show the same details as vertical tab group headers', () => {

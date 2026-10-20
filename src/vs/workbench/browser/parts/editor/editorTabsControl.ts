@@ -627,6 +627,14 @@ export abstract class EditorTabsControl extends Themable implements IEditorTabsC
 		return keybinding ? keybinding.getLabel() ?? undefined : undefined;
 	}
 
+	/**
+	 * Whether the workbench asks for reduced motion. The stylesheets switch their own
+	 * transitions off with the same class, this is for the animations that script runs.
+	 */
+	protected isMotionReduced(): boolean {
+		return !!this.parent.closest('.monaco-workbench.monaco-reduce-motion');
+	}
+
 	protected get tabHeight() {
 		const isCompact = this.groupsView.partOptions.tabHeight === 'compact';
 		// In modern multi-tab mode the tabs-and-actions-container gains extra

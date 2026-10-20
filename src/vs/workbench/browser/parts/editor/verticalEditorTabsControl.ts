@@ -59,9 +59,8 @@ class DraggedVerticalEditorIdentifier extends DraggedEditorIdentifier { }
 /** The id of the "New Untitled Text File" command, which the files contribution registers. */
 const NEW_UNTITLED_FILE_COMMAND_ID = 'workbench.action.files.newUntitledFile';
 
-/** The tab group change that is about to be rendered, so that it can animate rows instead of just swapping them. */
+/** A tab group that the change about to be rendered collapses or expands, so that it can animate rows instead of just swapping them. */
 interface IVerticalTabGroupTransition {
-	readonly groupId: string;
 	readonly kind: 'expand' | 'collapse';
 	/** The editors that had a row before the change. */
 	readonly existing: ReadonlySet<EditorInput>;
@@ -124,7 +123,10 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 	private tabStop: HTMLElement | undefined;
 	private compact = false;
 	private emptyStateAction: HTMLElement | undefined;
-	private tabGroupTransition: IVerticalTabGroupTransition | undefined;
+
+	/** Whether each tab group was collapsed when the list was last drawn, to tell which ones a model change collapses or expands. */
+	private readonly renderedTabGroups = new Map<string, boolean>();
+	private tabGroupTransitions: ReadonlyMap<string, IVerticalTabGroupTransition> = new Map();
 	private dropTarget: HTMLElement | undefined;
 	private lastMouseWheelEventTime = 0;
 
@@ -159,7 +161,16 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 			this._register(this.hoverService.setupManagedHover(getDefaultHoverDelegate('mouse'), this.emptyStateAction, localize('verticalTabs.newFile', "New File")));
 		}
 		this._register(this.tabsModel.onDidModelChange(event => {
-			if (event.kind === GroupModelChangeKind.TAB_GROUP_CREATED || event.kind === GroupModelChangeKind.TAB_GROUP_CHANGED || event.kind === GroupModelChangeKind.TAB_GROUP_REMOVED) {
+			if (event.kind === GroupModelChangeKind.TAB_GROUP_CHANGED) {
+				// Whichever way a tab group got collapsed or expanded (header, keyboard, context
+				// menu, command), it arrives here as a change of the model, which drives the animation
+				this.tabGroupTransitions = this.captureTabGroupTransitions();
+				try {
+					this.redraw();
+				} finally {
+					this.tabGroupTransitions = new Map();
+				}
+			} else if (event.kind === GroupModelChangeKind.TAB_GROUP_CREATED || event.kind === GroupModelChangeKind.TAB_GROUP_REMOVED) {
 				this.redraw();
 			}
 		}));
@@ -334,9 +345,8 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		this.tabGroupHeaders.clear();
 		clearNode(this.tabsContainer);
 
-		const transition = this.tabGroupTransition;
 		const editors = this.tabsModel.getEditors(EditorsOrder.SEQUENTIAL);
-		const renderedGroups = new Set<string>();
+		this.renderedTabGroups.clear();
 		const tabGroupsEnabled = this.groupsView.partOptions.tabGroups.enabled;
 		const showPinnedSection = this.groupsView.partOptions.pinnedTabsOnSeparateRow && this.tabsModel.stickyCount > 0;
 		for (let index = 0; index < editors.length; index++) {
@@ -347,18 +357,18 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 				this.tabsContainer.appendChild(this.createSectionLabel(localize('verticalTabs.editors', "Editors"), this.tabsModel.stickyCount, false));
 			}
 			const tabGroup = tabGroupsEnabled ? this.tabsModel.getTabGroupForEditor(editor) : undefined;
-			if (tabGroup && !renderedGroups.has(tabGroup.id)) {
+			const transition = tabGroup ? this.tabGroupTransitions.get(tabGroup.id) : undefined;
+			if (tabGroup && !this.renderedTabGroups.has(tabGroup.id)) {
 				const header = this.createTabGroupHeader(tabGroup, editors);
-				if (transition?.groupId === tabGroup.id && !this.isMotionReduced()) {
+				if (transition) {
 					header.classList.add(transition.kind === 'expand' ? 'expanding' : 'collapsing');
 				}
 				this.tabsContainer.appendChild(header);
-				renderedGroups.add(tabGroup.id);
+				this.renderedTabGroups.set(tabGroup.id, tabGroup.collapsed);
 			}
 
-			const inTransition = !!tabGroup && transition?.groupId === tabGroup.id;
 			if (tabGroup?.collapsed && !this.tabsModel.isActive(editor)) {
-				const exitingRow = inTransition ? transition.exitingRows.get(editor) : undefined;
+				const exitingRow = transition?.exitingRows.get(editor);
 				if (exitingRow) {
 					this.tabsContainer.appendChild(this.animateExitingRow(exitingRow));
 				}
@@ -366,7 +376,7 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 			}
 
 			const row = this.createTab(editor);
-			if (inTransition && transition.kind === 'expand' && !transition.existing.has(editor)) {
+			if (transition?.kind === 'expand' && !transition.existing.has(editor)) {
 				this.animateEnteringRow(row);
 			}
 			this.tabsContainer.appendChild(row);
@@ -409,8 +419,37 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		return undefined;
 	}
 
-	private isMotionReduced(): boolean {
-		return !!this.root?.closest('.monaco-workbench.monaco-reduce-motion');
+	/**
+	 * Finds the tab groups that the model change about to be drawn collapses or expands and
+	 * takes what the animation needs from the rows that are still on screen: the editors that
+	 * had a row and copies of the rows that a collapse removes. Nothing animates while motion
+	 * is reduced.
+	 */
+	private captureTabGroupTransitions(): ReadonlyMap<string, IVerticalTabGroupTransition> {
+		const transitions = new Map<string, IVerticalTabGroupTransition>();
+		if (this.isMotionReduced()) {
+			return transitions;
+		}
+
+		for (const group of this.tabsModel.tabGroups) {
+			const wasCollapsed = this.renderedTabGroups.get(group.id);
+			if (wasCollapsed === undefined || wasCollapsed === group.collapsed) {
+				continue; // not drawn before, or drawn in the state that it is in now
+			}
+
+			const exitingRows = new Map<EditorInput, HTMLElement>();
+			if (group.collapsed) {
+				for (const [editor, tab] of this.tabs) {
+					if (this.tabsModel.getTabGroupForEditor(editor)?.id === group.id && !this.tabsModel.isActive(editor)) {
+						exitingRows.set(editor, tab.element.cloneNode(true) as HTMLElement); // taken now, the redraw replaces the rows
+					}
+				}
+			}
+
+			transitions.set(group.id, { kind: group.collapsed ? 'collapse' : 'expand', existing: new Set(this.tabs.keys()), exitingRows });
+		}
+
+		return transitions;
 	}
 
 	/** Lets a row that an expanding tab group reveals grow into place. */
@@ -543,8 +582,9 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		header.classList.toggle('locked', group.locked);
 		header.style.setProperty('--tab-group-color', getEditorTabGroupColor(group.color));
 
-		const twistie = $('span.vertical-tab-group-twistie');
-		twistie.classList.add(...ThemeIcon.asClassNameArray(group.collapsed ? Codicon.chevronRight : Codicon.chevronDown));
+		// The twistie always shows the same icon and turns when the group collapses (see the stylesheet)
+		const twistie = $('span.vertical-tab-group-twistie', { 'aria-hidden': 'true' });
+		twistie.classList.add(...ThemeIcon.asClassNameArray(Codicon.chevronDown));
 		header.appendChild(twistie);
 		const colorDot = $('span.vertical-tab-group-color-dot');
 		colorDot.setAttribute('aria-hidden', 'true');
@@ -724,21 +764,7 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 	}
 
 	private setTabGroupCollapsed(group: IEditorTabGroup, collapsed: boolean): void {
-		const exitingRows = new Map<EditorInput, HTMLElement>();
-		if (collapsed && !this.isMotionReduced()) {
-			for (const [editor, tab] of this.tabs) {
-				if (this.tabsModel.getTabGroupForEditor(editor)?.id === group.id && !this.tabsModel.isActive(editor)) {
-					exitingRows.set(editor, tab.element.cloneNode(true) as HTMLElement); // taken now, the redraw below replaces the rows
-				}
-			}
-		}
-
-		this.tabGroupTransition = { groupId: group.id, kind: collapsed ? 'collapse' : 'expand', existing: new Set(this.tabs.keys()), exitingRows };
-		try {
-			this.groupView.setTabGroupCollapsed(group.id, collapsed);
-		} finally {
-			this.tabGroupTransition = undefined;
-		}
+		this.groupView.setTabGroupCollapsed(group.id, collapsed); // the model change redraws the list and animates it
 	}
 
 	private createTab(editor: EditorInput): HTMLElement {

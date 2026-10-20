@@ -311,6 +311,15 @@
 	color: inherit;
 }
 
+/* The twistie is always the same chevron, which turns sideways while the group is collapsed. */
+.monaco-workbench .part.editor > .content .vertical-tab-group-twistie {
+	flex: 0 0 auto;
+}
+
+.monaco-workbench .part.editor > .content .vertical-tab-group-header.collapsed > .vertical-tab-group-twistie {
+	transform: rotate(-90deg);
+}
+
 .monaco-workbench .part.editor > .content .vertical-tab-group-header:hover {
 	color: color-mix(in srgb, var(--tab-group-color) 58%, var(--vscode-tab-activeForeground));
 	background: color-mix(in srgb, var(--tab-group-color) 32%, var(--vscode-tab-hoverBackground));
@@ -598,6 +607,7 @@
 	}
 }
 
+/* The twistie of a collapsed group points sideways (see above), so it turns from or to upright. */
 @keyframes vertical-tab-group-expand {
 	from {
 		transform: rotate(-90deg);
@@ -606,7 +616,7 @@
 
 @keyframes vertical-tab-group-collapse {
 	from {
-		transform: rotate(90deg);
+		transform: rotate(0deg);
 	}
 }
 
