@@ -9,7 +9,8 @@
 	"categories": ["Other"],
 	"main": "./out/extension",
 	"scripts": {
-		"test": "node --test \"out/test/**/*.test.js\""
+		"compile": "node ../../node_modules/@typescript/native/bin/tsc --project tsconfig.json",
+		"test": "node -e \"require('node:fs').rmSync('out/test', { recursive: true, force: true })\" && npm run compile && node --test \"out/test/**/*.test.js\""
 	},
 	"activationEvents": ["onFileSystem:jcode-sftp", "onView:jcodeSftp.connections", "onCommand:jcodeSftp.connect", "onCommand:jcodeSftp.reconnect", "onCommand:jcodeSftp.new", "onCommand:jcodeSftp.open", "onCommand:jcodeSftp.edit", "onCommand:jcodeSftp.delete", "onCommand:jcodeSftp.import", "onCommand:jcodeSftp.export", "onCommand:jcodeSftp.disconnect", "onCommand:jcodeSftp.showStatusMenu"],
 	"capabilities": {
