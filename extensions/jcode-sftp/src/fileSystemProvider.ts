@@ -9,6 +9,7 @@ import picomatch from 'picomatch';
 import { utils, type FileEntryWithStats, type SFTPWrapper, type Stats } from 'ssh2';
 import { EventEmitter, FileChangeType, FileSystemError, FileSystemProvider, FileStat, FileType, l10n, Uri, workspace, type Disposable, type FileChangeEvent, type LogOutputChannel } from 'vscode';
 import { SftpConnections } from './connection';
+import { planOwnership } from './saveStrategy';
 
 interface SnapshotEntry {
 	type: FileType;
@@ -179,11 +180,7 @@ export class SftpFileSystemProvider implements FileSystemProvider {
 					offset += length;
 				}
 				if (target) {
-					const attrs = await operation<Stats>(callback => sftp.fstat(handle!, callback));
-					if (attrs.uid !== target.uid || attrs.gid !== target.gid) {
-						await operation<void>(callback => sftp.fchown(handle!, target.uid, target.gid, callback));
-					}
-					await operation<void>(callback => sftp.fchmod(handle!, target.mode & 0o7777, callback));
+					await this.restoreMetadata(sftp, handle, path, target);
 				}
 				await operation<void>(callback => sftp.close(handle!, callback));
 				handle = undefined;
@@ -208,6 +205,30 @@ export class SftpFileSystemProvider implements FileSystemProvider {
 			return !entry;
 		});
 		this.changes.fire([{ type: created ? FileChangeType.Created : FileChangeType.Changed, uri }]);
+	}
+
+	/** Gives the staged file the original owner and mode. The content is already safe, so metadata failures are logged instead of failing the save. */
+	private async restoreMetadata(sftp: SFTPWrapper, handle: Buffer, path: string, original: Stats): Promise<void> {
+		const created = await operation<Stats>(callback => sftp.fstat(handle, callback));
+		const plan = planOwnership(created, original);
+		if (plan.action === 'restore') {
+			await this.tolerate(`restore the owner of ${path}`, () => operation<void>(callback => sftp.fchown(handle, plan.owner.uid, plan.owner.gid, callback)));
+		} else if (plan.action === 'unrestorable') {
+			this.log.info(`Saved ${path} as ${created.uid}:${created.gid} because only root can restore the original owner ${original.uid}:${original.gid}.`);
+		}
+		await this.tolerate(`restore the mode of ${path}`, () => operation<void>(callback => sftp.fchmod(handle, original.mode & 0o7777, callback)));
+	}
+
+	/** Runs a best-effort step, rethrowing transport failures so a dropped connection still fails the save. */
+	private async tolerate(description: string, action: () => Promise<void>): Promise<void> {
+		try {
+			await action();
+		} catch (error) {
+			if (!(error instanceof Error) || isConnectionError(error)) {
+				throw error;
+			}
+			this.log.warn(`Could not ${description}: ${String(error)}`);
+		}
 	}
 
 	async createDirectory(uri: Uri): Promise<void> {

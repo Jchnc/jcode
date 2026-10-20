@@ -2,3 +2,4 @@ src/**
 tsconfig*.json
 **/*.tsbuildinfo
 package-lock.json
+out/test/**

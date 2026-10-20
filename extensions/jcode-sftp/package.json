@@ -8,6 +8,9 @@
 	"engines": { "vscode": "^1.100.0" },
 	"categories": ["Other"],
 	"main": "./out/extension",
+	"scripts": {
+		"test": "node --test \"out/test/**/*.test.js\""
+	},
 	"activationEvents": ["onFileSystem:jcode-sftp", "onView:jcodeSftp.connections", "onCommand:jcodeSftp.connect", "onCommand:jcodeSftp.reconnect", "onCommand:jcodeSftp.new", "onCommand:jcodeSftp.open", "onCommand:jcodeSftp.edit", "onCommand:jcodeSftp.delete", "onCommand:jcodeSftp.import", "onCommand:jcodeSftp.export"],
 	"capabilities": {
 		"virtualWorkspaces": true,
