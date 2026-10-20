@@ -64,3 +64,9 @@ export function normalizeWorkspaceColor(value: string): string | undefined {
 	}
 	return (value.length === 4 ? `#${value[1]}${value[1]}${value[2]}${value[2]}${value[3]}${value[3]}` : value).toLowerCase();
 }
+
+/** Read a typed or pasted color: surrounding space and a missing leading `#` are tolerated. */
+export function parseWorkspaceColorInput(value: string): string | undefined {
+	const trimmed = value.trim();
+	return normalizeWorkspaceColor(trimmed.startsWith('#') ? trimmed : `#${trimmed}`);
+}

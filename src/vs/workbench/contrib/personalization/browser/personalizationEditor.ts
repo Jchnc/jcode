@@ -4,9 +4,10 @@
  *--------------------------------------------------------------------------------------------*/
 
 import './media/personalization.css';
-import { $, addDisposableListener, append, Dimension, EventType, getActiveElement, isHTMLElement } from '../../../../base/browser/dom.js';
+import { $, addDisposableListener, append, Dimension, EventHelper, EventType, getActiveElement, isHTMLElement } from '../../../../base/browser/dom.js';
+import { InputBox } from '../../../../base/browser/ui/inputbox/inputBox.js';
 import { Codicon } from '../../../../base/common/codicons.js';
-import { DisposableStore } from '../../../../base/common/lifecycle.js';
+import { DisposableStore, MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
 import { localize } from '../../../../nls.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
@@ -16,13 +17,14 @@ import { INotificationService } from '../../../../platform/notification/common/n
 import { Registry } from '../../../../platform/registry/common/platform.js';
 import { IStorageService } from '../../../../platform/storage/common/storage.js';
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
+import { defaultInputBoxStyles } from '../../../../platform/theme/browser/defaultStyles.js';
 import { IWorkspaceContextService, WorkbenchState } from '../../../../platform/workspace/common/workspace.js';
-import { isDark } from '../../../../platform/theme/common/theme.js';
+import { IWorkspaceColorSwatch, renderWorkspaceColorSwatch } from '../../../browser/workspaceColorSwatch.js';
 import { EditorPane } from '../../../browser/parts/editor/editorPane.js';
-import { WORKSPACE_COLOR_PALETTE, getWorkspaceColorPreset, getWorkspaceColorRamp } from '../../../common/workspaceColorPalette.js';
+import { WORKSPACE_COLOR_PALETTE, getWorkspaceColorPreset } from '../../../common/workspaceColorPalette.js';
 import { IEditorGroup } from '../../../services/editor/common/editorGroupsService.js';
 import { IWorkbenchThemeService } from '../../../services/themes/common/workbenchThemeService.js';
-import { IWorkspaceAppearance, IWorkspaceAppearanceService } from '../../../services/themes/common/workspaceAppearance.js';
+import { IWorkspaceAppearance, IWorkspaceAppearancePreview, IWorkspaceAppearanceService, parseWorkspaceColorInput, WorkspaceAppearancePreviewEnd } from '../../../services/themes/common/workspaceAppearance.js';
 import { getPersonalizationValue, PersonalizationValue } from '../common/personalizationSettings.js';
 
 interface SettingChoice {
@@ -64,6 +66,7 @@ export class PersonalizationEditor extends EditorPane {
 	private readonly sections: { element: HTMLElement; nav: HTMLButtonElement }[] = [];
 	private readonly targetButtons: HTMLButtonElement[] = [];
 	private readonly focusTargets = new Map<string, HTMLElement>();
+	private discardColorDraft = () => { };
 	private nextControlId = 0;
 
 	constructor(
@@ -190,37 +193,157 @@ export class PersonalizationEditor extends EditorPane {
 
 	private createWorkspaceColors(parent: HTMLElement): void {
 		const palette = append(parent, $('.personalization-palette', { role: 'group', 'aria-label': localize('personalization.palette', "Workspace colors") }));
-		const buttons: { button: HTMLButtonElement; swatch: HTMLElement; value: string | undefined }[] = [];
+		const buttons: { button: HTMLButtonElement; swatch: IWorkspaceColorSwatch; value: string | undefined }[] = [];
 		for (const preset of [undefined, ...WORKSPACE_COLOR_PALETTE]) {
 			const button = this.button(palette, '', () => {
 				const preview = this.appearanceService.beginPreview();
 				try { preview.update(preset ? { color: preset.value, style: this.appearanceService.appearance?.style ?? 'subtle' } : undefined); preview.apply(); }
 				finally { preview.dispose(); }
 				this.status.textContent = localize('personalization.colorSaved', "Workspace color updated.");
-			});
-			const swatch = append(button, $('span.personalization-swatch'));
-			if (preset) { swatch.style.backgroundColor = preset.value; }
-			else { swatch.classList.add('no-color'); }
-			append(button, $('span', undefined, preset?.label ?? localize('personalization.none', "None")));
-			buttons.push({ button, swatch, value: preset?.value });
+			}, `color:${preset?.id ?? 'none'}`);
+			buttons.push({ button, swatch: renderWorkspaceColorSwatch(button, preset?.label ?? localize('personalization.none', "None")), value: preset?.value });
 		}
+		this.createWorkspaceColorInput(parent);
 		const actions = append(parent, $('.personalization-color-actions'));
 		const hint = append(actions, $('span.personalization-muted'));
 		this.updates.push(() => {
 			const available = this.workspaceService.getWorkbenchState() !== WorkbenchState.EMPTY;
 			const appearance = this.appearanceService.appearance;
 			const preset = getWorkspaceColorPreset(appearance?.color);
-			const dark = isDark(this.workbenchThemeService.getColorTheme().type);
+			const theme = this.workbenchThemeService.getColorTheme();
 			for (const item of buttons) {
 				item.button.disabled = !available;
 				item.button.setAttribute('aria-pressed', String(item.value === (preset?.value ?? appearance?.color)));
-				if (item.value) {
-					item.swatch.style.backgroundColor = getWorkspaceColorRamp(item.value, dark).marker;
-				}
+				item.swatch.update(item.value, appearance?.style ?? 'subtle', theme);
 			}
 			hint.textContent = available ? localize('personalization.localColor', "Only this workspace, on this device.") : localize('personalization.openWorkspace', "Open a folder or workspace to choose a color.");
 		});
 		this.createWorkspaceColorIntensity(parent);
+	}
+
+	/** A hex color previewed live on the workbench while typing, and saved only when applied. */
+	private createWorkspaceColorInput(parent: HTMLElement): void {
+		const row = append(parent, $('.personalization-color-custom'));
+		const text = append(row, $('.personalization-setting-text'));
+		const id = `personalization-custom-color-${this.group.id}`;
+		append(text, $('span.personalization-control-label', { id: `${id}-label` }, localize('personalization.customColor', "Custom color")));
+		append(text, $('p', { id: `${id}-description` }, localize('personalization.customColorDescription', "Type a hex color to preview it live, then apply it.")));
+		const error = append(text, $('span.personalization-setting-hint.personalization-color-error', { id: `${id}-error`, role: 'status' }));
+		const field = append(row, $('.personalization-field'));
+		const input = this.pageDisposables.add(new InputBox(field, undefined, {
+			inputBoxStyles: defaultInputBoxStyles,
+			ariaLabel: localize('personalization.customColorHex', "Custom workspace color in hexadecimal"),
+			placeholder: '#RRGGBB'
+		}));
+		input.inputElement.maxLength = 7;
+		input.inputElement.spellcheck = false;
+		input.inputElement.setAttribute('aria-describedby', `${id}-description ${id}-error`);
+		this.registerFocusTarget('color:hex', input.inputElement);
+		const apply = this.button(field, localize('personalization.applyColor', "Apply"), () => commit(), 'color:apply');
+		apply.className = 'personalization-primary';
+
+		// The draft is what was typed and not yet applied. Only one preview is shown at a time, and this one is kept until applied, discarded or superseded.
+		const previews = this.pageDisposables.add(new MutableDisposable<DisposableStore>());
+		let preview: IWorkspaceAppearancePreview | undefined;
+		let dirty = false;
+		let showError = false;
+		let settingValue = false;
+		const setValue = (value: string) => {
+			settingValue = true;
+			try { input.value = value; } finally { settingValue = false; }
+		};
+		const render = () => {
+			const value = input.value.trim();
+			const invalid = dirty && showError && value !== '' && !parseWorkspaceColorInput(value);
+			error.textContent = invalid ? localize('personalization.invalidColor', "Enter a hex color, such as #3b82f6.") : '';
+			if (invalid) { input.inputElement.setAttribute('aria-invalid', 'true'); }
+			else { input.inputElement.removeAttribute('aria-invalid'); }
+			// Applying stays focusable while there is nothing to apply, so activating it never drops focus.
+			if (dirty && value !== '') { apply.removeAttribute('aria-disabled'); }
+			else { apply.setAttribute('aria-disabled', 'true'); }
+		};
+		const endPreview = () => {
+			previews.clear();
+			preview = undefined;
+		};
+		const discard = () => {
+			endPreview();
+			dirty = false;
+			showError = false;
+			setValue(this.appearanceService.appearance?.color ?? '');
+			render();
+		};
+		const acquirePreview = (): IWorkspaceAppearancePreview => {
+			if (!preview?.isActive) {
+				const store = new DisposableStore();
+				const next = store.add(this.appearanceService.beginPreview());
+				store.add(next.onDidEnd(reason => {
+					if (reason === WorkspaceAppearancePreviewEnd.Superseded) {
+						discard();
+					}
+				}));
+				previews.value = store;
+				preview = next;
+			}
+			return preview;
+		};
+		const commit = () => {
+			const value = input.value.trim();
+			if (!dirty || value === '') { return; }
+			const color = parseWorkspaceColorInput(value);
+			if (!color) {
+				showError = true;
+				render();
+				input.focus();
+				return;
+			}
+			const current = acquirePreview();
+			current.update({ color, style: this.appearanceService.appearance?.style ?? 'subtle' });
+			current.apply();
+			endPreview();
+			dirty = false;
+			showError = false;
+			setValue(color);
+			render();
+			this.status.textContent = localize('personalization.colorSaved', "Workspace color updated.");
+		};
+		this.discardColorDraft = () => {
+			if (dirty) { discard(); }
+		};
+		this.pageDisposables.add(input.onDidChange(() => {
+			if (settingValue) { return; }
+			dirty = true;
+			showError = false;
+			const color = parseWorkspaceColorInput(input.value);
+			if (color) { acquirePreview().update({ color, style: this.appearanceService.appearance?.style ?? 'subtle' }); }
+			// A color still being typed keeps the last valid preview, like the title bar picker, so the workbench does not flash back to the saved color.
+			else if (input.value.trim() === '') { endPreview(); }
+			render();
+		}));
+		this.pageDisposables.add(addDisposableListener(input.inputElement, EventType.KEY_DOWN, (event: KeyboardEvent) => {
+			if (event.key === 'Enter') {
+				EventHelper.stop(event);
+				commit();
+			} else if (event.key === 'Escape' && dirty) {
+				EventHelper.stop(event);
+				discard();
+			}
+		}));
+		// Leaving the field without applying ends the preview, unless the window itself just lost focus.
+		this.pageDisposables.add(addDisposableListener(row, EventType.FOCUS_OUT, (event: FocusEvent) => {
+			const next = event.relatedTarget;
+			const windowBlurred = !next && !row.ownerDocument.hasFocus();
+			if (dirty && !windowBlurred && !(isHTMLElement(next) && row.contains(next))) {
+				discard();
+			}
+		}));
+		this.updates.push(() => {
+			const available = this.workspaceService.getWorkbenchState() !== WorkbenchState.EMPTY;
+			input.setEnabled(available);
+			apply.disabled = !available;
+			if (!dirty) { setValue(this.appearanceService.appearance?.color ?? ''); }
+			render();
+		});
 	}
 
 	private createWorkspaceColorIntensity(parent: HTMLElement): void {
@@ -396,6 +519,11 @@ export class PersonalizationEditor extends EditorPane {
 
 	private runCommand(id: string): void {
 		void this.commandService.executeCommand(id).catch(error => this.notificationService.error(error instanceof Error ? error : String(error)));
+	}
+
+	protected override setEditorVisible(visible: boolean): void {
+		super.setEditorVisible(visible);
+		if (!visible) { this.discardColorDraft(); }
 	}
 
 	layout(dimension: Dimension): void {

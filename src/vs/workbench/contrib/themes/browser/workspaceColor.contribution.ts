@@ -24,9 +24,10 @@ import { isDark, isHighContrast } from '../../../../platform/theme/common/theme.
 import { IThemeService } from '../../../../platform/theme/common/themeService.js';
 import { IWorkspaceContextService, WorkbenchState } from '../../../../platform/workspace/common/workspace.js';
 import { WorkbenchStateContext } from '../../../common/contextkeys.js';
-import { getWorkspaceColorPreset, getWorkspaceColorRamp, WORKSPACE_COLOR_PALETTE } from '../../../common/workspaceColorPalette.js';
+import { IWorkspaceColorSwatch, renderWorkspaceColorSwatch } from '../../../browser/workspaceColorSwatch.js';
+import { getWorkspaceColorPreset, getWorkspaceColorSwatch, WORKSPACE_COLOR_PALETTE } from '../../../common/workspaceColorPalette.js';
 import { IWorkbenchLayoutService } from '../../../services/layout/browser/layoutService.js';
-import { IWorkspaceAppearance, IWorkspaceAppearancePreview, IWorkspaceAppearanceService, normalizeWorkspaceColor, WORKSPACE_COLOR_COMMAND_ID, WorkspaceAppearancePreviewEnd } from '../../../services/themes/common/workspaceAppearance.js';
+import { IWorkspaceAppearance, IWorkspaceAppearancePreview, IWorkspaceAppearanceService, parseWorkspaceColorInput, WORKSPACE_COLOR_COMMAND_ID, WorkspaceAppearancePreviewEnd } from '../../../services/themes/common/workspaceAppearance.js';
 
 /** Native workspace identity picker with a disposable live preview. */
 class WorkspaceColorPicker {
@@ -117,24 +118,20 @@ class WorkspaceColorPicker {
 				swatchesContainer.setAttribute('role', 'radiogroup');
 				swatchesContainer.setAttribute('aria-label', localize('workspaceColor.palette', "Workspace color palette"));
 				const swatches: HTMLButtonElement[] = [];
-				const chips: HTMLElement[] = [];
+				const swatchViews: IWorkspaceColorSwatch[] = [];
 				const styles: HTMLButtonElement[] = [];
 				const stylePreviews: { title: HTMLElement; marker: HTMLElement; search: HTMLElement }[] = [];
 				const updatePreviews = () => {
 					const theme = this.themeService.getColorTheme();
-					for (const [index, button] of swatches.entries()) {
-						const ramp = getWorkspaceColorRamp(WORKSPACE_COLOR_PALETTE[index].value, isDark(theme.type));
-						const background = Color.fromHex(ramp[style]);
-						button.style.backgroundColor = isHighContrast(theme.type) ? '' : background.toString();
-						button.style.color = isHighContrast(theme.type) ? '' : ramp.foreground;
-						chips[index].style.backgroundColor = background.ensureConstrast(Color.fromHex(ramp.marker), 3).toString();
+					const highContrast = isHighContrast(theme.type);
+					for (const [index, view] of swatchViews.entries()) {
+						view.update(WORKSPACE_COLOR_PALETTE[index].value, style, theme);
 					}
-					const ramp = getWorkspaceColorRamp(selected?.color ?? WORKSPACE_COLOR_PALETTE[0].value, isDark(theme.type));
 					for (const [index, sample] of stylePreviews.entries()) {
-						const background = Color.fromHex(index === 0 ? ramp.subtle : ramp.prominent);
-						sample.title.style.backgroundColor = isHighContrast(theme.type) ? '' : background.toString();
-						sample.marker.style.backgroundColor = isHighContrast(theme.type) ? '' : background.ensureConstrast(Color.fromHex(ramp.marker), 3).toString();
-						sample.search.style.borderColor = isHighContrast(theme.type) ? '' : Color.fromHex(ramp.foreground).transparent(0.25).toString();
+						const swatch = getWorkspaceColorSwatch(selected?.color ?? WORKSPACE_COLOR_PALETTE[0].value, index === 0 ? 'subtle' : 'prominent', isDark(theme.type));
+						sample.title.style.backgroundColor = highContrast ? '' : swatch.surface;
+						sample.marker.style.backgroundColor = highContrast ? '' : swatch.marker;
+						sample.search.style.borderColor = highContrast ? '' : Color.fromHex(swatch.foreground).transparent(0.25).toString();
 					}
 				};
 				disposables.add(this.themeService.onDidColorThemeChange(updatePreviews));
@@ -244,16 +241,8 @@ class WorkspaceColorPicker {
 					}
 				};
 				for (const color of WORKSPACE_COLOR_PALETTE) {
-					const button = append(swatchesContainer, $('button.workspace-color-swatch')) as HTMLButtonElement;
-					button.type = 'button';
-					const chip = append(button, $('span.workspace-color-chip'));
-					chips.push(chip);
-					append(button, $('span.workspace-color-swatch-name', undefined, color.label));
-					const check = append(button, $('span.workspace-color-check'));
-					check.classList.add(...ThemeIcon.asClassNameArray(Codicon.check));
-					check.setAttribute('aria-hidden', 'true');
-					button.setAttribute('role', 'radio');
-					button.setAttribute('aria-label', color.label);
+					const button = append(swatchesContainer, $('button', { type: 'button', role: 'radio', 'aria-label': color.label })) as HTMLButtonElement;
+					swatchViews.push(renderWorkspaceColorSwatch(button, color.label));
 					swatches.push(button);
 					disposables.add(this.hoverService.setupManagedHover(getDefaultHoverDelegate('mouse'), button, color.label));
 					disposables.add(addDisposableListener(button, EventType.CLICK, () => selectColor(color.value)));
@@ -291,7 +280,7 @@ class WorkspaceColorPicker {
 					if (showingValue) {
 						return;
 					}
-					const color = normalizeWorkspaceColor(value.trim());
+					const color = parseWorkspaceColorInput(value);
 					apply.enabled = !!color;
 					input.inputElement.setAttribute('aria-invalid', String(!color));
 					error.textContent = color ? '' : localize('workspaceColor.invalid', "Enter a hex color, such as #3b82f6.");

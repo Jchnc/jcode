@@ -272,35 +272,13 @@
 	grid-template-columns: repeat(3, minmax(0, 1fr));
 	gap: var(--vscode-spacing-size60);
 	padding: var(--vscode-spacing-size160);
-}
-
-.jcode-personalization .personalization-palette button {
-	display: flex;
-	align-items: center;
-	gap: var(--vscode-spacing-size80);
-	min-width: 0;
-	padding: var(--vscode-spacing-size80) var(--vscode-spacing-size100);
-	text-align: left;
 	font-size: var(--vscode-fontSize-label1);
 }
 
-.jcode-personalization .personalization-palette button[aria-pressed='true'] {
-	background: var(--vscode-list-inactiveSelectionBackground);
-	color: var(--vscode-list-inactiveSelectionForeground);
-	box-shadow: inset 0 0 0 var(--vscode-strokeThickness) var(--vscode-focusBorder);
-}
-
-.jcode-personalization .personalization-swatch {
-	flex: 0 0 auto;
-	width: var(--vscode-spacing-size200);
-	height: var(--vscode-spacing-size200);
-	border-radius: var(--vscode-cornerRadius-circle);
-	border: var(--vscode-strokeThickness) solid var(--vscode-contrastBorder, transparent);
-}
-
-.jcode-personalization .personalization-swatch.no-color {
-	background: linear-gradient(135deg, transparent 47%, var(--vscode-descriptionForeground) 48%, var(--vscode-descriptionForeground) 52%, transparent 53%);
-	border-color: var(--vscode-descriptionForeground);
+/* Swatches without a tint blend into the page like the other controls. */
+.jcode-personalization .personalization-palette .workspace-color-swatch {
+	background: var(--vscode-editor-background);
+	color: var(--vscode-foreground);
 }
 
 .jcode-personalization .personalization-color-actions {
@@ -314,6 +292,7 @@
 	color: var(--vscode-textLink-foreground);
 }
 
+.jcode-personalization .personalization-color-custom,
 .jcode-personalization .personalization-color-intensity {
 	display: grid;
 	grid-template-columns: minmax(240px, 1fr) auto;
@@ -323,9 +302,40 @@
 	border-top: var(--vscode-strokeThickness) solid var(--vscode-widget-border, var(--vscode-contrastBorder, transparent));
 }
 
+.jcode-personalization .personalization-color-custom p,
 .jcode-personalization .personalization-color-intensity p {
 	margin-top: var(--vscode-spacing-size40);
 	font-size: var(--vscode-fontSize-label1);
+}
+
+.jcode-personalization .personalization-color-custom .personalization-field {
+	gap: var(--vscode-spacing-size80);
+}
+
+.jcode-personalization .personalization-color-custom .monaco-inputbox {
+	width: 112px;
+}
+
+.jcode-personalization .personalization-color-custom input {
+	font-family: var(--monaco-monospace-font);
+}
+
+.jcode-personalization .personalization-setting-hint.personalization-color-error:not(:empty) {
+	color: var(--vscode-errorForeground);
+}
+
+.jcode-personalization .personalization-primary {
+	color: var(--vscode-button-foreground);
+	background: var(--vscode-button-background);
+}
+
+.jcode-personalization .personalization-primary:hover:not(:disabled):not([aria-disabled='true']) {
+	background: var(--vscode-button-hoverBackground);
+}
+
+.jcode-personalization .personalization-primary[aria-disabled='true'] {
+	opacity: 0.5;
+	cursor: default;
 }
 
 .jcode-personalization .personalization-intensity-options {
@@ -575,6 +585,7 @@
 	grid-column: 1 / -1;
 }
 
+.jcode-personalization.narrow .personalization-color-custom,
 .jcode-personalization.narrow .personalization-color-intensity {
 	grid-template-columns: minmax(0, 1fr);
 }
@@ -662,11 +673,12 @@
 	padding: var(--vscode-spacing-size100);
 }
 
-.jcode-personalization.compact .personalization-palette button {
+.jcode-personalization.compact .personalization-palette .workspace-color-swatch {
 	padding: var(--vscode-spacing-size60) var(--vscode-spacing-size80);
 }
 
 .jcode-personalization.compact .personalization-color-actions,
+.jcode-personalization.compact .personalization-color-custom,
 .jcode-personalization.compact .personalization-color-intensity,
 .jcode-personalization.compact .personalization-setting {
 	padding-right: var(--vscode-spacing-size120);

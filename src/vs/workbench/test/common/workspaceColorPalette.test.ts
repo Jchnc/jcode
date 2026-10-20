@@ -6,7 +6,7 @@
 import assert from 'assert';
 import { Color } from '../../../base/common/color.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../base/test/common/utils.js';
-import { ensureContrastOnSurfaces, getWorkspaceColorPreset, getWorkspaceColorRamp, WORKSPACE_COLOR_PALETTE } from '../../common/workspaceColorPalette.js';
+import { ensureContrastOnSurfaces, getWorkspaceColorPreset, getWorkspaceColorRamp, getWorkspaceColorSwatch, WORKSPACE_COLOR_PALETTE } from '../../common/workspaceColorPalette.js';
 
 suite('Workspace color palette', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -62,6 +62,22 @@ suite('Workspace color palette', () => {
 			}
 		}
 		assert.deepStrictEqual(failures, []);
+	});
+
+	test('draws every swatch marker visibly on the surface it tints', () => {
+		const colors = [...WORKSPACE_COLOR_PALETTE.map(preset => preset.value), '#ffff00', '#00ff00', '#ff00ff', '#0000ff', '#f5f5f5', '#111111'];
+		const hidden: string[] = [];
+		for (const color of colors) {
+			for (const dark of [true, false]) {
+				for (const style of ['subtle', 'prominent'] as const) {
+					const swatch = getWorkspaceColorSwatch(color, style, dark);
+					if (Color.fromHex(swatch.surface).getContrastRatio(Color.fromHex(swatch.marker)) < 3 || Color.fromHex(swatch.surface).getContrastRatio(Color.fromHex(swatch.foreground)) < 4.5) {
+						hidden.push(`${color} ${dark ? 'dark' : 'light'} ${style}`);
+					}
+				}
+			}
+		}
+		assert.deepStrictEqual(hidden, []);
 	});
 
 	test('resolves contrast against all surfaces at once instead of one pass after another', () => {

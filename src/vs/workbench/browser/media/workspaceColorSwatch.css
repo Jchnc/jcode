@@ -1,0 +1,72 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* The workspace color swatch shared by the title bar picker and the Personalization page. */
+.monaco-workbench .workspace-color-swatch {
+	box-sizing: border-box;
+	display: flex;
+	align-items: center;
+	gap: var(--vscode-spacing-size80);
+	min-width: 0;
+	height: 40px;
+	padding: var(--vscode-spacing-size80) var(--vscode-spacing-size100);
+	border: var(--vscode-strokeThickness) solid var(--vscode-contrastBorder, transparent);
+	border-radius: var(--vscode-cornerRadius-small);
+	background: var(--vscode-menu-background);
+	color: var(--vscode-menu-foreground);
+	font: inherit;
+}
+
+.monaco-workbench button.workspace-color-swatch {
+	cursor: pointer;
+}
+
+.monaco-workbench button.workspace-color-swatch:hover,
+.monaco-workbench .workspace-color-swatch[aria-checked='true'],
+.monaco-workbench .workspace-color-swatch[aria-pressed='true'] {
+	border-color: currentColor;
+}
+
+.monaco-workbench .workspace-color-swatch:focus-visible {
+	outline: var(--vscode-strokeThickness) solid var(--vscode-focusBorder);
+	outline-offset: 2px;
+}
+
+.monaco-workbench .workspace-color-swatch:focus:not(:focus-visible) {
+	outline: none;
+}
+
+.monaco-workbench .workspace-color-chip {
+	box-sizing: border-box;
+	flex: 0 0 auto;
+	width: var(--vscode-spacing-size100);
+	height: var(--vscode-spacing-size100);
+	border-radius: var(--vscode-cornerRadius-circle);
+}
+
+/* No color: a ring crossed out, in the text color of the swatch. */
+.monaco-workbench .workspace-color-chip.no-color {
+	border: var(--vscode-strokeThickness) solid currentColor;
+	background: linear-gradient(135deg, transparent 42%, currentColor 45%, currentColor 55%, transparent 58%);
+}
+
+.monaco-workbench .workspace-color-swatch-name {
+	flex: 1;
+	min-width: 0;
+	text-align: left;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.monaco-workbench .workspace-color-check {
+	visibility: hidden;
+	color: inherit;
+}
+
+.monaco-workbench [aria-checked='true'] .workspace-color-check,
+.monaco-workbench [aria-pressed='true'] .workspace-color-check {
+	visibility: visible;
+}

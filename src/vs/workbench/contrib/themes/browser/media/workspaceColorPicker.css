@@ -38,60 +38,11 @@
 	margin-bottom: 16px;
 }
 
-.workspace-color-picker .workspace-color-swatch {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	min-width: 0;
-	height: 40px;
-	padding: 8px 10px;
-	border: var(--vscode-strokeThickness) solid var(--vscode-contrastBorder, transparent);
-	border-radius: var(--vscode-cornerRadius-small);
-	background: var(--vscode-menu-background);
-	color: var(--vscode-menu-foreground);
-	font: inherit;
-	cursor: pointer;
-}
-
-.workspace-color-picker .workspace-color-chip {
-	flex: 0 0 8px;
-	width: 8px;
-	height: 8px;
-	border-radius: var(--vscode-cornerRadius-circle);
-}
-
-.workspace-color-picker .workspace-color-swatch:hover {
-	border-color: currentColor;
-}
-
-.workspace-color-picker .workspace-color-swatch[aria-checked="true"] {
-	border-color: currentColor;
-}
-
-.workspace-color-picker .workspace-color-swatch-name {
-	flex: 1;
-	text-align: left;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.monaco-workbench .workspace-color-picker .workspace-color-check {
-	visibility: hidden;
-	color: inherit;
-}
-
-.workspace-color-picker [aria-checked="true"] .workspace-color-check {
-	visibility: visible;
-}
-
-.workspace-color-picker .workspace-color-swatch:focus-visible,
 .workspace-color-picker .workspace-color-style:focus-visible {
 	outline: var(--vscode-strokeThickness) solid var(--vscode-focusBorder);
 	outline-offset: 2px;
 }
 
-.workspace-color-picker .workspace-color-swatch:focus:not(:focus-visible),
 .workspace-color-picker .workspace-color-style:focus:not(:focus-visible) {
 	outline: none;
 }

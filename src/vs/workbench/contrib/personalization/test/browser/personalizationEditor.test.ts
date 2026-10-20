@@ -7,7 +7,7 @@ import assert from 'assert';
 import { Dimension } from '../../../../../base/browser/dom.js';
 import { mainWindow } from '../../../../../base/browser/window.js';
 import { DeferredPromise, timeout } from '../../../../../base/common/async.js';
-import { Emitter, Event } from '../../../../../base/common/event.js';
+import { Event } from '../../../../../base/common/event.js';
 import { toDisposable } from '../../../../../base/common/lifecycle.js';
 import { mock } from '../../../../../base/test/common/mock.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
@@ -21,7 +21,8 @@ import { NullTelemetryServiceShape } from '../../../../../platform/telemetry/com
 import { ColorScheme } from '../../../../../platform/theme/common/theme.js';
 import { IEditorGroup } from '../../../../services/editor/common/editorGroupsService.js';
 import { IWorkbenchColorTheme, IWorkbenchFileIconTheme, IWorkbenchThemeService } from '../../../../services/themes/common/workbenchThemeService.js';
-import { IWorkspaceAppearance, IWorkspaceAppearanceService } from '../../../../services/themes/common/workspaceAppearance.js';
+import { WorkspaceAppearanceService } from '../../../../services/themes/browser/workspaceAppearanceService.js';
+import { StorageScope } from '../../../../../platform/storage/common/storage.js';
 import { TestContextService, TestStorageService } from '../../../../test/common/workbenchTestServices.js';
 import { PersonalizationEditor } from '../../browser/personalizationEditor.js';
 
@@ -76,10 +77,9 @@ suite('Personalization editor', () => {
 			override getColorTheme() { return colorTheme; }
 			override getFileIconTheme() { return fileIconTheme; }
 		}();
-		const appearanceService = new class extends mock<IWorkspaceAppearanceService>() {
-			override readonly appearance: IWorkspaceAppearance | undefined = undefined;
-			override readonly onDidChangeAppearance = new Emitter<void>().event;
-		}();
+		const storage = store.add(new TestStorageService());
+		const contextService = new TestContextService();
+		const appearanceService = store.add(new WorkspaceAppearanceService(storage, contextService));
 		const editor = store.add(new PersonalizationEditor(
 			new class extends mock<IEditorGroup>() {
 				override readonly id = 1;
@@ -87,17 +87,34 @@ suite('Personalization editor', () => {
 			}(),
 			new NullTelemetryServiceShape(),
 			themeService,
-			store.add(new TestStorageService()),
+			storage,
 			configurationService,
 			new class extends mock<ICommandService>() { }(),
-			new TestContextService(),
+			contextService,
 			appearanceService,
 			new TestNotificationService()
 		));
 		editor.create(parent);
 		editor.layout(new Dimension(900, 700));
-		const control = (key: string) => parent.querySelector<HTMLButtonElement>(`[data-focus-key="${key}"]`)!;
-		return { configurationService, control, row: control(`${tabPosition}:left`).closest('.personalization-setting')! };
+		const control = <T extends HTMLElement = HTMLButtonElement>(key: string) => parent.querySelector<T>(`[data-focus-key="${key}"]`)!;
+		return {
+			configurationService,
+			appearanceService,
+			parent,
+			control,
+			row: control(`${tabPosition}:left`).closest('.personalization-setting')!,
+			savedColor: () => storage.getObject('workbench.workspaceAppearance', StorageScope.WORKSPACE),
+		};
+	}
+
+	function type(input: HTMLInputElement, value: string): void {
+		input.focus();
+		input.value = value;
+		input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+	}
+
+	function press(element: HTMLElement, key: string): void {
+		element.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
 	}
 
 	test('keeps keyboard focus on a setting while it saves', async () => {
@@ -146,6 +163,94 @@ suite('Personalization editor', () => {
 			updates: [{ key: tabPosition, value: undefined, target: ConfigurationTarget.USER }],
 			resetDisabled: true,
 			focusedKey: `${tabPosition}:top`,
+		});
+	});
+
+	test('previews a typed hex color live and saves it only when applied', () => {
+		const { appearanceService, control, savedColor } = createEditor();
+		const input = control<HTMLInputElement>('color:hex');
+		const apply = control('color:apply');
+		const idle = { applyAriaDisabled: apply.getAttribute('aria-disabled') };
+
+		type(input, '3B82F6');
+		const typed = { shown: appearanceService.appearance, saved: savedColor(), applyAriaDisabled: apply.getAttribute('aria-disabled') };
+		type(input, '#3B82');
+		const incomplete = { shown: appearanceService.appearance, applyAriaDisabled: apply.getAttribute('aria-disabled') };
+		type(input, '');
+		const cleared = { shown: appearanceService.appearance, applyAriaDisabled: apply.getAttribute('aria-disabled') };
+		type(input, '#16A34A');
+		press(input, 'Enter');
+
+		assert.deepStrictEqual({ idle, typed, incomplete, cleared, applied: { shown: appearanceService.appearance, saved: savedColor(), input: input.value, applyAriaDisabled: apply.getAttribute('aria-disabled') } }, {
+			idle: { applyAriaDisabled: 'true' },
+			typed: { shown: { color: '#3b82f6', style: 'subtle' }, saved: undefined, applyAriaDisabled: null },
+			incomplete: { shown: { color: '#3b82f6', style: 'subtle' }, applyAriaDisabled: null },
+			cleared: { shown: undefined, applyAriaDisabled: 'true' },
+			applied: { shown: { color: '#16a34a', style: 'subtle' }, saved: { color: '#16a34a', style: 'subtle' }, input: '#16a34a', applyAriaDisabled: 'true' },
+		});
+	});
+
+	test('explains an invalid hex color only when it is applied', () => {
+		const { appearanceService, control, parent } = createEditor();
+		const input = control<HTMLInputElement>('color:hex');
+
+		type(input, '#12');
+		const error = () => parent.querySelector('.personalization-color-error')?.textContent;
+		const whileTyping = { error: error(), invalid: input.getAttribute('aria-invalid') };
+		press(input, 'Enter');
+
+		assert.deepStrictEqual({ whileTyping, afterEnter: { error: error(), invalid: input.getAttribute('aria-invalid'), focused: mainWindow.document.activeElement === input }, shown: appearanceService.appearance }, {
+			whileTyping: { error: '', invalid: null },
+			afterEnter: { error: 'Enter a hex color, such as #3b82f6.', invalid: 'true', focused: true },
+			shown: undefined,
+		});
+	});
+
+	test('discards an unapplied hex color on Escape, when focus leaves and when another preview takes over', () => {
+		const { appearanceService, control } = createEditor();
+		const input = control<HTMLInputElement>('color:hex');
+		const outcome = () => ({ shown: appearanceService.appearance?.color, input: input.value });
+
+		type(input, '#3b82f6');
+		press(input, 'Escape');
+		const escaped = outcome();
+
+		// The window of a test run is not focused, so the focus change is simulated.
+		const leaveFor = (target: HTMLElement) => input.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: target }));
+		type(input, '#3b82f6');
+		leaveFor(control('color:apply'));
+		const toApply = outcome();
+		leaveFor(control('color:none'));
+		const blurred = outcome();
+
+		type(input, '#3b82f6');
+		const other = appearanceService.beginPreview();
+		other.update({ color: '#9333ea', style: 'subtle' });
+		const superseded = outcome();
+		other.dispose();
+
+		assert.deepStrictEqual({ escaped, toApply, blurred, superseded, afterwards: outcome() }, {
+			escaped: { shown: undefined, input: '' },
+			toApply: { shown: '#3b82f6', input: '#3b82f6' },
+			blurred: { shown: undefined, input: '' },
+			superseded: { shown: '#9333ea', input: '#9333ea' },
+			afterwards: { shown: undefined, input: '' },
+		});
+	});
+
+	test('draws every palette color as the surface it tints', () => {
+		const { parent } = createEditor();
+		const swatches = [...parent.querySelectorAll<HTMLElement>('.personalization-palette .workspace-color-swatch')];
+		const chip = (swatch: HTMLElement) => swatch.querySelector<HTMLElement>('.workspace-color-chip');
+
+		assert.deepStrictEqual({
+			count: swatches.length,
+			none: { background: swatches[0].style.backgroundColor, crossedOut: chip(swatches[0])?.classList.contains('no-color') },
+			azure: { name: swatches[2].textContent, background: swatches[2].style.backgroundColor, foreground: swatches[2].style.color, marker: chip(swatches[2])?.style.backgroundColor },
+		}, {
+			count: 9,
+			none: { background: '', crossedOut: true },
+			azure: { name: 'Azure', background: 'rgb(29, 41, 61)', foreground: 'rgb(244, 246, 248)', marker: 'rgb(96, 165, 250)' },
 		});
 	});
 });
