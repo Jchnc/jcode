@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
-import { EditorGroupModel, IGroupEditorChangeEvent, IGroupEditorCloseEvent, IGroupEditorMoveEvent, IGroupEditorOpenEvent, ISerializedEditorGroupModel, isGroupEditorChangeEvent, isGroupEditorCloseEvent, isGroupEditorMoveEvent, isGroupEditorOpenEvent } from '../../../../common/editor/editorGroupModel.js';
+import { EditorGroupModel, IGroupEditorChangeEvent, IGroupEditorCloseEvent, IGroupEditorMoveEvent, IGroupEditorOpenEvent, ISerializedEditorGroupModel, ISerializedEditorInput, ISerializedEditorTabGroup, isGroupEditorChangeEvent, isGroupEditorCloseEvent, isGroupEditorMoveEvent, isGroupEditorOpenEvent } from '../../../../common/editor/editorGroupModel.js';
 import { EditorExtensions, IEditorFactoryRegistry, IFileEditorInput, IEditorSerializer, CloseDirection, EditorsOrder, IResourceDiffEditorInput, IResourceSideBySideEditorInput, SideBySideEditor, EditorCloseContext, GroupModelChangeKind } from '../../../../common/editor.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { TestLifecycleService, workbenchInstantiationService } from '../../workbenchTestServices.js';
@@ -315,6 +315,24 @@ suite('EditorGroupModel', () => {
 
 			return disposables.add(new TestEditorInput(testInput.id));
 		}
+	}
+
+	/** Serialized editor that is restored as an editor with the given ID. */
+	function serializedEditor(id: string): ISerializedEditorInput {
+		return { id: 'testEditorInputForGroups', value: JSON.stringify({ id }) };
+	}
+
+	/** Serialized editor without a serializer: it cannot be restored. */
+	const unrestorableEditor: ISerializedEditorInput = { id: 'testEditorInputForGroups-unknown', value: '{}' };
+
+	function restoreEditorGroupModel(editors: ISerializedEditorInput[], extra?: { readonly mru?: number[]; readonly preview?: number; readonly sticky?: number; readonly tabGroups?: ISerializedEditorTabGroup[] }): EditorGroupModel {
+		inst().invokeFunction(accessor => Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).start(accessor));
+
+		return createEditorGroupModel({ id: 0, editors, mru: extra?.mru ?? editors.map((_, i) => i), preview: extra?.preview, sticky: extra?.sticky, tabGroups: extra?.tabGroups });
+	}
+
+	function describeEditorIds(editors: EditorInput[]): string[] {
+		return editors.map(editor => (editor as TestEditorInput).id);
 	}
 
 	const disposables = new DisposableStore();
@@ -948,6 +966,112 @@ suite('EditorGroupModel', () => {
 			group.removeFromTabGroup([d]);
 
 			assert.deepStrictEqual(describeLayout(group), ['a', 'd', 'b:G', 'c:G', 'e']);
+		});
+
+		test('restoring tab groups maps members to the editors that could be restored', () => {
+			const group = restoreEditorGroupModel(
+				[serializedEditor('a'), unrestorableEditor, serializedEditor('b'), serializedEditor('c'), serializedEditor('d')],
+				{
+					tabGroups: [
+						{ id: 'g1', name: 'First', color: 'red', members: [0, 2] },
+						{ id: 'g2', name: 'Second', color: 'blue', members: [3, 4] },
+						{ id: 'g3', name: 'Lost', color: 'green', members: [1] }
+					]
+				});
+
+			assert.deepStrictEqual({ layout: describeLayout(group), tabGroupIds: group.tabGroups.map(tabGroup => tabGroup.id) }, {
+				layout: ['a:First', 'b:First', 'c:Second', 'd:Second'],
+				tabGroupIds: ['g1', 'g2']
+			});
+		});
+
+		test('restoring tab groups ignores invalid and duplicate groups and members', () => {
+			const group = restoreEditorGroupModel(
+				[serializedEditor('a'), serializedEditor('b'), serializedEditor('c'), serializedEditor('d')],
+				{
+					tabGroups: [
+						{ id: 'dup', name: 'One', color: 'red', members: [0] },
+						{ id: 'dup', name: 'Two', color: 'red', members: [1] },
+						{ id: '', name: 'No ID', color: 'red', members: [2] },
+						{ id: 'overlap', name: 'Overlap', color: 'red', members: [0, 3, 3] },
+						{ id: 'empty', name: 'Empty', color: 'red', members: [] },
+						{ id: 'invalid', name: 'Invalid', color: 'red', members: [9, -1, 1.5] }
+					]
+				});
+
+			assert.deepStrictEqual({ layout: describeLayout(group), tabGroupIds: group.tabGroups.map(tabGroup => tabGroup.id) }, {
+				layout: ['a:One', 'b', 'c', 'd:Overlap'],
+				tabGroupIds: ['dup', 'overlap']
+			});
+		});
+
+		test('restoring tab groups replaces identifiers of older versions with unique ones', () => {
+			const group = restoreEditorGroupModel(
+				['a', 'b', 'c'].map(serializedEditor),
+				{
+					tabGroups: [
+						{ id: 'editor.tabGroup.0', name: 'Legacy', color: 'red', members: [0] },
+						{ id: 'editor.tabGroup.0', name: 'Legacy Duplicate', color: 'red', members: [1] },
+						{ id: 'g1', name: 'Current', color: 'blue', members: [2] }
+					]
+				});
+
+			assert.deepStrictEqual({ layout: describeLayout(group), legacyIdReplaced: isUUID(group.tabGroups[0].id), currentId: group.tabGroups[1].id }, {
+				layout: ['a:Legacy', 'b', 'c:Current'],
+				legacyIdReplaced: true,
+				currentId: 'g1'
+			});
+		});
+
+		test('restoring tab groups gathers members that are not contiguous', () => {
+			const group = restoreEditorGroupModel(
+				['a', 'b', 'c', 'd', 'e'].map(serializedEditor),
+				{
+					tabGroups: [
+						{ id: 'g1', name: 'G', color: 'red', members: [0, 3] },
+						{ id: 'g2', name: 'H', color: 'blue', members: [1, 4] }
+					]
+				});
+
+			assert.deepStrictEqual({ layout: describeLayout(group), violations: findTabGroupViolations(group) }, {
+				layout: ['a:G', 'd:G', 'b:H', 'e:H', 'c'],
+				violations: []
+			});
+		});
+
+		test('restoring tab groups does not group sticky editors', () => {
+			const group = restoreEditorGroupModel(
+				['a', 'b', 'c'].map(serializedEditor),
+				{
+					sticky: 0,
+					tabGroups: [{ id: 'g1', name: 'G', color: 'red', members: [0, 1] }]
+				});
+
+			assert.deepStrictEqual({ layout: describeLayout(group), stickyCount: group.stickyCount }, {
+				layout: ['a', 'b:G', 'c'],
+				stickyCount: 1
+			});
+		});
+
+		test('tab groups survive serialization when an editor cannot be serialized', () => {
+			inst().invokeFunction(accessor => Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).start(accessor));
+			const group = createEditorGroupModel();
+			const [a, b, c, d, e] = ['a', 'b', 'c', 'd', 'e'].map(id => input(id, id === 'b'));
+			for (const editor of [a, b, c, d, e]) {
+				group.openEditor(editor, { pinned: true, active: true });
+			}
+			const first = group.createTabGroup([b, c], 'First', 'red', { collapsed: true, icon: 'star' })!;
+			const second = group.createTabGroup([d, e], 'Second', 'blue', { locked: true, saved: true })!;
+
+			const restored = createEditorGroupModel(group.serialize());
+
+			assert.deepStrictEqual({ layout: describeLayout(restored), tabGroups: restored.tabGroups }, {
+				layout: ['a', 'c:First', 'd:Second', 'e:Second'],
+				tabGroups: [
+					{ id: first.id, name: 'First', color: 'red', collapsed: true, saved: false, locked: false, icon: 'star', metadata: undefined },
+					{ id: second.id, name: 'Second', color: 'blue', collapsed: false, saved: true, locked: true, icon: undefined, metadata: undefined }
+				]
+			});
 		});
 
 		test('tab groups stay contiguous and free of sticky editors across random operations', () => {
@@ -3225,6 +3349,38 @@ suite('EditorGroupModel', () => {
 		group.setTransient(input2, false);
 		assert.strictEqual(group.isTransient(input2), false);
 		assert.strictEqual(events.transient[2].editor, input2);
+	});
+
+	suite('restoring editors that cannot be deserialized', () => {
+
+		test('MRU order and preview editor refer to the editors that were restored', () => {
+			const group = restoreEditorGroupModel(
+				[unrestorableEditor, serializedEditor('a'), serializedEditor('b'), serializedEditor('c')],
+				{ mru: [2, 3, 1], preview: 3 });
+
+			assert.deepStrictEqual({
+				sequential: describeEditorIds(group.getEditors(EditorsOrder.SEQUENTIAL)),
+				mru: describeEditorIds(group.getEditors(EditorsOrder.MOST_RECENTLY_ACTIVE)),
+				active: describeEditorIds([group.activeEditor!]),
+				preview: describeEditorIds([group.previewEditor!])
+			}, {
+				sequential: ['a', 'b', 'c'],
+				mru: ['b', 'c', 'a'],
+				active: ['b'],
+				preview: ['c']
+			});
+		});
+
+		test('sticky editors that cannot be restored do not make other editors sticky', () => {
+			const group = restoreEditorGroupModel(
+				[serializedEditor('a'), unrestorableEditor, unrestorableEditor, serializedEditor('b')],
+				{ sticky: 2 });
+
+			assert.deepStrictEqual({ stickyCount: group.stickyCount, sticky: describeEditorIds(group.getEditors(EditorsOrder.SEQUENTIAL).filter(editor => group.isSticky(editor))) }, {
+				stickyCount: 1,
+				sticky: ['a']
+			});
+		});
 	});
 
 	ensureNoDisposablesAreLeakedInTestSuite();

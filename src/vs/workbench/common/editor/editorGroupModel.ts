@@ -230,6 +230,12 @@ function generateTabGroupId(): string {
 	return generateUuid();
 }
 
+/**
+ * Older versions generated tab group identifiers from a counter that restarted
+ * on every launch, so these identifiers are not unique across sessions.
+ */
+const LEGACY_TAB_GROUP_ID = /^editor\.tabGroup\.\d+$/;
+
 export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 
 	private static IDS = 0;
@@ -1288,16 +1294,8 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 			}
 		}
 
-		// Keep the editors of the new group together at the position of the first one
-		// when the selection spans tabs or groups, without splitting any other group.
-		const gatheredEditors = new Set(candidates);
-		const otherEditors = this.editors.filter(editor => !gatheredEditors.has(editor));
-		let gatherIndex = this.indexOf(candidates[0]);
-		const enclosingGroupId = this.getEnclosingTabGroupId(otherEditors, gatherIndex);
-		if (enclosingGroupId) {
-			gatherIndex = this.getTabGroupRange(otherEditors, enclosingGroupId).last + 1;
-		}
-		this.editors.splice(0, this.editors.length, ...otherEditors.toSpliced(gatherIndex, 0, ...candidates));
+		// Keep the editors of the new group together when the selection spans tabs or groups
+		this.gatherEditors(candidates);
 
 		const group: IEditorTabGroup = {
 			id,
@@ -1666,6 +1664,24 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 	}
 
 	/**
+	 * Moves editors next to each other at the position of the first one, in the
+	 * order they have already. A tab group is never split by this: if the position
+	 * is inside of a group, the editors are placed right after that group instead.
+	 */
+	private gatherEditors(editors: readonly EditorInput[]): void {
+		const gathered = new Set(editors);
+		const otherEditors = this.editors.filter(editor => !gathered.has(editor));
+
+		let gatherIndex = this.editors.indexOf(editors[0]); // everything before the first editor stays in front of it
+		const enclosingGroupId = this.getEnclosingTabGroupId(otherEditors, gatherIndex);
+		if (enclosingGroupId) {
+			gatherIndex = this.getTabGroupRange(otherEditors, enclosingGroupId).last + 1;
+		}
+
+		this.editors.splice(0, this.editors.length, ...otherEditors.toSpliced(gatherIndex, 0, ...editors));
+	}
+
+	/**
 	 * Returns the tab group that the position in front of the editor at the
 	 * given index is inside of: the editors on both sides belong to it.
 	 */
@@ -1863,7 +1879,11 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 			this.locked = true;
 		}
 
-		this.editors = coalesce(data.editors.map((e, index) => {
+		// Indices in the serialized data (MRU, preview and tab group members) refer to the
+		// serialized editors, but editors that cannot be restored are dropped. As such, keep
+		// track of the restored editor for each serialized index.
+		let droppedStickyEditors = 0;
+		const restoredEditors = data.editors.map((e, index) => {
 			let editor: EditorInput | undefined;
 
 			const editorSerializer = registry.getEditorSerializer(e.id);
@@ -1876,46 +1896,31 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 			}
 
 			if (!editor && typeof data.sticky === 'number' && index <= data.sticky) {
-				data.sticky--; // if editor cannot be deserialized but was sticky, we need to decrease sticky index
+				droppedStickyEditors++; // if editor cannot be deserialized but was sticky, we need to decrease sticky index
 			}
 
 			return editor;
-		}));
+		});
 
-		this.mru = coalesce(data.mru.map(i => this.editors[i]));
+		this.editors = coalesce(restoredEditors);
+
+		this.mru = coalesce(data.mru.map(i => restoredEditors[i]));
 
 		this.selection = this.mru.length > 0 ? [this.mru[0]] : [];
 
 		if (typeof data.preview === 'number') {
-			this.preview = this.editors[data.preview];
+			this.preview = restoredEditors[data.preview] ?? null;
 		}
 
 		if (typeof data.sticky === 'number') {
-			this.sticky = data.sticky;
+			this.sticky = Math.min(data.sticky - droppedStickyEditors, this.editors.length - 1);
 		}
 
 		// Restore tab groups and their membership
 		if (Array.isArray(data.tabGroups)) {
+			const serializedTabGroupIds = new Set<string>();
 			for (const serializedGroup of data.tabGroups) {
-				const group: IEditorTabGroup = {
-					id: serializedGroup.id,
-					name: serializedGroup.name,
-					color: serializedGroup.color || DEFAULT_EDITOR_TAB_GROUP_COLOR,
-					collapsed: !!serializedGroup.collapsed,
-					saved: !!serializedGroup.saved,
-					locked: !!serializedGroup.locked,
-					icon: serializedGroup.icon,
-					metadata: serializedGroup.metadata
-				};
-
-				this._tabGroups.push(group);
-
-				for (const memberIndex of serializedGroup.members) {
-					const editor = this.editors[memberIndex];
-					if (editor) {
-						this.editorTabGroups.set(editor, group.id);
-					}
-				}
+				this.restoreTabGroup(serializedGroup, restoredEditors, serializedTabGroupIds);
 			}
 
 			// State saved before grouped editors were pinned may contain a grouped preview editor
@@ -1925,6 +1930,50 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 		}
 
 		return this._id;
+	}
+
+	/**
+	 * Restores a serialized tab group without trusting the data: groups with an invalid or
+	 * duplicate ID and groups without any restored member are dropped, an editor only joins
+	 * the first group it is a member of and sticky editors never join a group. Groups with
+	 * an identifier of an older version get a new one, because it is not unique.
+	 */
+	private restoreTabGroup(serializedGroup: ISerializedEditorTabGroup | undefined, restoredEditors: readonly (EditorInput | undefined)[], serializedTabGroupIds: Set<string>): void {
+		if (typeof serializedGroup?.id !== 'string' || !serializedGroup.id || serializedTabGroupIds.has(serializedGroup.id)) {
+			return;
+		}
+
+		const members = new Set<EditorInput>();
+		for (const memberIndex of Array.isArray(serializedGroup.members) ? serializedGroup.members : []) {
+			const editor = Number.isInteger(memberIndex) ? restoredEditors[memberIndex] : undefined;
+			if (editor && !this.editorTabGroups.has(editor) && !this.isSticky(editor)) {
+				members.add(editor);
+			}
+		}
+
+		if (members.size === 0) {
+			return;
+		}
+		serializedTabGroupIds.add(serializedGroup.id);
+
+		// Members of a group must be contiguous (older versions could split a group)
+		this.gatherEditors(this.editors.filter(editor => members.has(editor)));
+
+		const group: IEditorTabGroup = {
+			id: LEGACY_TAB_GROUP_ID.test(serializedGroup.id) ? generateTabGroupId() : serializedGroup.id,
+			name: typeof serializedGroup.name === 'string' ? serializedGroup.name : localize('defaultTabGroupName', "Tab Group"),
+			color: serializedGroup.color || DEFAULT_EDITOR_TAB_GROUP_COLOR,
+			collapsed: !!serializedGroup.collapsed,
+			saved: !!serializedGroup.saved,
+			locked: !!serializedGroup.locked,
+			icon: serializedGroup.icon,
+			metadata: serializedGroup.metadata
+		};
+
+		this._tabGroups.push(group);
+		for (const editor of members) {
+			this.editorTabGroups.set(editor, group.id);
+		}
 	}
 
 	override dispose(): void {
