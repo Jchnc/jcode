@@ -350,6 +350,51 @@ suite('Personalization editor', () => {
 		});
 	});
 
+	test('offers the palette as radios with one tab stop, arrow keys that only move focus, and a click that applies', () => {
+		const { appearanceService, control, parent } = createEditor();
+		const palette = parent.querySelector<HTMLElement>('.personalization-palette')!;
+		// Whatever the stylesheet does, the palette is three columns wide here.
+		palette.style.display = 'grid';
+		palette.style.gridTemplateColumns = 'repeat(3, 1fr)';
+		const radios = [...palette.querySelectorAll<HTMLElement>('button')];
+		const state = () => ({
+			checked: radios.findIndex(radio => radio.getAttribute('aria-checked') === 'true'),
+			tabStop: radios.findIndex(radio => radio.tabIndex === 0),
+			focused: radios.findIndex(radio => radio === mainWindow.document.activeElement),
+			applied: appearanceService.appearance?.color,
+		});
+		const move = (from: number, key: string) => {
+			press(radios[from], key);
+			return state();
+		};
+
+		const initial = { group: palette.getAttribute('role'), roles: new Set(radios.map(radio => radio.getAttribute('role'))), pressed: radios.some(radio => radio.hasAttribute('aria-pressed')), ...state() };
+		radios[0].focus();
+		const right = move(0, 'ArrowRight');
+		const down = move(1, 'ArrowDown');
+		const end = move(4, 'End');
+		const wrapped = move(8, 'ArrowRight');
+		const other = move(0, 'a');
+		radios[2].focus();
+		radios[2].click();
+		const clicked = state();
+		const input = control<HTMLInputElement>('color:hex');
+		type(input, '#123456');
+		press(input, 'Enter');
+		const custom = state();
+
+		assert.deepStrictEqual({ initial, right, down, end, wrapped, other, clicked, custom }, {
+			initial: { group: 'radiogroup', roles: new Set(['radio']), pressed: false, checked: 0, tabStop: 0, focused: -1, applied: undefined },
+			right: { checked: 0, tabStop: 1, focused: 1, applied: undefined },
+			down: { checked: 0, tabStop: 4, focused: 4, applied: undefined },
+			end: { checked: 0, tabStop: 8, focused: 8, applied: undefined },
+			wrapped: { checked: 0, tabStop: 0, focused: 0, applied: undefined },
+			other: { checked: 0, tabStop: 0, focused: 0, applied: undefined },
+			clicked: { checked: 2, tabStop: 2, focused: 2, applied: '#3b82f6' },
+			custom: { checked: -1, tabStop: 0, focused: -1, applied: '#123456' },
+		});
+	});
+
 	test('draws every palette color as the surface it tints', () => {
 		const { parent } = createEditor();
 		const swatches = [...parent.querySelectorAll<HTMLElement>('.personalization-palette .workspace-color-swatch')];

@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import './media/personalization.css';
-import { $, addDisposableListener, append, Dimension, EventHelper, EventType, getActiveElement, isHTMLElement } from '../../../../base/browser/dom.js';
+import { $, addDisposableListener, append, Dimension, EventHelper, EventType, getActiveElement, getWindow, isHTMLElement } from '../../../../base/browser/dom.js';
 import { InputBox } from '../../../../base/browser/ui/inputbox/inputBox.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { DisposableStore, MutableDisposable } from '../../../../base/common/lifecycle.js';
@@ -18,8 +18,9 @@ import { Registry } from '../../../../platform/registry/common/platform.js';
 import { IStorageService } from '../../../../platform/storage/common/storage.js';
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
 import { defaultInputBoxStyles } from '../../../../platform/theme/browser/defaultStyles.js';
+import { editorBackground } from '../../../../platform/theme/common/colorRegistry.js';
 import { IWorkspaceContextService, WorkbenchState } from '../../../../platform/workspace/common/workspace.js';
-import { IWorkspaceColorSwatch, renderWorkspaceColorSwatch } from '../../../browser/workspaceColorSwatch.js';
+import { getRadioNavigationTarget, IWorkspaceColorSwatch, renderWorkspaceColorSwatch } from '../../../browser/workspaceColorSwatch.js';
 import { EditorPane } from '../../../browser/parts/editor/editorPane.js';
 import { WORKSPACE_COLOR_PALETTE, getWorkspaceColorPreset } from '../../../common/workspaceColorPalette.js';
 import { IEditorGroup } from '../../../services/editor/common/editorGroupsService.js';
@@ -222,7 +223,8 @@ export class PersonalizationEditor extends EditorPane {
 				finally { preview.dispose(); }
 			}
 		};
-		const palette = append(parent, $('.personalization-palette', { role: 'group', 'aria-label': localize('personalization.palette', "Workspace colors") }));
+		// Radios: one tab stop that follows the checked color, arrow keys move focus, and Enter or Space (a click) applies the focused one.
+		const palette = append(parent, $('.personalization-palette', { role: 'radiogroup', 'aria-label': localize('personalization.palette', "Workspace colors") }));
 		const buttons: { button: HTMLButtonElement; swatch: IWorkspaceColorSwatch; value: string | undefined }[] = [];
 		for (const preset of [undefined, ...WORKSPACE_COLOR_PALETTE]) {
 			const button = this.button(palette, '', () => {
@@ -231,8 +233,22 @@ export class PersonalizationEditor extends EditorPane {
 				finally { preview.dispose(); }
 				this.status.textContent = localize('personalization.colorSaved', "Workspace color updated.");
 			}, `color:${preset?.id ?? 'none'}`);
-			buttons.push({ button, swatch: renderWorkspaceColorSwatch(button, preset?.label ?? localize('personalization.none', "None")), value: preset?.value });
+			button.setAttribute('role', 'radio');
+			// The swatch sits on the page, so high contrast themes draw its marker against the editor background.
+			buttons.push({ button, swatch: renderWorkspaceColorSwatch(button, preset?.label ?? localize('personalization.none', "None"), editorBackground), value: preset?.value });
 		}
+		const setFocusable = (focusable: number) => buttons.forEach(({ button }, index) => { button.tabIndex = index === focusable ? 0 : -1; });
+		this.pageDisposables.add(addDisposableListener(palette, EventType.KEY_DOWN, (event: KeyboardEvent) => {
+			const index = buttons.findIndex(({ button }) => button === event.target);
+			// Laid out in as many columns as the page currently fits.
+			const columns = getWindow(palette).getComputedStyle(palette).gridTemplateColumns.split(' ').filter(track => track !== '' && track !== 'none').length;
+			const next = index < 0 ? undefined : getRadioNavigationTarget(event.key, index, buttons.length, columns);
+			if (next !== undefined) {
+				EventHelper.stop(event);
+				setFocusable(next);
+				buttons[next].button.focus();
+			}
+		}));
 		this.createWorkspaceColorInput(parent);
 		const actions = append(parent, $('.personalization-color-actions'));
 		const hint = append(actions, $('span.personalization-muted'));
@@ -241,9 +257,12 @@ export class PersonalizationEditor extends EditorPane {
 			const appearance = this.appearanceService.appearance;
 			const preset = getWorkspaceColorPreset(appearance?.color);
 			const theme = this.workbenchThemeService.getColorTheme();
-			for (const item of buttons) {
+			const checked = buttons.findIndex(item => item.value === (preset?.value ?? appearance?.color));
+			// A custom color checks no radio: the tab stop then rests on the first one.
+			setFocusable(Math.max(checked, 0));
+			for (const [index, item] of buttons.entries()) {
 				item.button.disabled = !available;
-				item.button.setAttribute('aria-pressed', String(item.value === (preset?.value ?? appearance?.color)));
+				item.button.setAttribute('aria-checked', String(index === checked));
 				item.swatch.update(item.value, appearance?.style ?? 'subtle', theme);
 			}
 			hint.textContent = available ? localize('personalization.localColor', "Only this workspace, on this device.") : localize('personalization.openWorkspace', "Open a folder or workspace to choose a color.");

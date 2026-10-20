@@ -117,11 +117,15 @@ export function ensureContrastOnSurfaces(foreground: Color, surfaces: readonly C
 	return surfaces[0].getContrastRatio(Color.black) > surfaces[0].getContrastRatio(Color.white) ? Color.black : Color.white;
 }
 
-/** The tinted title bar a workspace color produces, and the identity marker that stays visible on it. */
-export function getWorkspaceColorSwatch(color: string, style: 'subtle' | 'prominent', dark: boolean): { readonly surface: string; readonly foreground: string; readonly marker: string } {
+/**
+ * The tinted title bar a workspace color produces, and the identity marker that stays visible on it.
+ * A swatch that is drawn without the tint, as in high contrast themes, passes the opaque `markerSurface`
+ * it is drawn on instead, so that the marker stays visible there rather than on a surface that is not shown.
+ */
+export function getWorkspaceColorSwatch(color: string, style: 'subtle' | 'prominent', dark: boolean, markerSurface?: Color): { readonly surface: string; readonly foreground: string; readonly marker: string } {
 	const ramp = getWorkspaceColorRamp(color, dark);
 	const surface = Color.fromHex(ramp[style]);
-	return { surface: surface.toString(), foreground: ramp.foreground, marker: ensureContrastOnSurfaces(Color.fromHex(ramp.marker), [surface], 3).toString() };
+	return { surface: surface.toString(), foreground: ramp.foreground, marker: ensureContrastOnSurfaces(Color.fromHex(ramp.marker), [markerSurface ?? surface], 3).toString() };
 }
 
 export function getWorkspaceColorRamp(color: string, dark: boolean): IWorkspaceColorSurface & { readonly foreground: string; readonly inactiveForeground: string } {

@@ -24,7 +24,7 @@ import { isDark, isHighContrast } from '../../../../platform/theme/common/theme.
 import { IThemeService } from '../../../../platform/theme/common/themeService.js';
 import { IWorkspaceContextService, WorkbenchState } from '../../../../platform/workspace/common/workspace.js';
 import { WorkbenchStateContext } from '../../../common/contextkeys.js';
-import { IWorkspaceColorSwatch, renderWorkspaceColorSwatch } from '../../../browser/workspaceColorSwatch.js';
+import { getRadioNavigationTarget, IWorkspaceColorSwatch, renderWorkspaceColorSwatch } from '../../../browser/workspaceColorSwatch.js';
 import { getWorkspaceColorPreset, getWorkspaceColorSwatch, WORKSPACE_COLOR_PALETTE } from '../../../common/workspaceColorPalette.js';
 import { IWorkbenchLayoutService } from '../../../services/layout/browser/layoutService.js';
 import { IWorkspaceAppearance, IWorkspaceAppearancePreview, IWorkspaceAppearanceService, parseWorkspaceColorInput, WORKSPACE_COLOR_COMMAND_ID, WORKSPACE_COLOR_INPUT_MAX_LENGTH, WorkspaceAppearancePreviewEnd } from '../../../services/themes/common/workspaceAppearance.js';
@@ -224,15 +224,9 @@ class WorkspaceColorPicker {
 				const addRadioNavigation = (buttons: HTMLButtonElement[], columns = 1) => {
 					for (const [index, button] of buttons.entries()) {
 						disposables.add(addDisposableListener(button, EventType.KEY_DOWN, (event: KeyboardEvent) => {
-							let next: number;
-							switch (event.key) {
-								case 'ArrowRight': next = (index + 1) % buttons.length; break;
-								case 'ArrowLeft': next = (index + buttons.length - 1) % buttons.length; break;
-								case 'ArrowDown': next = (index + columns) % buttons.length; break;
-								case 'ArrowUp': next = (index + buttons.length - columns) % buttons.length; break;
-								case 'Home': next = 0; break;
-								case 'End': next = buttons.length - 1; break;
-								default: return;
+							const next = getRadioNavigationTarget(event.key, index, buttons.length, columns);
+							if (next === undefined) {
+								return;
 							}
 							EventHelper.stop(event);
 							buttons[next].click();

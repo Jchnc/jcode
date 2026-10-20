@@ -80,6 +80,22 @@ suite('Workspace color palette', () => {
 		assert.deepStrictEqual(hidden, []);
 	});
 
+	test('draws the marker for the surface a swatch is actually drawn on', () => {
+		const plain = Color.fromHex('#808080');
+		const tinted = getWorkspaceColorSwatch('#808080', 'subtle', true);
+		const untinted = getWorkspaceColorSwatch('#808080', 'subtle', true, plain);
+
+		assert.deepStrictEqual({
+			tintedMarkerOnPlain: plain.getContrastRatio(Color.fromHex(tinted.marker)) >= 3,
+			untintedMarkerOnPlain: plain.getContrastRatio(Color.fromHex(untinted.marker)) >= 3,
+			sameSurface: untinted.surface === tinted.surface,
+		}, {
+			tintedMarkerOnPlain: false,
+			untintedMarkerOnPlain: true,
+			sameSurface: true,
+		});
+	});
+
 	test('resolves contrast against all surfaces at once instead of one pass after another', () => {
 		const marker = Color.fromHex('#a3a666');
 		const surfaces = [Color.fromHex('#f43384'), Color.fromHex('#e89c03')];
