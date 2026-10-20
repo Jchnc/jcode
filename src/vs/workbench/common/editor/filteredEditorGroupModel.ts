@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { IUntypedEditorInput, IMatchEditorOptions, EditorsOrder, GroupIdentifier } from '../editor.js';
+import { IUntypedEditorInput, IMatchEditorOptions, EditorsOrder, GroupIdentifier, GroupModelChangeKind } from '../editor.js';
 import { EditorInput } from './editorInput.js';
 import { Emitter } from '../../../base/common/event.js';
 import { IGroupModelChangeEvent, IReadonlyEditorGroupModel } from './editorGroupModel.js';
@@ -21,14 +21,19 @@ abstract class FilteredEditorGroupModel extends Disposable implements IReadonlyE
 		super();
 
 		this._register(this.model.onDidModelChange(e => {
-			const candidateOrIndex = e.editorIndex ?? e.editor;
-			if (candidateOrIndex !== undefined) {
-				if (!this.filter(candidateOrIndex)) {
-					return; // exclude events for excluded items
-				}
+			if (this.includes(e)) {
+				this._onDidModelChange.fire(e);
 			}
-			this._onDidModelChange.fire(e);
 		}));
+	}
+
+	/**
+	 * Whether a change of the model is about anything this model includes.
+	 */
+	protected includes(e: IGroupModelChangeEvent): boolean {
+		const candidateOrIndex = e.editorIndex ?? e.editor;
+
+		return candidateOrIndex === undefined || this.filter(candidateOrIndex); // exclude events for excluded items
 	}
 
 	get id(): GroupIdentifier { return this.model.id; }
@@ -92,6 +97,12 @@ export class StickyEditorGroupModel extends FilteredEditorGroupModel {
 
 	override getTabGroupForEditor(editor: EditorInput): IEditorTabGroup | undefined {
 		return undefined;
+	}
+
+	protected override includes(e: IGroupModelChangeEvent): boolean {
+		const isTabGroupChange = e.kind === GroupModelChangeKind.TAB_GROUP_CREATED || e.kind === GroupModelChangeKind.TAB_GROUP_CHANGED || e.kind === GroupModelChangeKind.TAB_GROUP_REMOVED;
+
+		return !isTabGroupChange && super.includes(e); // sticky editors do not belong to tab groups, so changes to them are not about sticky editors
 	}
 
 	override getEditors(order: EditorsOrder, options?: { excludeSticky?: boolean }): EditorInput[] {

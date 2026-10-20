@@ -9,7 +9,7 @@ import { List } from '../../../../../base/browser/ui/list/listWidget.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { OpenEditor } from '../../common/files.js';
-import { findFirstDirtyEditor } from '../../browser/views/openEditorsView.js';
+import { findFirstDirtyEditor, hasEditorOrderChanged } from '../../browser/views/openEditorsView.js';
 import { TestEditorGroupView, TestEditorInput } from '../../../../test/browser/workbenchTestServices.js';
 
 suite('Files - OpenEditorsView', () => {
@@ -91,6 +91,29 @@ suite('Files - OpenEditorsView', () => {
 		const firstDirty = findFirstDirtyEditor([firstGroup, secondGroup]);
 
 		assert.deepStrictEqual({ editor: firstDirty?.editor, group: firstDirty?.group }, { editor: firstDirtyEditor, group: secondGroup });
+	});
+
+	test('detects when the editors of a group are listed in another order than the group has them', () => {
+		const group = new TestEditorGroupView(1);
+		const otherGroup = new TestEditorGroupView(2);
+		const [first, second, third] = ['first', 'second', 'third'].map(name => store.add(new TestEditorInput(URI.parse(`test:/${name}`), 'testEditor')));
+		const listed = [group, new OpenEditor(first, group), new OpenEditor(second, group), new OpenEditor(third, group), otherGroup, new OpenEditor(third, otherGroup), new OpenEditor(first, otherGroup)];
+
+		group.editors = [first, second, third];
+		otherGroup.editors = [third, first];
+		const sameOrder = hasEditorOrderChanged(listed, group);
+
+		group.editors = [first, third, second];
+		const reordered = hasEditorOrderChanged(listed, group);
+
+		group.editors = [first, second, third];
+		otherGroup.editors = [first, third];
+		const otherGroupReordered = hasEditorOrderChanged(listed, group);
+
+		group.editors = [first, second, third, third];
+		const editorAdded = hasEditorOrderChanged(listed, group);
+
+		assert.deepStrictEqual({ sameOrder, reordered, otherGroupReordered, editorAdded }, { sameOrder: false, reordered: true, otherGroupReordered: false, editorAdded: true });
 	});
 
 	test('finds no unsaved editor when all editors are saved', () => {

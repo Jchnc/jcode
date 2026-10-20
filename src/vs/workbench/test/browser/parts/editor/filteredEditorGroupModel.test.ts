@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
-import { EditorGroupModel, ISerializedEditorGroupModel } from '../../../../common/editor/editorGroupModel.js';
+import { EditorGroupModel, IGroupModelChangeEvent, ISerializedEditorGroupModel } from '../../../../common/editor/editorGroupModel.js';
 import { EditorExtensions, IEditorFactoryRegistry, IFileEditorInput, IEditorSerializer, EditorsOrder, GroupModelChangeKind } from '../../../../common/editor.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { TestLifecycleService } from '../../workbenchTestServices.js';
@@ -810,6 +810,34 @@ suite('FilteredEditorGroupModel', () => {
 		assert.strictEqual(unstickyFilteredEditorGroup.isTransient(input2), false);
 		assert.strictEqual(stickyFilteredEditorGroup.isTransient(input3), true);
 		assert.strictEqual(unstickyFilteredEditorGroup.isTransient(input4), true);
+	});
+
+	test('Sticky model does not forward tab group changes', () => {
+		const model = createEditorGroupModel();
+		const stickyFilteredEditorGroup = disposables.add(new StickyEditorGroupModel(model));
+		const unstickyFilteredEditorGroup = disposables.add(new UnstickyEditorGroupModel(model));
+
+		const input1 = input();
+		const input2 = input();
+		const input3 = input();
+		model.openEditor(input1, { pinned: true, sticky: true });
+		model.openEditor(input2, { pinned: true });
+		model.openEditor(input3, { pinned: true });
+
+		const describeEvent = (e: IGroupModelChangeEvent) => e.kind === GroupModelChangeKind.TAB_GROUP_CREATED ? 'created' : e.kind === GroupModelChangeKind.TAB_GROUP_CHANGED ? 'changed' : e.kind === GroupModelChangeKind.TAB_GROUP_REMOVED ? 'removed' : undefined;
+		const stickyEvents: (string | undefined)[] = [];
+		const unstickyEvents: (string | undefined)[] = [];
+		disposables.add(stickyFilteredEditorGroup.onDidModelChange(e => stickyEvents.push(describeEvent(e))));
+		disposables.add(unstickyFilteredEditorGroup.onDidModelChange(e => unstickyEvents.push(describeEvent(e))));
+
+		const tabGroup = model.createTabGroup([input2, input3], 'G')!;
+		model.renameTabGroup(tabGroup.id, 'H');
+		model.dissolveTabGroup(tabGroup.id);
+
+		assert.deepStrictEqual({ stickyEvents, unstickyEvents }, {
+			stickyEvents: [],
+			unstickyEvents: ['created', 'changed', 'removed']
+		});
 	});
 
 	ensureNoDisposablesAreLeakedInTestSuite();

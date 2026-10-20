@@ -78,6 +78,18 @@ export function findFirstDirtyEditor(groups: readonly IEditorGroup[]): OpenEdito
 	return undefined;
 }
 
+/**
+ * Whether the list shows the editors of a group in another order than the group
+ * has them. Tab groups keep their editors together, which changes that order
+ * without any editor move event.
+ */
+export function hasEditorOrderChanged(elements: readonly (OpenEditor | IEditorGroup)[], group: IEditorGroup): boolean {
+	const listedEditors = elements.filter((element): element is OpenEditor => element instanceof OpenEditor && element.groupId === group.id).map(element => element.editor);
+	const editors = group.editors;
+
+	return listedEditors.length !== editors.length || listedEditors.some((editor, index) => editor !== editors[index]);
+}
+
 export class OpenEditorsView extends ViewPane {
 
 	private static readonly DEFAULT_VISIBLE_OPEN_EDITORS = 9;
@@ -181,6 +193,14 @@ export class OpenEditorsView extends ViewPane {
 					case GroupModelChangeKind.EDITOR_MOVE:
 					case GroupModelChangeKind.EDITOR_CLOSE:
 						updateWholeList();
+						break;
+					case GroupModelChangeKind.TAB_GROUP_CREATED:
+					case GroupModelChangeKind.TAB_GROUP_CHANGED:
+					case GroupModelChangeKind.TAB_GROUP_REMOVED:
+						// Tab groups do not show up in this view, but they can reorder editors without a move event
+						if (this.sortOrder === 'editorOrder' && hasEditorOrderChanged(this.elements, group)) {
+							updateWholeList();
+						}
 						break;
 				}
 			});

@@ -504,6 +504,37 @@ export class MainThreadEditorTabs implements MainThreadEditorTabsShape {
 	}
 
 	/**
+	 * Called when a tab group changes. Tab groups are not part of the tabs API, but
+	 * they keep their editors together, which reorders the tabs of a group without
+	 * a move event. Tabs that are out of order are moved so that tabs stay the same.
+	 * @param groupId The id of the group whose tab groups changed
+	 */
+	private _onDidTabGroupChange(groupId: number) {
+		const group = this._editorGroupsService.getGroup(groupId);
+		const tabs = this._groupLookup.get(groupId)?.tabs;
+		const editors = group?.editors;
+
+		// Something is wrong with the model state so we rebuild
+		if (!editors || !tabs || editors.length !== tabs.length) {
+			this._createTabsModel();
+			return;
+		}
+
+		for (const [editorIndex, editor] of editors.entries()) {
+			const tabInfo = this._tabInfoLookup.get(this._generateTabId(editor, groupId));
+			const oldEditorIndex = tabInfo?.editorInput === editor ? tabs.indexOf(tabInfo.tab) : -1;
+			if (oldEditorIndex < 0) {
+				this._createTabsModel();
+				return;
+			}
+
+			if (oldEditorIndex !== editorIndex) {
+				this._onDidTabMove(groupId, editorIndex, oldEditorIndex, editor);
+			}
+		}
+	}
+
+	/**
 	 * Builds the model from scratch based on the current state of the editor service.
 	 */
 	private _createTabsModel(): void {
@@ -556,6 +587,11 @@ export class MainThreadEditorTabs implements MainThreadEditorTabsShape {
 				} else {
 					return;
 				}
+			case GroupModelChangeKind.TAB_GROUP_CREATED:
+			case GroupModelChangeKind.TAB_GROUP_CHANGED:
+			case GroupModelChangeKind.TAB_GROUP_REMOVED:
+				this._onDidTabGroupChange(groupId);
+				break;
 			case GroupModelChangeKind.EDITOR_LABEL:
 				if (event.editor !== undefined && event.editorIndex !== undefined) {
 					this._onDidTabLabelChange(groupId, event.editor, event.editorIndex);

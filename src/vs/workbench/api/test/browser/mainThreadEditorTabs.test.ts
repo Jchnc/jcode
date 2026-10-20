@@ -23,7 +23,7 @@ import { IEditorsChangeEvent, IEditorService } from '../../../services/editor/co
 import { ITextFileEditorModelManager, ITextFileService } from '../../../services/textfile/common/textfiles.js';
 import { TestEditorInput } from '../../../test/browser/workbenchTestServices.js';
 import { MainThreadEditorTabs } from '../../browser/mainThreadEditorTabs.js';
-import { MainThreadEditorTabsShape, TabModelOperationKind } from '../../common/extHost.protocol.js';
+import { IEditorTabGroupDto, IExtHostEditorTabsShape, MainThreadEditorTabsShape, TabModelOperationKind, TabOperation } from '../../common/extHost.protocol.js';
 import { ExtHostEditorTabs } from '../../common/extHostEditorTabs.js';
 import { SingleProxyRPCProtocol } from '../common/testRPCProtocol.js';
 
@@ -344,5 +344,105 @@ suite('MainThreadEditorTabs', () => {
 			event: { kind: GroupModelChangeKind.EDITOR_CLOSE, editor: multiDiffInput, editorIndex: 0 }
 		});
 		assert.strictEqual(multiDiffEditorInputListeners.size, 0);
+	});
+
+	suite('tab group changes', () => {
+
+		class NamedEditorInput extends TestEditorInput {
+			constructor(resource: URI, private readonly _name: string) {
+				super(resource, 'testEditor');
+			}
+			override getName(): string { return this._name; }
+		}
+
+		/** Creates the main thread side of the tabs API for one editor group whose editors the test controls. */
+		async function createTabsApi(names: string[]) {
+			const inputs = new Map(names.map(name => [name, disposables.add(new NamedEditorInput(URI.parse(`test:${name}`), name))]));
+			let editors: EditorInput[] = [...inputs.values()];
+
+			const group = new class extends mock<IEditorGroup>() {
+				override readonly id = 1;
+				override get editors() { return editors; }
+				override isSticky() { return false; }
+				override isPinned() { return true; }
+				override isActive(editor: EditorInput) { return editor === editors[0]; }
+			}();
+			const editorGroupsService = new class extends mock<IEditorGroupsService>() {
+				override readonly onDidAddGroup = Event.None;
+				override readonly onDidRemoveGroup = Event.None;
+				override readonly whenReady = Promise.resolve();
+				override readonly activeModalEditorPart = undefined;
+				override get groups(): readonly IEditorGroup[] { return [group]; }
+				override getGroups(): readonly IEditorGroup[] { return [group]; }
+				override get activeGroup(): IEditorGroup { return group; }
+				override getGroup(): IEditorGroup | undefined { return group; }
+			}();
+			const editorChanges = disposables.add(new Emitter<IEditorsChangeEvent>());
+			const editorService = new class extends mock<IEditorService>() {
+				override readonly onDidEditorsChange = editorChanges.event;
+			}();
+
+			const extHostEditorTabs = new ExtHostEditorTabs(SingleProxyRPCProtocol(new class extends mock<MainThreadEditorTabsShape>() { }));
+			const operations: string[] = [];
+			const proxy = new class extends mock<IExtHostEditorTabsShape>() {
+				override $acceptEditorTabModel(tabGroups: IEditorTabGroupDto[]): void {
+					operations.push('rebuild');
+					extHostEditorTabs.$acceptEditorTabModel(tabGroups);
+				}
+				override $acceptTabOperation(operation: TabOperation): void {
+					operations.push(operation.kind === TabModelOperationKind.TAB_MOVE ? `move ${operation.oldIndex} to ${operation.index}` : 'other');
+					extHostEditorTabs.$acceptTabOperation(operation);
+				}
+				override $acceptTabGroupUpdate(tabGroup: IEditorTabGroupDto): void {
+					extHostEditorTabs.$acceptTabGroupUpdate(tabGroup);
+				}
+			}();
+			disposables.add(new MainThreadEditorTabs(SingleProxyRPCProtocol(proxy), editorGroupsService, new TestConfigurationService(), new NullLogService(), editorService));
+			await Promise.resolve();
+			operations.length = 0; // the initial model
+
+			return {
+				tabs: () => extHostEditorTabs.tabGroups.activeTabGroup.tabs,
+				operations,
+				reorder: (order: string[]) => { editors = order.map(name => inputs.get(name)!); },
+				changeTabGroups: () => editorChanges.fire({ groupId: group.id, event: { kind: GroupModelChangeKind.TAB_GROUP_CHANGED } })
+			};
+		}
+
+		test('reordered tabs are moved and keep their identity', async () => {
+			const api = await createTabsApi(['a', 'b', 'c']);
+			const tabsBefore = api.tabs();
+
+			api.reorder(['c', 'a', 'b']);
+			api.changeTabGroups();
+			const afterFirstReorder = api.tabs().map(tab => tab.label);
+			api.reorder(['c', 'b', 'a']);
+			api.changeTabGroups();
+
+			assert.deepStrictEqual({ afterFirstReorder, labels: api.tabs().map(tab => tab.label), sameTabs: api.tabs().map(tab => tabsBefore.includes(tab)), operations: api.operations }, {
+				afterFirstReorder: ['c', 'a', 'b'],
+				labels: ['c', 'b', 'a'],
+				sameTabs: [true, true, true],
+				operations: ['move 2 to 0', 'move 2 to 1']
+			});
+		});
+
+		test('tab group changes that keep the order of the tabs change nothing', async () => {
+			const api = await createTabsApi(['a', 'b', 'c']);
+			const tabsBefore = api.tabs();
+
+			api.changeTabGroups();
+
+			assert.deepStrictEqual({ sameTabs: api.tabs().every((tab, index) => tab === tabsBefore[index]), operations: api.operations }, { sameTabs: true, operations: [] });
+		});
+
+		test('a tab group change rebuilds the tabs when they do not match the editors of the group', async () => {
+			const api = await createTabsApi(['a', 'b', 'c']);
+
+			api.reorder(['a', 'b']);
+			api.changeTabGroups();
+
+			assert.deepStrictEqual({ labels: api.tabs().map(tab => tab.label), operations: api.operations }, { labels: ['a', 'b'], operations: ['rebuild'] });
+		});
 	});
 });
