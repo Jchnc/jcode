@@ -2368,6 +2368,10 @@ export class EditorGroupView extends Themable implements IEditorGroupView {
 		const verticalTabsGap = preferredVerticalTabsWidth > 0 ? this.verticalTabsGap : 0;
 		const verticalTabsWidth = preferredVerticalTabsWidth > 0 ? computeVerticalTabsWidth(contentWidth, verticalTabsGap, preferredVerticalTabsWidth, this.editorPane.minimumWidth) : 0;
 		this.layoutVerticalTabsWidth = verticalTabsWidth;
+		const verticalTabsInset = verticalTabsWidth > 0 ? verticalTabsWidth + verticalTabsGap : 0;
+		const verticalTabsOnLeft = this.groupsView.partOptions.tabPosition === 'left';
+		this.element.style.setProperty('--vertical-tabs-inset-left', `${verticalTabsOnLeft ? verticalTabsInset : 0}px`);
+		this.element.style.setProperty('--vertical-tabs-inset-right', `${verticalTabsOnLeft ? 0 : verticalTabsInset}px`);
 		this.verticalTabsSash.state = verticalTabsWidth >= VERTICAL_TABS_MIN_WIDTH ? SashState.Enabled : SashState.Disabled; // a compact column is not resizable
 		const editorWidth = Math.max(0, contentWidth - verticalTabsWidth - verticalTabsGap);
 

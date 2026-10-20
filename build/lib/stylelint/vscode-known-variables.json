@@ -1093,6 +1093,8 @@
 		"--editor-tab-border-indicator-display",
 		"--editor-group-tab-height",
 		"--tab-group-color",
+		"--vertical-tabs-inset-left",
+		"--vertical-tabs-inset-right",
 		"--editor-group-tabs-height",
 		"--testMessageDecorationFontFamily",
 		"--testMessageDecorationFontSize",

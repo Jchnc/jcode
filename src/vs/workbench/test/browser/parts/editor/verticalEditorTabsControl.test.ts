@@ -13,6 +13,7 @@ import { mock } from '../../../../../base/test/common/mock.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { TreeViewsDnDService } from '../../../../../editor/common/services/treeViewsDnd.js';
 import { ITreeViewsDnDService } from '../../../../../editor/common/services/treeViewsDndService.js';
+import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { NullHoverService } from '../../../../../platform/hover/test/browser/nullHoverService.js';
 import { SyncDescriptor } from '../../../../../platform/instantiation/common/descriptors.js';
@@ -50,6 +51,8 @@ suite('VerticalEditorTabsControl', () => {
 	let partOptions: IEditorPartOptions;
 	let model: EditorGroupModel;
 	let openedEditors: EditorInput[];
+	let calls: string[];
+	let workbenchElement: HTMLElement;
 	let instantiationService: ReturnType<typeof workbenchInstantiationService>;
 	let groupView: IEditorGroupView;
 	let groupsView: IEditorGroupsView;
@@ -101,6 +104,7 @@ suite('VerticalEditorTabsControl', () => {
 		disposables = new DisposableStore();
 		partOptions = { ...DEFAULT_EDITOR_PART_OPTIONS };
 		openedEditors = [];
+		calls = [];
 
 		instantiationService = workbenchInstantiationService(undefined, disposables);
 		instantiationService.stub(ITreeViewsDnDService, new TreeViewsDnDService());
@@ -136,6 +140,10 @@ suite('VerticalEditorTabsControl', () => {
 			override get partOptions() { return partOptions; }
 			override get activeGroup(): IEditorGroupView { return groupView; }
 			override get groups(): IEditorGroupView[] { return [groupView]; }
+			override activateGroup() {
+				calls.push('activateGroup');
+				return groupView;
+			}
 			override readonly onDidChangeEditorPartOptions = Event.None;
 			override readonly onDidVisibilityChange = Event.None;
 		};
@@ -145,7 +153,7 @@ suite('VerticalEditorTabsControl', () => {
 			override getGroup() { return groupView; }
 		};
 
-		const workbench = $('.monaco-workbench');
+		const workbench = workbenchElement = $('.monaco-workbench');
 		const part = $('.part.editor');
 		const content = $('.content');
 		const group = $('.editor-group-container.active');
@@ -551,6 +559,125 @@ suite('VerticalEditorTabsControl', () => {
 		const header = container.querySelector<HTMLElement>('.vertical-tab-group-header')!;
 		assert.deepStrictEqual({ hover: hovers.get(header), nativeTitle: header.title }, { hover: 'Work (2 editors)', nativeTitle: '' });
 	});
+
+	function closeAllEditors(): void {
+		for (const editor of model.getEditors(EditorsOrder.SEQUENTIAL)) {
+			model.closeEditor(editor);
+		}
+		control.closeEditors([]);
+	}
+
+	test('an empty group shows a message and a New File action that runs the new untitled file command', () => {
+		instantiationService.stub(ICommandService, new class extends mock<ICommandService>() {
+			override async executeCommand(commandId: string) {
+				calls.push(`command:${commandId}`);
+				return undefined;
+			}
+		});
+		control.dispose();
+		reset(container);
+		control = createControl();
+		const root = container.querySelector('.vertical-tabs-and-actions-container')!;
+		const display = (selector: string) => mainWindow.getComputedStyle(root.querySelector(selector)!).display;
+		const describe = () => ({
+			empty: root.classList.contains('empty'),
+			emptyState: display('.vertical-tabs-empty-state'),
+			list: display('.monaco-scrollable-element')
+		});
+
+		const withEditors = describe();
+		closeAllEditors();
+		const withoutEditors = describe();
+		const action = root.querySelector<HTMLButtonElement>('.vertical-tabs-empty-action')!;
+		action.click();
+
+		assert.deepStrictEqual({
+			withEditors,
+			withoutEditors,
+			message: root.querySelector('.vertical-tabs-empty-message')?.textContent,
+			action: action.getAttribute('aria-label'),
+			calls
+		}, {
+			withEditors: { empty: false, emptyState: 'none', list: 'block' },
+			withoutEditors: { empty: true, emptyState: 'flex', list: 'none' },
+			message: 'No open editors',
+			action: 'New File',
+			calls: ['activateGroup', 'command:workbench.action.files.newUntitledFile']
+		});
+	});
+
+	async function waitUntil(condition: () => boolean, description: string): Promise<void> {
+		const deadline = Date.now() + 3000;
+		while (!condition()) {
+			if (Date.now() >= deadline) {
+				assert.fail(`Timed out waiting for ${description}`);
+			}
+			await waitForAnimationFrame();
+		}
+	}
+
+	test('collapsing and expanding a tab group eases its rows out and in', async () => {
+		const tabGroup = model.createTabGroup(model.getEditors(EditorsOrder.SEQUENTIAL).slice(2, 5), 'Work', 'blue')!;
+		const header = () => container.querySelector<HTMLElement>('.vertical-tab-group-header')!;
+		const count = (selector: string) => container.querySelectorAll(selector).length;
+		const log: Record<string, unknown> = {};
+
+		header().click();
+		log.collapse = {
+			collapsed: tabGroup.collapsed,
+			headerClass: header().classList.contains('collapsing'),
+			exitingRows: count('.vertical-tab.exiting'),
+			exitingAreHidden: Array.from(container.querySelectorAll('.vertical-tab.exiting')).every(row => row.getAttribute('aria-hidden') === 'true'),
+			realRows: count('.vertical-tab:not(.exiting)')
+		};
+		await waitUntil(() => count('.vertical-tab.exiting') === 0, 'the collapsed rows to be removed');
+
+		header().click();
+		log.expand = {
+			collapsed: tabGroup.collapsed,
+			headerClass: header().classList.contains('expanding'),
+			enteringRows: count('.vertical-tab.entering'),
+			realRows: count('.vertical-tab:not(.exiting)')
+		};
+		await waitUntil(() => count('.vertical-tab.entering') === 0, 'the expanded rows to settle');
+
+		assert.deepStrictEqual(log, {
+			collapse: { collapsed: true, headerClass: true, exitingRows: 3, exitingAreHidden: true, realRows: 9 },
+			expand: { collapsed: false, headerClass: true, enteringRows: 3, realRows: 12 }
+		});
+	});
+
+	test('reduce motion keeps tab groups, hovers and rows from animating', () => {
+		const tabGroup = model.createTabGroup(model.getEditors(EditorsOrder.SEQUENTIAL).slice(2, 5), 'Work', 'blue')!;
+		const row = () => rows()[0];
+		const animation = (className: string) => {
+			row().classList.add(className);
+			const name = mainWindow.getComputedStyle(row()).animationName;
+			row().classList.remove(className);
+			return name;
+		};
+		const motion = () => ({
+			rowTransition: mainWindow.getComputedStyle(row()).transitionDuration,
+			headerTransition: mainWindow.getComputedStyle(container.querySelector('.vertical-tab-group-header')!).transitionDuration,
+			entering: animation('entering'),
+			exiting: animation('exiting')
+		});
+
+		const withMotion = motion();
+		workbenchElement.classList.add('monaco-reduce-motion');
+		const reduced = motion();
+		container.querySelector<HTMLElement>('.vertical-tab-group-header')!.click();
+
+		assert.deepStrictEqual({
+			withMotion,
+			reduced,
+			collapsedWithoutAnimation: { collapsed: tabGroup.collapsed, exitingRows: container.querySelectorAll('.vertical-tab.exiting').length, headerClass: container.querySelector('.vertical-tab-group-header')!.classList.contains('collapsing') }
+		}, {
+			withMotion: { rowTransition: '0.12s, 0.12s', headerTransition: '0.12s, 0.12s', entering: 'vertical-tab-enter', exiting: 'vertical-tab-exit' },
+			reduced: { rowTransition: '0s', headerTransition: '0s', entering: 'none', exiting: 'none' },
+			collapsedWithoutAnimation: { collapsed: true, exitingRows: 0, headerClass: false }
+		});
+	});
 });
 
 suite('EditorGroupView vertical tabs layout', () => {
@@ -606,6 +733,41 @@ suite('EditorGroupView vertical tabs layout', () => {
 				{ width: 300, tabs: '48px', editor: '252px' },
 				{ width: 100, tabs: '48px', editor: '52px' }
 			]
+		});
+	});
+
+	test('an empty group keeps its watermark and toolbars clear of a tab column on the right', async () => {
+		instantiationService = workbenchInstantiationService(undefined, disposables);
+		instantiationService.invokeFunction(accessor => Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).start(accessor));
+		const part = await createEditorPart(instantiationService, disposables);
+		const group = part.activeGroup as IEditorGroupView;
+		disposables.add(part.enforcePartOptions({ showTabs: 'multiple', tabPosition: 'right', verticalTabsWidth: 240 }));
+
+		// Mount the part below the ancestry the stylesheets expect
+		let partElement = group.element;
+		while (partElement.parentElement) {
+			partElement = partElement.parentElement;
+		}
+		partElement.classList.add('part', 'editor');
+		const workbench = $('.monaco-workbench');
+		workbench.appendChild(partElement);
+		mainWindow.document.body.appendChild(workbench);
+		disposables.add({ dispose: () => workbench.remove() });
+		group.layout(800, 400, 0, 0);
+
+		const style = (selector: string) => mainWindow.getComputedStyle(group.element.querySelector(selector)!);
+		assert.deepStrictEqual({
+			empty: group.element.classList.contains('empty'),
+			column: style('.editor-group-body').width,
+			watermark: style('.editor-group-watermark-wrapper').paddingRight,
+			watermarkToolbar: style('.editor-group-watermark-toolbar-container').right,
+			groupToolbar: style('.editor-group-container-toolbar').paddingRight
+		}, {
+			empty: true,
+			column: '240px',
+			watermark: '240px',
+			watermarkToolbar: '240px',
+			groupToolbar: '240px'
 		});
 	});
 });

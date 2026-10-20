@@ -12,6 +12,7 @@ import { applyDragImage } from '../../../../base/browser/ui/dnd/dnd.js';
 import { getDefaultHoverDelegate } from '../../../../base/browser/ui/hover/hoverDelegateFactory.js';
 import { ScrollableElement } from '../../../../base/browser/ui/scrollbar/scrollableElement.js';
 import { KeyCode } from '../../../../base/common/keyCodes.js';
+import { disposableTimeout } from '../../../../base/common/async.js';
 import { DisposableMap, DisposableStore } from '../../../../base/common/lifecycle.js';
 import { basenameOrAuthority } from '../../../../base/common/resources.js';
 import { ScrollbarVisibility } from '../../../../base/common/scrollable.js';
@@ -20,6 +21,7 @@ import { ThemeIcon } from '../../../../base/common/themables.js';
 import { isMacintosh } from '../../../../base/common/platform.js';
 import { BugIndicatingError } from '../../../../base/common/errors.js';
 import { assertReturnsDefined } from '../../../../base/common/types.js';
+import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
 import { IContextMenuService, IContextViewService } from '../../../../platform/contextview/browser/contextView.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
@@ -52,6 +54,19 @@ import { IEditorTitleControlDimensions } from './editorTitleControl.js';
 import { TabGroupContextMenu } from './tabGroupContextMenu.js';
 
 class DraggedVerticalEditorIdentifier extends DraggedEditorIdentifier { }
+
+/** The id of the "New Untitled Text File" command, which the files contribution registers. */
+const NEW_UNTITLED_FILE_COMMAND_ID = 'workbench.action.files.newUntitledFile';
+
+/** The tab group change that is about to be rendered, so that it can animate rows instead of just swapping them. */
+interface IVerticalTabGroupTransition {
+	readonly groupId: string;
+	readonly kind: 'expand' | 'collapse';
+	/** The editors that had a row before the change. */
+	readonly existing: ReadonlySet<EditorInput>;
+	/** Copies of the rows that the change removes, to animate out. */
+	readonly exitingRows: ReadonlyMap<EditorInput, HTMLElement>;
+}
 
 /** The narrowest width at which the vertical tab column still shows labels. */
 export const VERTICAL_TABS_MIN_WIDTH = 140;
@@ -107,6 +122,8 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 	private lastSingleSelectSelectedEditor: EditorInput | undefined;
 	private tabStop: HTMLElement | undefined;
 	private compact = false;
+	private emptyStateAction: HTMLElement | undefined;
+	private tabGroupTransition: IVerticalTabGroupTransition | undefined;
 	private dropTarget: HTMLElement | undefined;
 	private lastMouseWheelEventTime = 0;
 
@@ -133,9 +150,13 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		@IHistoryService private readonly historyService: IHistoryService,
 		@IContextViewService private readonly contextViewService: IContextViewService,
 		@IHoverService private readonly hoverService: IHoverService,
+		@ICommandService private readonly commandService: ICommandService,
 	) {
 		super(parent, editorPartsView, groupsView, groupView, tabsModel, menuIds, breadcrumbsInHeader, useModernUITabs, contextMenuService, instantiationService, contextKeyService, keybindingService, notificationService, quickInputService, themeService, editorResolverService, hostService, menuService);
 
+		if (this.emptyStateAction) {
+			this._register(this.hoverService.setupManagedHover(getDefaultHoverDelegate('mouse'), this.emptyStateAction, localize('verticalTabs.newFile', "New File")));
+		}
 		this._register(this.tabsModel.onDidModelChange(event => {
 			if (event.kind === GroupModelChangeKind.TAB_GROUP_CREATED || event.kind === GroupModelChangeKind.TAB_GROUP_CHANGED || event.kind === GroupModelChangeKind.TAB_GROUP_REMOVED) {
 				this.redraw();
@@ -192,6 +213,28 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 			scrollYToX: false
 		}));
 		this.root.appendChild(this.tabsScrollbar.getDomNode());
+
+		// Shown instead of the list while the group has no editors
+		const emptyState = $('.vertical-tabs-empty-state');
+		const emptyMessage = $('.vertical-tabs-empty-message');
+		emptyMessage.textContent = localize('verticalTabs.empty', "No open editors");
+		const newFileButton = $<HTMLButtonElement>('button.vertical-tabs-empty-action');
+		newFileButton.type = 'button';
+		newFileButton.setAttribute('aria-label', localize('verticalTabs.newFile', "New File"));
+		const newFileIcon = $('span.vertical-tabs-empty-action-icon');
+		newFileIcon.classList.add(...ThemeIcon.asClassNameArray(Codicon.newFile));
+		newFileIcon.setAttribute('aria-hidden', 'true');
+		const newFileLabel = $('span.vertical-tabs-empty-action-label');
+		newFileLabel.textContent = localize('verticalTabs.newFile', "New File");
+		newFileLabel.setAttribute('aria-hidden', 'true');
+		newFileButton.append(newFileIcon, newFileLabel);
+		emptyState.append(emptyMessage, newFileButton);
+		this.root.appendChild(emptyState);
+		this.emptyStateAction = newFileButton;
+		this._register(addDisposableListener(newFileButton, EventType.CLICK, event => {
+			EventHelper.stop(event, true);
+			this.createNewFile();
+		}));
 		this._register(addDisposableListener(this.tabsContainer, EventType.DBLCLICK, event => {
 			if (event.target === this.tabsContainer) {
 				EventHelper.stop(event, true);
@@ -259,6 +302,12 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		return this.root;
 	}
 
+	/** Opens a new untitled file in this group using the regular command. */
+	private createNewFile(): void {
+		this.groupsView.activateGroup(this.groupView);
+		void this.commandService.executeCommand(NEW_UNTITLED_FILE_COMMAND_ID);
+	}
+
 	private openNewTab(): void {
 		void this.editorService.openEditor({
 			resource: undefined,
@@ -284,6 +333,7 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		this.tabGroupHeaders.clear();
 		clearNode(this.tabsContainer);
 
+		const transition = this.tabGroupTransition;
 		const editors = this.tabsModel.getEditors(EditorsOrder.SEQUENTIAL);
 		const renderedGroups = new Set<string>();
 		const tabGroupsEnabled = this.groupsView.partOptions.tabGroups.enabled;
@@ -297,15 +347,28 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 			}
 			const tabGroup = tabGroupsEnabled ? this.tabsModel.getTabGroupForEditor(editor) : undefined;
 			if (tabGroup && !renderedGroups.has(tabGroup.id)) {
-				this.tabsContainer.appendChild(this.createTabGroupHeader(tabGroup, editors));
+				const header = this.createTabGroupHeader(tabGroup, editors);
+				if (transition?.groupId === tabGroup.id && !this.isMotionReduced()) {
+					header.classList.add(transition.kind === 'expand' ? 'expanding' : 'collapsing');
+				}
+				this.tabsContainer.appendChild(header);
 				renderedGroups.add(tabGroup.id);
 			}
 
+			const inTransition = !!tabGroup && transition?.groupId === tabGroup.id;
 			if (tabGroup?.collapsed && !this.tabsModel.isActive(editor)) {
+				const exitingRow = inTransition ? transition.exitingRows.get(editor) : undefined;
+				if (exitingRow) {
+					this.tabsContainer.appendChild(this.animateExitingRow(exitingRow));
+				}
 				continue;
 			}
 
-			this.tabsContainer.appendChild(this.createTab(editor));
+			const row = this.createTab(editor);
+			if (inTransition && transition.kind === 'expand' && !transition.existing.has(editor)) {
+				this.animateEnteringRow(row);
+			}
+			this.tabsContainer.appendChild(row);
 		}
 
 		this.root?.classList.toggle('empty', editors.length === 0);
@@ -343,6 +406,53 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 		}
 
 		return undefined;
+	}
+
+	private isMotionReduced(): boolean {
+		return !!this.root?.closest('.monaco-workbench.monaco-reduce-motion');
+	}
+
+	/** Lets a row that an expanding tab group reveals grow into place. */
+	private animateEnteringRow(row: HTMLElement): void {
+		if (this.isMotionReduced()) {
+			return;
+		}
+
+		row.classList.add('entering');
+		this.rowDisposables.get(row)?.add(addDisposableListener(row, EventType.ANIMATION_END, event => {
+			if (event.target !== row) {
+				return; // an animation of a nested element
+			}
+			row.classList.remove('entering');
+			this.layoutScrollbar();
+		}));
+	}
+
+	/**
+	 * Keeps a copy of a row that a collapsing tab group hides in place while it shrinks away.
+	 * The copy is inert and removed as soon as its animation is over.
+	 */
+	private animateExitingRow(row: HTMLElement): HTMLElement {
+		row.classList.add('exiting');
+		row.removeAttribute('tabindex');
+		row.removeAttribute('draggable');
+		row.setAttribute('aria-hidden', 'true');
+		row.inert = true;
+
+		const disposables = this.registerRow(row);
+		const remove = () => {
+			this.rowDisposables.deleteAndDispose(row);
+			row.remove();
+			this.layoutScrollbar();
+		};
+		disposables.add(addDisposableListener(row, EventType.ANIMATION_END, event => {
+			if (event.target === row) {
+				remove();
+			}
+		}));
+		disposables.add(disposableTimeout(remove, 400)); // in case the animation never runs, e.g. in a hidden window
+
+		return row;
 	}
 
 	private registerRow(element: HTMLElement): DisposableStore {
@@ -610,7 +720,25 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 	}
 
 	private toggleTabGroup(group: IEditorTabGroup): void {
-		this.groupView.setTabGroupCollapsed(group.id, !group.collapsed);
+		this.setTabGroupCollapsed(group, !group.collapsed);
+	}
+
+	private setTabGroupCollapsed(group: IEditorTabGroup, collapsed: boolean): void {
+		const exitingRows = new Map<EditorInput, HTMLElement>();
+		if (collapsed && !this.isMotionReduced()) {
+			for (const [editor, tab] of this.tabs) {
+				if (this.tabsModel.getTabGroupForEditor(editor)?.id === group.id && !this.tabsModel.isActive(editor)) {
+					exitingRows.set(editor, tab.element.cloneNode(true) as HTMLElement); // taken now, the redraw below replaces the rows
+				}
+			}
+		}
+
+		this.tabGroupTransition = { groupId: group.id, kind: collapsed ? 'collapse' : 'expand', existing: new Set(this.tabs.keys()), exitingRows };
+		try {
+			this.groupView.setTabGroupCollapsed(group.id, collapsed);
+		} finally {
+			this.tabGroupTransition = undefined;
+		}
 	}
 
 	private createTab(editor: EditorInput): HTMLElement {
@@ -1205,7 +1333,7 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 
 	/** The rows and headers of the list in visual order, i.e. everything keyboard navigation moves across. */
 	private getItems(): HTMLElement[] {
-		return Array.from(this.tabsContainer?.children ?? []).filter((child): child is HTMLElement => child.matches('.vertical-tab, .vertical-tab-group-header'));
+		return Array.from(this.tabsContainer?.children ?? []).filter((child): child is HTMLElement => child.matches('.vertical-tab:not(.exiting), .vertical-tab-group-header'));
 	}
 
 	private getItem(target: EventTarget | null): HTMLElement | undefined {
@@ -1270,12 +1398,12 @@ export class VerticalEditorTabsControl extends EditorTabsControl {
 			target = items[items.length - 1];
 		} else if (tabGroup && keyboardEvent.equals(KeyCode.LeftArrow) && !tabGroup.collapsed) {
 			EventHelper.stop(event, true);
-			this.groupView.setTabGroupCollapsed(tabGroup.id, true);
+			this.setTabGroupCollapsed(tabGroup, true);
 			return;
 		} else if (tabGroup && keyboardEvent.equals(KeyCode.RightArrow)) {
 			EventHelper.stop(event, true);
 			if (tabGroup.collapsed) {
-				this.groupView.setTabGroupCollapsed(tabGroup.id, false);
+				this.setTabGroupCollapsed(tabGroup, false);
 			} else {
 				this.focusItem(items[index + 1]); // into the group, as in a tree
 			}

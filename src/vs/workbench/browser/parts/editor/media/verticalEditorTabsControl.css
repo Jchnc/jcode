@@ -500,3 +500,160 @@
 .monaco-workbench .part.editor > .content .editor-group-container > .editor-group-body .vertical-tabs-and-actions-container.compact .vertical-tabs-section-label:first-child {
 	display: none;
 }
+
+/* Empty state, shown instead of the list while the group has no editors. */
+
+.monaco-workbench .part.editor > .content .vertical-tabs-empty-state {
+	display: none;
+	flex: 1 1 auto;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 12px;
+	min-height: 0;
+	padding: 16px;
+	box-sizing: border-box;
+	text-align: center;
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-fontSize-label1);
+}
+
+.monaco-workbench .part.editor > .content .vertical-tabs-and-actions-container.empty > .monaco-scrollable-element {
+	display: none;
+}
+
+.monaco-workbench .part.editor > .content .vertical-tabs-and-actions-container.empty > .vertical-tabs-empty-state {
+	display: flex;
+}
+
+.monaco-workbench .part.editor > .content .vertical-tabs-empty-action {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 12px;
+	border: 1px solid var(--vscode-button-border, transparent);
+	border-radius: var(--vscode-cornerRadius-medium);
+	background: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+	font: inherit;
+	cursor: pointer;
+}
+
+.monaco-workbench .part.editor > .content .vertical-tabs-empty-action:hover {
+	background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.monaco-workbench .part.editor > .content .vertical-tabs-empty-action:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: 2px;
+}
+
+.monaco-workbench .part.editor > .content .vertical-tabs-and-actions-container.compact .vertical-tabs-empty-message,
+.monaco-workbench .part.editor > .content .vertical-tabs-and-actions-container.compact .vertical-tabs-empty-action-label {
+	display: none;
+}
+
+.monaco-workbench .part.editor > .content .vertical-tabs-and-actions-container.compact .vertical-tabs-empty-action {
+	padding: 4px;
+}
+
+.monaco-workbench:is(.hc-black, .hc-light) .part.editor > .content .vertical-tabs-empty-action {
+	border-color: var(--vscode-contrastBorder);
+}
+
+/*
+ * Motion. Rows ease between their hover, selection and active states, and a tab group
+ * eases its rows in and out when it expands or collapses. All of it is switched off by
+ * the reduce motion setting.
+ */
+
+.monaco-workbench .part.editor > .content .vertical-tab,
+.monaco-workbench .part.editor > .content .vertical-tab-group-header {
+	transition: background-color 120ms ease, color 120ms ease;
+}
+
+.monaco-workbench .part.editor > .content .vertical-tab-actions {
+	transition: opacity 120ms ease;
+}
+
+.monaco-workbench .part.editor > .content .vertical-tabs-empty-action {
+	transition: background-color 120ms ease;
+}
+
+@keyframes vertical-tab-enter {
+	from {
+		height: 0;
+		margin-top: 0;
+		margin-bottom: 0;
+		opacity: 0;
+	}
+}
+
+@keyframes vertical-tab-exit {
+	to {
+		height: 0;
+		margin-top: 0;
+		margin-bottom: 0;
+		opacity: 0;
+	}
+}
+
+@keyframes vertical-tab-group-expand {
+	from {
+		transform: rotate(-90deg);
+	}
+}
+
+@keyframes vertical-tab-group-collapse {
+	from {
+		transform: rotate(90deg);
+	}
+}
+
+@keyframes vertical-tabs-empty-state-in {
+	from {
+		opacity: 0;
+	}
+}
+
+.monaco-workbench .part.editor > .content .vertical-tab.entering {
+	overflow: hidden;
+	animation: vertical-tab-enter 140ms ease-out;
+}
+
+.monaco-workbench .part.editor > .content .vertical-tab.exiting {
+	overflow: hidden;
+	pointer-events: none;
+	animation: vertical-tab-exit 140ms ease-in both;
+}
+
+.monaco-workbench .part.editor > .content .vertical-tab-group-header.expanding > .vertical-tab-group-twistie {
+	animation: vertical-tab-group-expand 140ms ease-out;
+}
+
+.monaco-workbench .part.editor > .content .vertical-tab-group-header.collapsing > .vertical-tab-group-twistie {
+	animation: vertical-tab-group-collapse 140ms ease-out;
+}
+
+.monaco-workbench .part.editor > .content .vertical-tabs-and-actions-container.empty > .vertical-tabs-empty-state {
+	animation: vertical-tabs-empty-state-in 160ms ease-out;
+}
+
+.monaco-workbench.monaco-reduce-motion .part.editor > .content .vertical-tab,
+.monaco-workbench.monaco-reduce-motion .part.editor > .content .vertical-tab-group-header,
+.monaco-workbench.monaco-reduce-motion .part.editor > .content .vertical-tab-actions,
+.monaco-workbench.monaco-reduce-motion .part.editor > .content .vertical-tabs-empty-action {
+	transition: none;
+}
+
+.monaco-workbench.monaco-reduce-motion .part.editor > .content .vertical-tab.entering,
+.monaco-workbench.monaco-reduce-motion .part.editor > .content .vertical-tab.exiting,
+.monaco-workbench.monaco-reduce-motion .part.editor > .content .vertical-tab-group-header.expanding > .vertical-tab-group-twistie,
+.monaco-workbench.monaco-reduce-motion .part.editor > .content .vertical-tab-group-header.collapsing > .vertical-tab-group-twistie,
+.monaco-workbench.monaco-reduce-motion .part.editor > .content .vertical-tabs-and-actions-container.empty > .vertical-tabs-empty-state {
+	animation: none;
+}
+
+.monaco-workbench.monaco-reduce-motion .part.editor > .content .vertical-tab.exiting {
+	display: none;
+}

@@ -321,6 +321,44 @@
 	display: none;
 }
 
+/*
+ * An empty group with vertical tabs keeps its tab column, which then shows the empty state.
+ * The column is taken out of the flow (its width is capped to the tabs) and the watermark
+ * and the group toolbars are inset by the same amount, so that the column covers none of
+ * their actions. The insets are set by the layout.
+ */
+.monaco-workbench .part.editor > .content .editor-group-container.vertical-tabs.empty > .editor-group-body {
+	display: flex;
+	position: absolute;
+	top: 0;
+	max-width: calc(var(--vertical-tabs-inset-left, 0px) + var(--vertical-tabs-inset-right, 0px));
+	z-index: 1;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container.vertical-tabs.empty > .editor-group-body.vertical-tabs-left {
+	left: 0;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container.vertical-tabs.empty > .editor-group-body.vertical-tabs-right {
+	right: 0;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container.vertical-tabs.empty > .editor-group-body > .editor-container {
+	display: none;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container.vertical-tabs.empty > .editor-group-watermark-wrapper,
+.monaco-workbench .part.editor > .content .editor-group-container.vertical-tabs.empty > .editor-group-container-toolbar {
+	box-sizing: border-box;
+	padding-left: var(--vertical-tabs-inset-left, 0px);
+	padding-right: var(--vertical-tabs-inset-right, 0px);
+}
+
+/* Positioned absolutely, so the padding above does not move it. */
+.monaco-workbench .part.editor > .content .editor-group-container.vertical-tabs.empty > .editor-group-watermark-wrapper > .editor-group-watermark-toolbar-container {
+	right: var(--vertical-tabs-inset-right, 0px);
+}
+
 .monaco-workbench .part.editor > .content .editor-group-container > .editor-group-body > .editor-container {
 	position: relative;
 	min-width: 0;
