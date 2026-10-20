@@ -25,6 +25,7 @@ import { EditorInput } from '../../../../common/editor/editorInput.js';
 import { SideBySideEditorInput } from '../../../../common/editor/sideBySideEditorInput.js';
 import { isEqual } from '../../../../../base/common/resources.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
+import { isUUID } from '../../../../../base/common/uuid.js';
 
 suite('EditorGroupModel', () => {
 
@@ -471,6 +472,88 @@ suite('EditorGroupModel', () => {
 			members: [tabGroup.id, tabGroup.id, tabGroup.id, undefined],
 			active: newEditor,
 			preview: newEditor
+		});
+	});
+
+	suite('tab groups', () => {
+
+		function openEditors(group: EditorGroupModel, count: number): EditorInput[] {
+			const editors = Array.from({ length: count }, () => input());
+			for (const editor of editors) {
+				group.openEditor(editor, { pinned: true, active: true });
+			}
+
+			return editors;
+		}
+
+		test('tab group IDs are unique identifiers', () => {
+			const group = createEditorGroupModel();
+			const [a, b, c] = openEditors(group, 3);
+			const other = createEditorGroupModel();
+			const [d] = openEditors(other, 1);
+
+			const ids = [
+				group.createTabGroup([a, b], 'First')!.id,
+				group.createTabGroup([c], 'Second')!.id,
+				other.createTabGroup([d], 'Third')!.id
+			];
+
+			assert.deepStrictEqual({ areUuids: ids.map(isUUID), uniqueCount: new Set(ids).size }, { areUuids: [true, true, true], uniqueCount: 3 });
+		});
+
+		test('clone gives tab groups fresh IDs and keeps their state and membership', () => {
+			const group = createEditorGroupModel();
+			const [a, b, c, d] = openEditors(group, 4);
+			const first = group.createTabGroup([a, b], 'First', 'red')!;
+			const second = group.createTabGroup([c], 'Second', 'blue', { collapsed: true })!;
+
+			const clone = disposables.add(group.clone());
+			const describeGroups = (model: EditorGroupModel) => model.tabGroups.map(tabGroup => ({
+				name: tabGroup.name,
+				color: tabGroup.color,
+				collapsed: tabGroup.collapsed,
+				members: model.getEditors(EditorsOrder.SEQUENTIAL).filter(editor => model.getTabGroupForEditor(editor)?.id === tabGroup.id)
+			}));
+
+			assert.deepStrictEqual({
+				source: describeGroups(group),
+				clone: describeGroups(clone),
+				sourceIds: group.tabGroups.map(tabGroup => tabGroup.id),
+				sharedIds: clone.tabGroups.filter(tabGroup => group.tabGroups.some(candidate => candidate.id === tabGroup.id)).map(tabGroup => tabGroup.id),
+				cloneIdsAreUuids: clone.tabGroups.map(tabGroup => isUUID(tabGroup.id)),
+				ungrouped: clone.getTabGroupForEditor(d)
+			}, {
+				source: [{ name: 'First', color: 'red', collapsed: false, members: [a, b] }, { name: 'Second', color: 'blue', collapsed: true, members: [c] }],
+				clone: [{ name: 'First', color: 'red', collapsed: false, members: [a, b] }, { name: 'Second', color: 'blue', collapsed: true, members: [c] }],
+				sourceIds: [first.id, second.id],
+				sharedIds: [],
+				cloneIdsAreUuids: [true, true],
+				ungrouped: undefined
+			});
+		});
+
+		test('createTabGroup keeps a requested ID when moving a group and replaces it when it is taken', () => {
+			const source = createEditorGroupModel();
+			const target = createEditorGroupModel();
+			const [a, b] = openEditors(source, 2);
+			const [c] = openEditors(target, 1);
+			const [d] = openEditors(target, 1);
+
+			const moved = target.createTabGroup([c], 'Moved', 'red', { id: 'moved-group' })!;
+			const conflicting = target.createTabGroup([d], 'Conflicting', 'blue', { id: 'moved-group' })!;
+			const sourceGroup = source.createTabGroup([a, b], 'Source')!;
+
+			assert.deepStrictEqual({
+				movedId: moved.id,
+				conflictingIsFresh: conflicting.id !== moved.id && isUUID(conflicting.id),
+				targetGroups: target.tabGroups.map(tabGroup => tabGroup.name),
+				sourceKeepsOwnId: source.tabGroups.map(tabGroup => tabGroup.id)
+			}, {
+				movedId: 'moved-group',
+				conflictingIsFresh: true,
+				targetGroups: ['Moved', 'Conflicting'],
+				sourceKeepsOwnId: [sourceGroup.id]
+			});
 		});
 	});
 

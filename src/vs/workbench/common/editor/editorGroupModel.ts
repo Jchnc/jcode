@@ -14,6 +14,7 @@ import { Registry } from '../../../platform/registry/common/platform.js';
 import { coalesce } from '../../../base/common/arrays.js';
 import { DEFAULT_EDITOR_TAB_GROUP_COLOR, getRandomEditorTabGroupColor, IEditorTabGroup, IEditorTabGroupCreateOptions } from './editorTabGroup.js';
 import { localize } from '../../../nls.js';
+import { generateUuid } from '../../../base/common/uuid.js';
 
 const EditorOpenPositioning = {
 	LEFT: 'left',
@@ -220,9 +221,13 @@ interface IEditorGroupModel extends IReadonlyEditorGroupModel {
 	undoLastTabGroupAction(): boolean;
 }
 
-let TAB_GROUP_ID_COUNTER = 0;
+/**
+ * Tab group identifiers outlive the editor group model that created them (for
+ * example as keys of saved tab groups), so they must stay unique across
+ * sessions and not just within one process.
+ */
 function generateTabGroupId(): string {
-	return `editor.tabGroup.${TAB_GROUP_ID_COUNTER++}`;
+	return generateUuid();
 }
 
 export class EditorGroupModel extends Disposable implements IEditorGroupModel {
@@ -1581,10 +1586,20 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 
 		// Copy over tab groups (descriptors and membership). Editors are
 		// shared between the clone and the source, so the editor-keyed
-		// membership map can be copied as-is.
-		clone._tabGroups = this._tabGroups.map(group => ({ ...group }));
+		// membership map is copied over, but every tab group gets a fresh ID
+		// because an ID must never exist in two editor groups at once.
+		const clonedTabGroupIds = new Map<string, string>();
+		clone._tabGroups = this._tabGroups.map(group => {
+			const id = generateTabGroupId();
+			clonedTabGroupIds.set(group.id, id);
+
+			return { ...group, id };
+		});
 		for (const [editor, groupId] of this.editorTabGroups) {
-			clone.editorTabGroups.set(editor, groupId);
+			const clonedGroupId = clonedTabGroupIds.get(groupId);
+			if (clonedGroupId) {
+				clone.editorTabGroups.set(editor, clonedGroupId);
+			}
 		}
 
 		// Ensure to register listeners for each editor
