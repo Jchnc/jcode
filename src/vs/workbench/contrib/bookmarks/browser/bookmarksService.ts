@@ -22,7 +22,7 @@ import { IStorageService, StorageScope, StorageTarget } from '../../../../platfo
 import { registerColor } from '../../../../platform/theme/common/colorRegistry.js';
 import { themeColorFromId } from '../../../../platform/theme/common/themeService.js';
 import { IUriIdentityService } from '../../../../platform/uriIdentity/common/uriIdentity.js';
-import { CONTEXT_CODE_BOOKMARKS_PRESENT, CONTEXT_CODE_BOOKMARKS_STALE_PRESENT, findBookmarkLine, ICodeBookmark, ICodeBookmarkAnchor, ICodeBookmarksService, isBookmarkLineRemoved } from '../common/bookmarks.js';
+import { CONTEXT_CODE_BOOKMARKS_PRESENT, CONTEXT_CODE_BOOKMARKS_STALE_PRESENT, findBookmarkLine, ICodeBookmark, ICodeBookmarkAnchor, ICodeBookmarksService, isBookmarkLineRemoved, mergeDuplicateBookmarks } from '../common/bookmarks.js';
 
 const STORAGE_KEY = 'jcode.codeBookmarks';
 
@@ -92,6 +92,7 @@ export class CodeBookmarksService extends Disposable implements ICodeBookmarksSe
 	) {
 		super();
 		this._bookmarks = this.restore();
+		this.mergeDuplicates();
 		this.hasBookmarksContext = CONTEXT_CODE_BOOKMARKS_PRESENT.bindTo(contextKeyService);
 		this.hasStaleBookmarksContext = CONTEXT_CODE_BOOKMARKS_STALE_PRESENT.bindTo(contextKeyService);
 		this.updateContextKeys();
@@ -121,9 +122,11 @@ export class CodeBookmarksService extends Disposable implements ICodeBookmarksSe
 	toggle(resource: URI, lineNumber: number, column = 1): ICodeBookmark | undefined {
 		const model = this.modelService.getModel(resource);
 		const safeLineNumber = model ? Math.max(1, Math.min(model.getLineCount(), lineNumber)) : Math.max(1, lineNumber);
-		const existing = this.find(resource, safeLineNumber);
-		if (existing) {
-			this.remove(existing.id);
+		const existing = this.bookmarksOnLine(resource, safeLineNumber);
+		if (existing.length > 0) {
+			const ids = new Set(existing.map(bookmark => bookmark.id));
+			this._bookmarks = this._bookmarks.filter(bookmark => !ids.has(bookmark.id));
+			this.changed(resource);
 			return undefined;
 		}
 
@@ -196,31 +199,25 @@ export class CodeBookmarksService extends Disposable implements ICodeBookmarksSe
 		this.syncTrackedModel(resource);
 		const model = this.modelService.getModel(resource);
 		const safeLineNumber = model ? Math.max(1, Math.min(model.getLineCount(), lineNumber)) : Math.max(1, lineNumber);
-		const occupant = this.find(resource, safeLineNumber);
 		const previousResource = bookmark.resource;
 
-		if (occupant && occupant.id !== bookmark.id) {
-			// The line is already bookmarked: keep that bookmark and let it inherit the note.
-			this._bookmarks = this._bookmarks
-				.filter(candidate => candidate.id !== bookmark.id)
-				.map(candidate => candidate.id === occupant.id && !candidate.note && bookmark.note ? { ...candidate, note: bookmark.note } : candidate);
-			this.changed(resource);
-			return this._bookmarks.find(candidate => candidate.id === occupant.id);
-		}
-
 		const anchor = model ? captureModelAnchor(model, safeLineNumber) : { lineText: bookmark.lineText, beforeText: bookmark.beforeText, afterText: bookmark.afterText };
-		const relocated: ICodeBookmark = { ...bookmark, resource, lineNumber: safeLineNumber, column: Math.max(1, column), ...anchor, stale: false };
-		this._bookmarks = this._bookmarks.map(candidate => candidate.id === bookmark.id ? relocated : candidate);
+		this._bookmarks = this._bookmarks.map(candidate => candidate.id === bookmark.id ? { ...bookmark, resource, lineNumber: safeLineNumber, column: Math.max(1, column), ...anchor, stale: false } : candidate);
 		if (!this.uriIdentityService.extUri.isEqual(previousResource, resource)) {
 			this.refreshTrackedModel(previousResource);
 		}
+		// When the line already has a bookmark, the two are merged into one.
 		this.changed(resource);
-		return relocated;
+		return this.find(resource, safeLineNumber);
 	}
 
 	find(resource: URI, lineNumber: number): ICodeBookmark | undefined {
+		return this.bookmarksOnLine(resource, lineNumber)[0];
+	}
+
+	private bookmarksOnLine(resource: URI, lineNumber: number): ICodeBookmark[] {
 		this.syncTrackedModel(resource);
-		return this._bookmarks.find(bookmark => !bookmark.stale && bookmark.lineNumber === lineNumber && this.uriIdentityService.extUri.isEqual(bookmark.resource, resource));
+		return this._bookmarks.filter(bookmark => !bookmark.stale && bookmark.lineNumber === lineNumber && this.uriIdentityService.extUri.isEqual(bookmark.resource, resource));
 	}
 
 	private trackModel(model: ITextModel): void {
@@ -295,11 +292,26 @@ export class CodeBookmarksService extends Disposable implements ICodeBookmarksSe
 		this.markStale(removed);
 		this.captureTrackedBookmarks(entry);
 
-		if (event.isUndoing && this._bookmarks.some(bookmark => bookmark.stale && this.uriIdentityService.extUri.isEqual(bookmark.resource, entry.model.uri))) {
+		if (this.hasBookmarksSharingLine(entry)) {
+			// Joining lines moved bookmarks onto the same line, so merge them right away.
+			this.syncModel(entry, false);
+			this.changed(entry.model.uri);
+		} else if (event.isUndoing && this._bookmarks.some(bookmark => bookmark.stale && this.uriIdentityService.extUri.isEqual(bookmark.resource, entry.model.uri))) {
 			// Undoing a deletion brings the line back, so let confidently matching stale bookmarks return to it.
 			this.refreshModel(entry);
 		}
 		entry.syncScheduler.schedule();
+	}
+
+	private hasBookmarksSharingLine(entry: ITrackedModel): boolean {
+		const lineNumbers = new Set<number>();
+		for (const tracked of entry.bookmarks.values()) {
+			if (lineNumbers.has(tracked.lineNumber)) {
+				return true;
+			}
+			lineNumbers.add(tracked.lineNumber);
+		}
+		return false;
 	}
 
 	/**
@@ -363,7 +375,7 @@ export class CodeBookmarksService extends Disposable implements ICodeBookmarksSe
 		const model = entry.model;
 		let lines: string[] | undefined;
 		let didChange = false;
-		const resolved: ICodeBookmark[] = [];
+		const resolvedIds = new Set<string>();
 
 		this._bookmarks = this._bookmarks.map(bookmark => {
 			if (!this.uriIdentityService.extUri.isEqual(bookmark.resource, model.uri)) {
@@ -387,12 +399,18 @@ export class CodeBookmarksService extends Disposable implements ICodeBookmarksSe
 
 			const anchor = captureModelAnchor(model, lineNumber);
 			const updated = { ...bookmark, ...anchor, lineNumber, stale: false };
-			resolved.push(updated);
+			resolvedIds.add(updated.id);
 			if (bookmark.lineNumber !== lineNumber || bookmark.stale || bookmark.lineText !== anchor.lineText || bookmark.beforeText !== anchor.beforeText || bookmark.afterText !== anchor.afterText) {
 				didChange = true;
 			}
 			return updated;
 		});
+
+		// Bookmarks found again on the same line are merged.
+		if (this.mergeDuplicates().length > 0) {
+			didChange = true;
+		}
+		const resolved = this._bookmarks.filter(bookmark => resolvedIds.has(bookmark.id));
 
 		const decorations: IModelDeltaDecoration[] = resolved.map(bookmark => ({
 			range: new Range(bookmark.lineNumber, 1, bookmark.lineNumber, 1),
@@ -454,6 +472,7 @@ export class CodeBookmarksService extends Disposable implements ICodeBookmarksSe
 			return { ...bookmark, resource: relativePath ? this.uriIdentityService.extUri.joinPath(target, relativePath) : target };
 		});
 		if (didChange) {
+			this.mergeDuplicates();
 			this.fireChanged();
 		}
 	}
@@ -465,8 +484,30 @@ export class CodeBookmarksService extends Disposable implements ICodeBookmarksSe
 	}
 
 	private changed(resource: URI): void {
+		const merged = this.mergeDuplicates();
 		this.refreshTrackedModel(resource);
+		for (const mergedResource of merged) {
+			if (!this.uriIdentityService.extUri.isEqual(mergedResource, resource)) {
+				this.refreshTrackedModel(mergedResource);
+			}
+		}
 		this.fireChanged();
+	}
+
+	/**
+	 * Makes sure there is only one bookmark per line.
+	 *
+	 * @returns The resources that lost a bookmark, whose decorations have to be refreshed.
+	 */
+	private mergeDuplicates(): URI[] {
+		const merged = mergeDuplicateBookmarks(this._bookmarks, resource => this.uriIdentityService.extUri.getComparisonKey(resource));
+		if (merged === this._bookmarks) {
+			return [];
+		}
+		const keptIds = new Set(merged.map(bookmark => bookmark.id));
+		const resources = this._bookmarks.filter(bookmark => !keptIds.has(bookmark.id)).map(bookmark => bookmark.resource);
+		this._bookmarks = [...merged];
+		return resources;
 	}
 
 	private fireChanged(): void {

@@ -18,7 +18,7 @@ import { IFileService } from '../../../../../platform/files/common/files.js';
 import { FileService } from '../../../../../platform/files/common/fileService.js';
 import { NullLogService } from '../../../../../platform/log/common/log.js';
 import { MockContextKeyService } from '../../../../../platform/keybinding/test/common/mockKeybindingService.js';
-import { InMemoryStorageService, IStorageService } from '../../../../../platform/storage/common/storage.js';
+import { InMemoryStorageService, IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { IUriIdentityService } from '../../../../../platform/uriIdentity/common/uriIdentity.js';
 import { UriIdentityService } from '../../../../../platform/uriIdentity/common/uriIdentityService.js';
 import { CodeBookmarksService } from '../../browser/bookmarksService.js';
@@ -27,12 +27,16 @@ suite('CodeBookmarksService', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
 	const resource = URI.file('/workspace/file.txt');
 
-	function setup(text = 'alpha\nbeta\ngamma\ndelta\nepsilon') {
+	function setup(text = 'alpha\nbeta\ngamma\ndelta\nepsilon', stored?: object[]) {
 		const disposables = store.add(new DisposableStore());
 		const instantiationService = createModelServices(disposables);
 		const fileService = disposables.add(new FileService(new NullLogService()));
+		const storageService = disposables.add(new InMemoryStorageService());
+		if (stored) {
+			storageService.store('jcode.codeBookmarks', JSON.stringify(stored), StorageScope.WORKSPACE, StorageTarget.MACHINE);
+		}
 		instantiationService.stub(IFileService, fileService);
-		instantiationService.stub(IStorageService, disposables.add(new InMemoryStorageService()));
+		instantiationService.stub(IStorageService, storageService);
 		instantiationService.stub(IUriIdentityService, disposables.add(new UriIdentityService(fileService)));
 		instantiationService.stub(IContextKeyService, new MockContextKeyService());
 
@@ -193,6 +197,58 @@ suite('CodeBookmarksService', () => {
 		service.relocate(stale.id, resource, 1);
 
 		assert.deepStrictEqual(snapshot(service), [{ lineNumber: 1, lineText: 'alpha', stale: false, note: 'remember this' }]);
+	});
+
+	test('toggling removes the bookmark and its gutter icon', () => {
+		const { model, service } = setup();
+
+		service.toggle(resource, 2);
+		const added = { bookmarks: snapshot(service).length, gutterDecorations: countGutterDecorations(model) };
+		service.toggle(resource, 2);
+
+		assert.deepStrictEqual({ added, bookmarks: snapshot(service), gutterDecorations: countGutterDecorations(model) }, {
+			added: { bookmarks: 1, gutterDecorations: 1 },
+			bookmarks: [],
+			gutterDecorations: 0
+		});
+	});
+
+	test('merges bookmarks when an edit moves one onto the line of another and keeps the note', () => {
+		const { model, service } = setup();
+		service.toggle(resource, 2);
+		const second = service.toggle(resource, 3)!;
+		service.updateNote(second.id, 'keep me');
+
+		// Joining the lines moves both bookmarks onto line 2.
+		model.applyEdits([{ range: new Range(2, 5, 3, 1), text: '' }]);
+
+		assert.deepStrictEqual({ bookmarks: snapshot(service), gutterDecorations: countGutterDecorations(model) }, {
+			bookmarks: [{ lineNumber: 2, lineText: 'betagamma', stale: false, note: 'keep me' }],
+			gutterDecorations: 1
+		});
+
+		service.toggle(resource, 2);
+
+		assert.deepStrictEqual({ bookmarks: snapshot(service), gutterDecorations: countGutterDecorations(model) }, { bookmarks: [], gutterDecorations: 0 });
+	});
+
+	test('merges duplicates found in stored data', () => {
+		const stored = (id: string, lineNumber: number, extra: object = {}) => ({ id, resource: resource.toString(), lineNumber, column: 1, lineText: 'beta', beforeText: 'alpha', afterText: 'gamma', stale: false, createdAt: 1, ...extra });
+		const { service } = setup('alpha\nbeta\ngamma', [
+			stored('a', 2),
+			stored('b', 2, { note: 'second' }),
+			stored('c', 1, { lineText: 'alpha' }),
+			stored('d', 9, { stale: true, lineText: 'gone' }),
+			stored('e', 9, { stale: true, lineText: 'gone' }),
+			stored('f', 9, { stale: true, lineText: 'other' })
+		]);
+
+		assert.deepStrictEqual(service.bookmarks.map(({ id, lineNumber, stale, note }) => ({ id, lineNumber, stale, note })), [
+			{ id: 'b', lineNumber: 2, stale: false, note: 'second' },
+			{ id: 'c', lineNumber: 1, stale: false, note: undefined },
+			{ id: 'd', lineNumber: 9, stale: true, note: undefined },
+			{ id: 'f', lineNumber: 9, stale: true, note: undefined }
+		]);
 	});
 
 	test('removes only stale bookmarks', () => {

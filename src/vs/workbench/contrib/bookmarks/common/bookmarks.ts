@@ -113,6 +113,40 @@ export function getBookmarkLabel(bookmark: Pick<ICodeBookmark, 'note' | 'lineTex
 	return bookmark.note || bookmark.lineText.trim() || localize('bookmarkEmptyLine', "Empty line");
 }
 
+/**
+ * Merges bookmarks that share a resource and line so that every line has at most one bookmark.
+ * The bookmark with a note is kept, else the one created first, and it keeps the note of the
+ * other when it has none of its own.
+ *
+ * A stale bookmark no longer has a position, so it is only merged with an identical stale bookmark.
+ *
+ * @returns The given array when there is nothing to merge, else a new array in which a merged
+ * bookmark takes the place of the first of its duplicates.
+ */
+export function mergeDuplicateBookmarks(bookmarks: readonly ICodeBookmark[], getResourceKey: (resource: URI) => string): readonly ICodeBookmark[] {
+	const indexByKey = new Map<string, number>();
+	const result: ICodeBookmark[] = [];
+	for (const bookmark of bookmarks) {
+		const resourceKey = getResourceKey(bookmark.resource);
+		const key = JSON.stringify(bookmark.stale ? ['stale', resourceKey, bookmark.lineNumber, bookmark.lineText] : ['live', resourceKey, bookmark.lineNumber]);
+		const index = indexByKey.get(key);
+		if (index === undefined) {
+			indexByKey.set(key, result.length);
+			result.push(bookmark);
+		} else {
+			result[index] = mergeBookmarks(result[index], bookmark);
+		}
+	}
+	return result.length === bookmarks.length ? bookmarks : result;
+}
+
+function mergeBookmarks(first: ICodeBookmark, second: ICodeBookmark): ICodeBookmark {
+	const keepFirst = !!first.note === !!second.note ? first.createdAt <= second.createdAt : !!first.note;
+	const [kept, other] = keepFirst ? [first, second] : [second, first];
+	const note = kept.note && other.note && kept.note !== other.note ? `${kept.note} · ${other.note}` : kept.note || other.note;
+	return { ...kept, note };
+}
+
 export function captureBookmarkAnchor(lines: readonly string[], lineNumber: number): ICodeBookmarkAnchor {
 	const index = Math.max(0, Math.min(lines.length - 1, lineNumber - 1));
 	return {

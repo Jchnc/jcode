@@ -4,8 +4,9 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
+import { URI } from '../../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { captureBookmarkAnchor, findBookmarkLine, isBookmarkLineRemoved } from '../../common/bookmarks.js';
+import { captureBookmarkAnchor, findBookmarkLine, ICodeBookmark, isBookmarkLineRemoved, mergeDuplicateBookmarks } from '../../common/bookmarks.js';
 
 suite('Code bookmarks', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -87,6 +88,28 @@ suite('Code bookmarks', () => {
 			deleteFollowingLastLine: false,
 			deleteEmptyLine: true,
 			backspaceOnEmptyLine: true
+		});
+	});
+
+	test('merges bookmarks that share a line and keeps their notes', () => {
+		const resource = URI.file('/workspace/file.ts');
+		const bookmark = (id: string, lineNumber: number, extra: Partial<ICodeBookmark> = {}): ICodeBookmark => ({ id, resource, lineNumber, column: 1, lineText: 'text', beforeText: '', afterText: '', stale: false, createdAt: 10, ...extra });
+		const getKey = (uri: URI) => uri.toString();
+		const unique = [bookmark('a', 1), bookmark('b', 2)];
+		const summarize = (bookmarks: readonly ICodeBookmark[]) => bookmarks.map(({ id, note }) => ({ id, note }));
+
+		assert.deepStrictEqual({
+			unique: mergeDuplicateBookmarks(unique, getKey) === unique,
+			noteWins: summarize(mergeDuplicateBookmarks([bookmark('a', 1, { createdAt: 1 }), bookmark('b', 1, { note: 'keep' })], getKey)),
+			olderWins: summarize(mergeDuplicateBookmarks([bookmark('a', 1), bookmark('b', 1, { createdAt: 1 })], getKey)),
+			bothNotes: summarize(mergeDuplicateBookmarks([bookmark('a', 1, { note: 'first' }), bookmark('b', 1, { note: 'second', createdAt: 1 })], getKey)),
+			staleStaysApart: summarize(mergeDuplicateBookmarks([bookmark('a', 1), bookmark('b', 1, { stale: true }), bookmark('c', 1, { stale: true }), bookmark('d', 1, { stale: true, lineText: 'other' })], getKey))
+		}, {
+			unique: true,
+			noteWins: [{ id: 'b', note: 'keep' }],
+			olderWins: [{ id: 'b', note: undefined }],
+			bothNotes: [{ id: 'b', note: 'second · first' }],
+			staleStaysApart: [{ id: 'a', note: undefined }, { id: 'b', note: undefined }, { id: 'd', note: undefined }]
 		});
 	});
 });
