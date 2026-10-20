@@ -1,164 +1,217 @@
 # JCode
 
-JCode is a customized fork of [Code - OSS](https://github.com/microsoft/vscode), the open-source codebase behind Visual Studio Code. It adds tab groups with sessions and search, vertical tabs, workspace colors, a Personalization page, code bookmarks, and built-in SSH/SFTP file access while retaining the upstream editor and extension architecture.
+**A calmer, more organized code editor, built on [Code - OSS](https://github.com/microsoft/vscode).**
 
-**An independent editor, built on Code - OSS.** JCode is maintained in this repository and is not affiliated with or endorsed by Microsoft.
+JCode keeps everything you know from VS Code (extensions, settings, keyboard shortcuts) and adds the tools that keep a busy workspace tidy: tab groups, vertical tabs, workspace colors, bookmarks, and built-in SSH/SFTP.
+
+> JCode is independently maintained and is not affiliated with or endorsed by Microsoft.
+
+## Contents
+
+- [Highlights](#highlights)
+- [Install](#install)
+  - [Windows](#windows)
+  - [macOS](#macos)
+  - [Linux](#linux)
+  - [Updating and uninstalling](#updating-and-uninstalling)
+- [Getting started](#getting-started)
+- [Features](#features)
+  - [Tab groups](#tab-groups)
+  - [Auto-grouping rules](#auto-grouping-rules)
+  - [Tab sessions and search](#tab-sessions-and-search)
+  - [Vertical tabs](#vertical-tabs)
+  - [Workspace colors](#workspace-colors)
+  - [Bookmarks](#bookmarks)
+  - [Remote files over SSH/SFTP](#remote-files-over-sshsftp)
+  - [AI features](#ai-features)
+- [Keyboard shortcuts](#keyboard-shortcuts)
+- [Tips](#tips)
+- [Troubleshooting](#troubleshooting)
+- [Build from source](#build-from-source)
+- [Contributing and support](#contributing-and-support)
+- [License](#license)
+
+## Highlights
+
+| | |
+| --- | --- |
+| 🗂️ **Tab groups** | Named, colored, collapsible groups of tabs, saved groups, and rules that group files for you. |
+| 📚 **Sessions and search** | Save your whole tab layout and bring it back later; search every open tab at once. |
+| ↔️ **Vertical tabs** | Tabs beside the editor, with a filter and a compact icon rail for narrow layouts. |
+| 🎨 **Workspace colors** | Give each project its own color so you always know which window you are in. |
+| 🔖 **Bookmarks** | Mark important lines, add notes and colors, and jump back from anywhere. |
+| 🌐 **SSH/SFTP** | Open folders on remote servers right in the Explorer. |
+| 🧭 **Personalization** | One friendly page for the choices that matter most. |
+| 🔕 **AI off by default** | Chat and inline suggestions stay hidden until you turn them on. |
 
 ## Install
 
-Download JCode for Windows, macOS and Linux from [GitHub Releases](https://github.com/Jchnc/jcode/releases).
+Download the latest version from **[GitHub Releases](https://github.com/Jchnc/jcode/releases)**.
 
-On Debian and Ubuntu, install or update JCode with one command:
+| Platform | Download | Architectures |
+| --- | --- | --- |
+| Windows | `.exe` installer (per user, no admin needed) | x64 |
+| macOS | `.zip` containing `JCode.app` | Apple Silicon (arm64), Intel (x64) |
+| Linux | `.deb` package or `.tar.gz` archive | x64, arm64 |
+
+### Windows
+
+1. Download `JCodeSetup-x64-<version>.exe` and run it.
+2. Keep **Add to PATH** checked so you can open folders from a terminal.
+3. Open a **new** terminal and run `jcode .` in any folder.
+
+If Windows SmartScreen warns about an unrecognized app, choose **More info** > **Run anyway**.
+
+### macOS
+
+1. Download the `.zip` for your Mac: `arm64` for Apple Silicon (M1 and newer) or `x64` for Intel.
+2. Unzip it and drag **JCode.app** into **Applications**.
+3. Open JCode. If macOS says it cannot be opened, see [Troubleshooting](#troubleshooting).
+4. To use the `jcode` command, open the Command Palette (`Cmd+Shift+P`), run **Shell Command: Install 'jcode' command in PATH**, and open a new terminal.
+
+### Linux
+
+**Debian and Ubuntu:** install with one command. It picks the right package for your machine, verifies it, and adds the `jcode` command.
 
 ```sh
 curl -fsSL https://jchnc.github.io/jcode/install.sh | bash
 ```
 
-It installs the right package for your machine and adds the `jcode` command: run `jcode .` to open the current folder, or `jcode <file>` to open a file. Run the command again to update, or uninstall with `sudo apt remove jcode`.
+To install a specific version, add `-s -- --version 1.2.3` after `bash`.
 
-## Custom Features
+<details>
+<summary>Install the .deb manually</summary>
 
-| Feature | What it does |
-| --- | --- |
-| Tab groups | Organize tabs into named, colored groups with optional icons. Collapse, lock, move, save, and ungroup them, undo the last group change, add tabs to groups automatically with rules, and do it all from the keyboard. |
-| Tab sessions | Save the editor groups, tabs, and tab groups of a workspace under a name and restore them later. |
-| Tab search | Search open tabs and saved tab groups across editor groups, jump to one, or close tabs without leaving the list. |
-| Vertical tabs | Place tabs to the left or right of the editor, resize the strip, filter it, and fall back to a compact icon rail in narrow editor groups. The traditional top layout is also available. |
-| Workspace colors | Give each workspace a recognizable identity using preset or custom colors, with live previews and Subtle or Rich appearance. SFTP workspaces get a color automatically. |
-| Personalization | A native page for the theme, workspace color, tabs, and layout choices that matter most, at user or workspace scope, with per-section reset. |
-| Bookmarks | Bookmark lines with notes and color tags, find them from a quick pick or the Bookmarks view, and toggle them with Alt+click in the glyph margin. |
-| SSH/SFTP workspaces | Browse and edit remote files in the Explorer, with saved connections, password/key/agent authentication, jump hosts, `~/.ssh/config` import, a connection status bar item, automatic reconnection, and encrypted profile export. |
+Download `JCode-linux-<x64|arm64>-<version>.deb` and run:
 
-### Tab Groups
+```sh
+sudo apt install ./JCode-linux-x64-<version>.deb
+```
 
-Right-click an editor tab and choose **Add to New Tab Group**; select several tabs first to group them together. Use **Move to Tab Group…** to send tabs to an existing group, or drag tabs onto its header. Click a group header to collapse or expand it. The active editor stays visible when its group collapses. Right-click the header, or press Shift+F10 on it, to edit the group's name, color, or icon, add a new tab to the group, move the group into a new window, save or lock it, undo the last group change, close it, or ungroup its tabs.
+</details>
 
-Tab groups follow a few simple rules:
+<details>
+<summary>Other distributions (.tar.gz)</summary>
 
-- A tab is pinned when it joins a group, and tabs pinned to the front (sticky tabs) never belong to a group.
-- The tabs of a group always stay next to each other. **Move Editor Left** and **Move Editor Right** treat groups the way a browser does: a tab at the edge of its group first leaves it, a tab next to an unlocked group first joins it, and collapsed or locked groups are skipped as a whole.
-- A newly opened editor opens after the group, not inside it. Turn on **Open in Active Group** (`workbench.editor.tabGroups.openInActiveGroup`) and an editor that opens while the active tab is in an unlocked group joins that group right after the active tab. Preview editors never join a group.
-- A locked group keeps its tabs: it cannot be ungrouped or closed, and tabs cannot be added to or removed from it.
+Extract the archive into a folder of its own and link the command onto your PATH:
 
-Choose **Save Group** in the header menu, or run **View: Save Tab Group**, to keep a group after it closes. When a saved group is closed, either with **Close Group** or by closing its last tab, JCode remembers it for the workspace. Reopen it with **View: Show Saved Tab Groups…**, with **Saved Tab Groups…** in the editor's **More Actions...** menu, or from Search Open Tabs. The saved groups list can rename groups, and deleting one offers **Undo**.
+```sh
+mkdir -p ~/.local/share/jcode ~/.local/bin
+tar -xzf JCode-linux-x64-<version>.tar.gz -C ~/.local/share/jcode
+ln -sf ~/.local/share/jcode/bin/jcode ~/.local/bin/jcode
+```
 
-Add tabs to groups automatically with rules. Each rule has a `name`, a glob `pattern`, and an optional `color` (a preset color name such as `teal`, or a CSS color such as `#ff8800`) and `icon` (a codicon name). The first rule whose pattern matches the file of a newly opened tab adds it to the group with the rule's name in that editor group, creating the group when there is none. Relative patterns match the path of a file in its workspace folder, and absolute patterns match its full path. Rules leave preview editors, sticky tabs, tabs that are in a group already, locked groups, and tabs that you removed from a group alone.
+Make sure `~/.local/bin` is on your PATH.
+
+</details>
+
+### Updating and uninstalling
+
+| Platform | Update | Uninstall |
+| --- | --- | --- |
+| Windows | JCode downloads and installs updates for you. | **Settings** > **Apps** > **JCode** > **Uninstall** |
+| macOS | JCode tells you when an update is ready. Download it and replace `JCode.app`. | Move `JCode.app` to the Trash. |
+| Linux (Debian/Ubuntu) | Run the install command again. | `sudo apt remove jcode` |
+| Linux (.tar.gz) | Replace the extracted folder with the new version. | Delete the folder and the `~/.local/bin/jcode` link. |
+
+## Getting started
+
+- **Open a project from a terminal:** `jcode .` opens the current folder, and `jcode <file>` opens a file. Running it again reuses the open window.
+- **Make it yours:** run **Preferences: Personalize JCode** from the Command Palette (`Ctrl+Shift+P`, or `Cmd+Shift+P` on macOS), or use the gear menu. It covers the theme, workspace color, tab style and position, tab groups, auto-grouping rules, and layout.
+- **Coming from VS Code?** Your favorite extensions install from the Extensions view, which uses the [Open VSX](https://open-vsx.org) marketplace. JCode keeps its settings separate from VS Code, so the two can be installed side by side.
+
+## Features
+
+> Shortcuts below use `Ctrl`. On macOS, use `Cmd` instead.
+
+### Tab groups
+
+Keep related files together in named, colored groups, like tab groups in a browser.
+
+- **Create one:** right-click a tab and choose **Add to New Tab Group**. Select several tabs first to group them together.
+- **Add tabs:** use **Move to Tab Group…** or drag a tab onto the group's header.
+- **Collapse:** click the group header. The tab you are working in stays visible.
+- **Customize:** right-click the header to rename it, pick a color or icon, save, lock, close, or ungroup it.
+- **Save for later:** choose **Save Group** in the header menu. Closed saved groups come back with **View: Show Saved Tab Groups…**.
+
+Good to know:
+
+- Tabs in a group stay next to each other and are pinned automatically.
+- New files open next to the group, not inside it. To have them join the group you are working in, turn on **Open in Active Group** in Settings (`workbench.editor.tabGroups.openInActiveGroup`).
+- A **locked** group keeps its tabs exactly as they are.
+
+### Auto-grouping rules
+
+Let JCode sort files into groups as you open them. Open **Personalize JCode** > **Auto-grouping** and add a rule with a group name and the files it covers:
+
+- A folder: `src/components` (everything inside it, subfolders included)
+- A pattern: `**/*.test.ts` (all test files)
+
+Rules apply to the tabs you already have open and to every file you open afterwards. The first matching rule wins, and a tab you remove from a group stays out of it.
+
+<details>
+<summary>Prefer settings.json?</summary>
 
 ```json
 {
-	"workbench.editor.tabGroups.enabled": true,
-	"workbench.editor.tabGroups.openInActiveGroup": false,
 	"workbench.editor.tabGroups.autoGroupRules": [
-		{ "name": "Tests", "pattern": "**/*.test.ts", "color": "teal", "icon": "beaker" },
-		{ "name": "Docs", "pattern": "docs/**", "color": "orange" }
+		{ "name": "Components", "pattern": "src/components", "color": "yellow" },
+		{ "name": "Tests", "pattern": "**/*.test.ts", "color": "teal", "icon": "beaker" }
 	]
 }
 ```
 
-Shortcuts use `Ctrl` on Windows and Linux and `Cmd` on macOS:
+</details>
 
-| Command | Shortcut |
-| --- | --- |
-| New Tab Group from Selected Editors | `Ctrl+K G` |
-| Toggle Collapse Active Tab Group | `Ctrl+K Ctrl+G` |
-| Rename Active Tab Group | `Ctrl+K Ctrl+Shift+G` |
-| Focus Next Tab Group | `Ctrl+K ]` |
-| Focus Previous Tab Group | `Ctrl+K [` |
-| Close Tab Group | `Ctrl+K X` |
-| Search Open Tabs… | `Ctrl+K A` |
-| Filter Tabs (while the vertical tabs have focus) | `Ctrl+F` |
-| Toggle Bookmark (while the editor has focus) | `Ctrl+K B` |
-| Go to Bookmark... | `Ctrl+K L` |
+### Tab sessions and search
 
-The other tab group commands, such as **View: Lock Tab Group**, **View: Ungroup Tabs**, and **View: Undo Last Tab Group Change**, are in the Command Palette without a default shortcut.
+- **Save a session:** **View: Save Tab Session…** remembers your editor groups, tabs, and tab groups under a name.
+- **Restore it:** **View: Open Tab Session…** brings them back. Unsaved changes are never lost.
+- **Search tabs:** **View: Search Open Tabs…** (`Ctrl+K A`) finds any open tab across all editor groups, plus your saved groups.
 
-### Tab Sessions and Search
+Sessions are stored per workspace on your device.
 
-Run **View: Save Tab Session…** to save the editor groups, their layout, the tabs, and the tab groups of the current workspace under a name. Saving under an existing name replaces that session. **View: Open Tab Session…** lists sessions, newest first, with buttons to rename or delete them. Opening one replaces the open editors. JCode asks first when editors with unsaved changes are open, and those stay open so nothing is lost. Files that no longer exist are skipped, and untitled files are not saved. **View: Delete Tab Session…** removes a session. Sessions are stored for the workspace on the current device.
+### Vertical tabs
 
-Run **View: Search Open Tabs…** (`Ctrl+K A`) to search the open tabs of the window by name or path. Tabs are listed by editor group and labeled with their tab group, and saved tab groups follow them. Pick a tab to go to it, which expands its group when it is collapsed, pick a saved group to reopen it, or use a tab's close button to close it without leaving the list.
-
-### Vertical Tabs
-
-Set the tab position to place the tabs beside the editor:
+Move the tabs beside the editor. On the Personalization page set **Tab position** to **Left** or **Right**, or use this setting:
 
 ```json
 {
-	"workbench.editor.showTabs": "multiple",
-	"workbench.editor.tabPosition": "left",
-	"workbench.editor.verticalTabsWidth": 240
+	"workbench.editor.tabPosition": "left"
 }
 ```
 
-Use `"right"` or `"top"` for a different tab position. Drag the edge of the strip to resize it, between 140 and 500 pixels, and double-click the edge to restore the default. Vertical tabs work with or without `workbench.experimental.modernUI`, which gives the strip the floating-card look of the side bars. The strip is a single tab stop that you move through with the arrow keys, and tab groups appear in it as collapsible headers.
+- Drag the edge of the strip to resize it; double-click the edge to reset.
+- Press `Ctrl+F` while the strip has focus to filter tabs by name or path.
+- In a narrow editor group, the strip shrinks to a compact rail of file icons.
 
-An editor group that is too narrow for the labeled strip and the editor shrinks the strip to a compact rail that shows file icons only, and it grows back when there is room.
+### Workspace colors
 
-Select **Filter Tabs** in the strip's toolbar, or press `Ctrl+F` while the strip has focus, to filter the tabs by name or path. Matches are highlighted, matching tabs of collapsed groups are listed without expanding the groups, and `Escape` closes the filter. The compact rail has no room for the filter.
+Tell windows apart at a glance. Run **Preferences: Workspace Color...**, pick a color, choose **Subtle** or **Rich**, and select **Apply**. The color tints the title bar and status bar of that workspace only.
 
-### Workspace Colors
-
-Open a folder or workspace and run **Preferences: Workspace Color...** from the Command Palette, choose it from the **View** > **Appearance** menu, or select the color marker in the title bar once the workspace has a color. Choose a preset or hex color, preview **Subtle** or **Rich**, then select **Apply**. **Cancel** restores the previous appearance; **Use Theme Color** clears the workspace color.
-
-Colors are saved for that workspace on the current device. Explicit theme color customizations take precedence over workspace colors, and high-contrast themes retain their accessible surfaces.
-
-A workspace whose folders are all on SSH/SFTP connections gets a color of its own automatically, so remote windows are easy to recognize. The color follows the connection, is never the neutral Graphite, and stays until you choose a color or **Use Theme Color**. Turn it off in your user settings, or from the Personalization page:
-
-```json
-{
-	"workbench.workspaceColor.autoRemote": false
-}
-```
-
-### Personalization
-
-Run **Preferences: Personalize JCode** from the Command Palette, or choose **Personalize JCode** in the Manage (gear) menu or the **Preferences** menu. The page opens as an editor with these sections:
-
-- **Appearance** opens the color theme and file icon theme pickers.
-- **Workspace color** sets the workspace color, a custom hex color, and its intensity, and turns automatic remote colors on or off.
-- **Editor tabs** sets the tab position, the vertical tab width, tab groups, and breadcrumbs.
-- **Workbench layout** sets the primary sidebar side, the activity bar position, and the interface density when `workbench.experimental.modernUI` is on.
-
-Choose **User** or **Workspace** scope in the sidebar to decide where a change is saved. Each section has **Reset to Defaults**, which offers **Undo**, and **Open All Settings** is at the bottom of the page.
+Remote SSH/SFTP workspaces get a color automatically. Turn that off on the Personalization page.
 
 ### Bookmarks
 
-Bookmark a line to return to it from anywhere in the workspace. Run **Toggle Bookmark** (`Ctrl+K B`), use the editor or line number context menu, or Alt+click the glyph margin. Alt+click is controlled by `jcode.bookmarks.toggleOnAltClick` and is on by default; in files where the debugger can set breakpoints, Alt+click on an empty glyph margin keeps opening the conditional breakpoint editor, so use the keyboard shortcut or the line number context menu there.
+- **Toggle a bookmark:** `Ctrl+K B`, or Alt+click the margin next to the line numbers.
+- **Jump to one:** **Go to Bookmark...** (`Ctrl+K L`) searches by note, file, or color.
+- **Organize:** add notes with **Bookmark with Note...** and color tags from the list. The **Bookmarks** view in the Explorer shows them all.
 
-```json
-{
-	"jcode.bookmarks.toggleOnAltClick": true
-}
-```
+Bookmarks follow their line as you edit. If the line is deleted, the bookmark is marked stale so you can relocate or remove it.
 
-**Bookmark with Note...** adds a note that helps you recognize the line later. **Go to Bookmark...** (`Ctrl+K L`) searches bookmarks by note, file, line, or color and previews the highlighted one in the editor; its buttons tag a bookmark with a color, using the same palette as tab groups, or remove it. **Go to Next Bookmark** and **Go to Previous Bookmark** step through the bookmarks. A line has one bookmark, and bookmarks follow their line as you edit.
+### Remote files over SSH/SFTP
 
-The **Bookmarks** view in the Explorer lists bookmarks by file. Press `F2` to edit the note of a bookmark, `Delete` (`Cmd+Backspace` on macOS) to remove it, or use **Set Bookmark Color...** in its context menu. When the bookmarked line is deleted, the bookmark is marked stale; place the cursor on a new line and run **Relocate Bookmark**, or run **Remove Stale Bookmarks**. Bookmarks are stored for the workspace.
+Open a folder on a server and edit it like a local one.
 
-### Remote Files over SSH/SFTP
+1. Open the **Remote** view, or run **JCode Remote: Manage SSH/SFTP Connections...**.
+2. Create a connection (password, private key, or SSH agent), or import hosts with **JCode Remote: Import Connections from SSH Config...**.
+3. Choose the remote folder and select **Save and Connect**.
 
-Open the **Remote** view or run **JCode Remote: Manage SSH/SFTP Connections...**. Create a connection, choose the remote folder, and select **Save and Connect** to open it in the Explorer. When the window already has folders open, JCode asks whether to **Add to Workspace**, **Open in New Window**, or **Replace Workspace**, so opening a connection never closes local folders unexpectedly.
+The status bar shows the connection state; select it to reconnect or edit the connection. Jump hosts (like `ssh -J`) are supported. Remote terminals and language servers are not; JCode edits remote files over SFTP. See the [SSH/SFTP guide](extensions/jcode-sftp/README.md) for details.
 
-- **Authentication.** Use a password, a private key with an optional passphrase, or your SSH agent. JCode asks you to trust a server's host key fingerprint on the first connection and again if it changes, and passwords and passphrases are stored in VS Code SecretStorage.
-- **Status bar.** An item shows whether the connection is connected, connecting, reconnecting, or offline, with a warning or error background when attention is needed. Select it to retry, enter a password, edit the connection, reconnect, disconnect, or open the connection list. While a server is down, background reconnects back off up to five minutes, so the item stays Offline instead of flickering.
-- **SSH config import.** Run **JCode Remote: Import Connections from SSH Config...** to pick hosts from `~/.ssh/config`, including hosts from `Include` files. Each host's `HostName`, `User`, `Port`, `IdentityFile`, and `ProxyJump` are carried over; passwords and passphrases never are.
-- **Jump hosts.** Enter hosts such as `bastion.example.com, deploy@gateway:2200` in a connection's **Jump Hosts** field to connect through them in order, like `ssh -J`. Every hop uses the connection's authentication and host key verification.
-- **Export and import.** When connections have saved passwords or passphrases, **Export Connections to JSON...** asks how to handle them: **Encrypt with Passphrase** (AES-256-GCM, with a key derived using scrypt), **Exclude Secrets**, or **Include Unencrypted**, which requires confirming a warning.
+### AI features
 
-```json
-{
-	"jcodeSftp.pollInterval": 10000,
-	"jcodeSftp.pollMaxEntries": 5000
-}
-```
-
-`jcodeSftp.pollInterval` controls how often JCode checks remote folders for changes, in milliseconds, and `jcodeSftp.pollMaxEntries` limits how many entries it tracks per watched folder.
-
-This feature provides an SFTP virtual workspace. Remote terminals and server-side language tooling require separate support. See the [SSH/SFTP guide](extensions/jcode-sftp/README.md) for authentication, host verification, the status bar item, jump hosts, SSH config import, save behavior, polling, and profile import/export, including how exported credentials are handled.
-
-### AI Features
-
-AI features (Chat, inline suggestions and the Copilot sign-in) are turned off by default. They are still included: to turn them on, open Settings and clear **Chat: Disable AI Features**, or set:
+Chat, inline suggestions, and the Copilot sign-in are **off by default**. To turn them on, open Settings and clear **Chat: Disable AI Features**, or set:
 
 ```json
 {
@@ -166,75 +219,109 @@ AI features (Chat, inline suggestions and the Copilot sign-in) are turned off by
 }
 ```
 
-## Build and Run
+## Keyboard shortcuts
 
-Use the Node.js version in [.nvmrc](.nvmrc), npm below version 13, Git, and your operating system's native build toolchain. The [upstream contribution guide](https://github.com/microsoft/vscode/wiki/How-to-Contribute) documents platform-specific prerequisites. A [development container](.devcontainer/README.md) is also included.
+On macOS, use `Cmd` instead of `Ctrl`. A shortcut like `Ctrl+K G` means press `Ctrl+K`, release, then press `G`.
+
+| Action | Shortcut |
+| --- | --- |
+| New tab group from selected tabs | `Ctrl+K G` |
+| Collapse or expand the active tab group | `Ctrl+K Ctrl+G` |
+| Rename the active tab group | `Ctrl+K Ctrl+Shift+G` |
+| Next / previous tab group | `Ctrl+K ]` / `Ctrl+K [` |
+| Close the tab group | `Ctrl+K X` |
+| Search open tabs | `Ctrl+K A` |
+| Filter vertical tabs (strip focused) | `Ctrl+F` |
+| Toggle bookmark | `Ctrl+K B` |
+| Go to bookmark | `Ctrl+K L` |
+
+Find every other JCode command in the Command Palette by typing **Tab Group**, **Tab Session**, **Bookmark**, or **JCode Remote**.
+
+## Tips
+
+- **One project per color.** Give your main projects distinct workspace colors; switching windows becomes effortless.
+- **Let rules do the sorting.** A couple of auto-grouping rules (for example `src/components` and `**/*.test.ts`) keep large projects tidy with zero effort.
+- **Sessions for context switches.** Save a session before jumping to another task, and restore it when you come back.
+- **Vertical tabs on wide screens.** With many files open, vertical tabs show full names instead of squeezed ones.
+- **Notes on bookmarks.** A short note ("fix after release") turns bookmarks into a lightweight to-do list.
+
+## Troubleshooting
+
+<details>
+<summary><b>macOS: "JCode can't be opened" or "is damaged"</b></summary>
+
+Builds that are not notarized by Apple are blocked the first time. Right-click **JCode.app** in Applications, choose **Open**, then **Open** again. If macOS still refuses, run:
 
 ```sh
-git clone --branch custom/main --single-branch https://github.com/Jchnc/jcode.git
+xattr -dr com.apple.quarantine /Applications/JCode.app
+```
+
+</details>
+
+<details>
+<summary><b>Windows: SmartScreen blocks the installer</b></summary>
+
+Choose **More info** > **Run anyway**. SmartScreen warns about apps it has not seen often yet.
+
+</details>
+
+<details>
+<summary><b>The <code>jcode</code> command is not found</b></summary>
+
+- **Windows:** reinstall with **Add to PATH** checked, then open a new terminal.
+- **macOS:** run **Shell Command: Install 'jcode' command in PATH** from the Command Palette, then open a new terminal.
+- **Linux:** the `.deb` installs `/usr/bin/jcode`. For the `.tar.gz`, check that `~/.local/bin` is on your PATH.
+
+</details>
+
+<details>
+<summary><b>Linux on WSL asks to install the Windows version</b></summary>
+
+Inside WSL, install JCode on Windows instead and run `jcode .` from your WSL terminal; it opens the folder in Windows JCode.
+
+</details>
+
+<details>
+<summary><b>I want AI features back</b></summary>
+
+See [AI features](#ai-features).
+
+</details>
+
+## Build from source
+
+You need Git, the Node.js version in [`.nvmrc`](.nvmrc), and your platform's build tools:
+
+| Platform | Build tools |
+| --- | --- |
+| Windows | Visual Studio Build Tools with **Desktop development with C++**, and Python 3 |
+| macOS | Xcode Command Line Tools (`xcode-select --install`) and Python 3 |
+| Linux | `build-essential`, `pkg-config`, `libx11-dev`, `libxkbfile-dev`, `libsecret-1-dev`, `libkrb5-dev`, and Python 3 |
+
+```sh
+git clone --branch custom/main https://github.com/Jchnc/jcode.git
 cd jcode
 npm run install-fast
 npm run build-fast
 ```
 
-`build-fast` builds the client, built-in extensions (including JCode SFTP), and Copilot outputs. Run it after source changes. Once the full product has been built, `npm run build-fast -- --client-only` supports client-only iteration.
-
-Launch from the repository root:
-
-```powershell
-# Windows
-.\scripts\code.bat
-```
+Then start the development build, which runs as **JCode Dev** with its own settings:
 
 ```sh
-# macOS / Linux
-./scripts/code.sh
+./scripts/code.sh      # macOS and Linux
+.\scripts\code.bat     # Windows
 ```
 
-Development builds run as **JCode Dev**, with settings and extensions kept apart from an installed JCode.
+More for maintainers: [releases and updates](docs/jcode-releases.md), [keeping JCode in sync with upstream](docs/upstream-sync.md), and the [upstream contribution guide](https://github.com/microsoft/vscode/wiki/How-to-Contribute) for detailed prerequisites.
 
-## Keeping JCode Updated
+## Contributing and support
 
-**`custom/main` is the default and sole development branch.**
+- **Bugs, questions, and ideas:** [open an issue](https://github.com/Jchnc/jcode/issues).
+- **Pull requests:** target `custom/main`; see [CONTRIBUTING.md](CONTRIBUTING.md).
+- **Security issues:** report them privately through [GitHub security advisories](https://github.com/Jchnc/jcode/security/advisories/new); see [SECURITY.md](SECURITY.md).
 
-`origin` points to this JCode fork; `upstream` points to Microsoft's Code - OSS repository. The remote-tracking reference `upstream/main` does not require a second local development branch.
+## License
 
-Set up the upstream remote once and keep pulls from rebasing the customized branch:
+JCode is available under the [MIT License](LICENSE.txt) and keeps Microsoft's Code - OSS copyright and license notices. Upstream and third-party work remains credited to its authors; see the [third-party notices](ThirdPartyNotices.txt) and [licensing and distribution](docs/LICENSING.md).
 
-```sh
-git remote add upstream https://github.com/microsoft/vscode.git
-git config branch.custom/main.rebase false
-git config pull.ff only
-```
-
-For an upstream update, start with a clean working tree:
-
-```sh
-git switch custom/main
-git pull --ff-only origin custom/main
-git fetch --no-tags upstream main
-git merge --no-ff upstream/main
-bash build/jcode/prune-upstream-ci.sh
-```
-
-JCode only runs its own GitHub Actions workflows (`.github/workflows/jcode-*.yml`): **Build JCode Release**, started by hand, and **Publish JCode Update Feed**, which runs when a release is published. `prune-upstream-ci.sh` removes the workflows, actions and Dependabot configuration that upstream adds or changes, and resolves the merge conflicts those files report. Resolve the remaining conflicts while preserving the custom features. If dependency manifests changed, run `npm run install-fast`; then rebuild and run the relevant checks before pushing:
-
-```sh
-git push origin custom/main
-```
-
-Merge upstream updates rather than rebasing the combined upstream and custom history. Recovery points are kept as `archive/*` tags, leaving one development branch.
-
-## Contributing and Support
-
-Use the [JCode issue tracker](https://github.com/Jchnc/jcode/issues) for bugs, questions, and feature requests. Submit pull requests against `custom/main`; see [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow, validation, and contribution terms.
-
-Report vulnerabilities privately through [GitHub security advisories](https://github.com/Jchnc/jcode/security/advisories/new). See [SECURITY.md](SECURITY.md) for reporting details and the maintained branch.
-
-## License and Attribution
-
-JCode's source is available under the [MIT License](LICENSE.txt), retaining Microsoft's Code - OSS copyright and license notices. Original JCode contributions are made under MIT; upstream and third-party work remains attributed to its authors.
-
-The [upstream notices](ThirdPartyNotices.txt), [SFTP dependency notices](extensions/jcode-sftp/ThirdPartyNotices.txt), and component licenses are retained. Runtime dependencies and hosted services can have different terms, including the bundled Copilot CLI. See [licensing and distribution](docs/LICENSING.md) before publishing a binary package.
-
-Visual Studio Code and Microsoft's logos are their respective owners' trademarks. JCode is independently maintained; the upstream relationship does not imply Microsoft endorsement.
+Visual Studio Code and the Microsoft logos are trademarks of their respective owners.
