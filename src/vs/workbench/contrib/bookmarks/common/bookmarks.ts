@@ -91,6 +91,12 @@ export interface ICodeBookmarksService {
 	 * Finds the live (not stale) bookmark on the given line.
 	 */
 	find(resource: URI, lineNumber: number): ICodeBookmark | undefined;
+	/**
+	 * Applies the edits to open files that are not reflected in the bookmarks yet, which otherwise
+	 * happens a moment after typing stops. Call it before reading line numbers for something the
+	 * user is about to land on, such as navigation. Listeners are notified when a line changed.
+	 */
+	sync(): void;
 }
 
 export const ICodeBookmarksService = createDecorator<ICodeBookmarksService>('codeBookmarksService');

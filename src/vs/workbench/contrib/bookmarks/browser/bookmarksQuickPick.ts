@@ -18,7 +18,7 @@ import { IUriIdentityService } from '../../../../platform/uriIdentity/common/uri
 import { PickerEditorState } from '../../../browser/quickaccess.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { getBookmarkLabel, groupBookmarksByFile, ICodeBookmark, ICodeBookmarksService } from '../common/bookmarks.js';
-import { getBookmarkFileOrder, openBookmark } from './bookmarksNavigation.js';
+import { getBookmarkFileOrder, getCurrentBookmark, openBookmark } from './bookmarksNavigation.js';
 
 interface IBookmarkQuickPickItem extends IQuickPickItem {
 	readonly bookmark: ICodeBookmark;
@@ -44,14 +44,18 @@ export function showBookmarksQuickPick(services: IBookmarksQuickPickServices): P
 	const { bookmarksService, quickInputService, editorService, instantiationService, notificationService, labelService, uriIdentityService } = services;
 	const fileOrder = getBookmarkFileOrder(uriIdentityService, labelService);
 
-	const createItems = (): IBookmarkQuickPickItem[] => groupBookmarksByFile(bookmarksService.bookmarks.filter(bookmark => !bookmark.stale), fileOrder).flatMap(group => group.bookmarks.map(bookmark => ({
-		bookmark,
-		label: getBookmarkLabel(bookmark),
-		description: `${group.label}:${bookmark.lineNumber}`,
-		detail: bookmark.note ? bookmark.lineText.trim() || undefined : undefined,
-		iconClass: ThemeIcon.asClassName(Codicon.bookmark),
-		buttons: [{ iconClass: ThemeIcon.asClassName(Codicon.trash), tooltip: localize('removeBookmark', "Remove Bookmark") }]
-	})));
+	const createItems = (): IBookmarkQuickPickItem[] => {
+		// The lines of bookmarks lag behind edits that were just made, so catch up before listing them.
+		bookmarksService.sync();
+		return groupBookmarksByFile(bookmarksService.bookmarks.filter(bookmark => !bookmark.stale), fileOrder).flatMap(group => group.bookmarks.map(bookmark => ({
+			bookmark,
+			label: getBookmarkLabel(bookmark),
+			description: `${group.label}:${bookmark.lineNumber}`,
+			detail: bookmark.note ? bookmark.lineText.trim() || undefined : undefined,
+			iconClass: ThemeIcon.asClassName(Codicon.bookmark),
+			buttons: [{ iconClass: ThemeIcon.asClassName(Codicon.trash), tooltip: localize('removeBookmark', "Remove Bookmark") }]
+		})));
+	};
 
 	const items = createItems();
 	if (items.length === 0) {
@@ -108,7 +112,7 @@ export function showBookmarksQuickPick(services: IBookmarksQuickPickServices): P
 			if (item) {
 				// The selected bookmark is opened for good, so the previewed editors are not restored.
 				editorState.reset();
-				void openBookmark(editorService, item.bookmark);
+				void openBookmark(editorService, getCurrentBookmark(bookmarksService, item.bookmark));
 			}
 		}));
 

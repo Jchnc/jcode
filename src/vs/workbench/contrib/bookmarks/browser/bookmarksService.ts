@@ -58,6 +58,10 @@ interface ITrackedModel {
 	readonly disposables: DisposableStore;
 	readonly syncScheduler: RunOnceScheduler;
 	bookmarks: Map<string, ITrackedBookmark>;
+	/**
+	 * Whether lines were synced without listeners being told about it yet.
+	 */
+	hasUnreportedChanges: boolean;
 }
 
 function createDecorationOptions(bookmark: ICodeBookmark): IModelDecorationOptions {
@@ -235,6 +239,15 @@ export class CodeBookmarksService extends Disposable implements ICodeBookmarksSe
 		return this.bookmarksOnLine(resource, lineNumber)[0];
 	}
 
+	sync(): void {
+		for (const entry of this.trackedModels.values()) {
+			if (entry.syncScheduler.isScheduled() || entry.hasUnreportedChanges) {
+				entry.syncScheduler.cancel();
+				this.syncModel(entry, true);
+			}
+		}
+	}
+
 	private bookmarksOnLine(resource: URI, lineNumber: number): ICodeBookmark[] {
 		this.syncTrackedModel(resource);
 		return this._bookmarks.filter(bookmark => !bookmark.stale && bookmark.lineNumber === lineNumber && this.uriIdentityService.extUri.isEqual(bookmark.resource, resource));
@@ -254,7 +267,8 @@ export class CodeBookmarksService extends Disposable implements ICodeBookmarksSe
 			model,
 			disposables,
 			syncScheduler: disposables.add(new RunOnceScheduler(() => this.syncModel(entry, true), 150)),
-			bookmarks: new Map()
+			bookmarks: new Map(),
+			hasUnreportedChanges: false
 		};
 		disposables.add(model.onDidChangeContent(event => this.onDidChangeModelContent(entry, event)));
 		this.trackedModels.set(model.uri, entry);
@@ -503,9 +517,14 @@ export class CodeBookmarksService extends Disposable implements ICodeBookmarksSe
 		}
 		if (didChange) {
 			this.storeScheduler.schedule();
-			if (fire) {
-				this._onDidChangeBookmarks.fire();
+		}
+		if (fire) {
+			if (didChange || entry.hasUnreportedChanges) {
+				this.fireDidChange();
 			}
+		} else if (didChange) {
+			// The edit that is waiting to settle, or the next sync, tells listeners about this.
+			entry.hasUnreportedChanges = true;
 		}
 	}
 
@@ -566,6 +585,17 @@ export class CodeBookmarksService extends Disposable implements ICodeBookmarksSe
 		this.releaseUnusedModels();
 		this.updateContextKeys();
 		this.storeScheduler.schedule();
+		this.fireDidChange();
+	}
+
+	/**
+	 * Tells listeners that the bookmarks changed. They read all of them again, so this also
+	 * covers the lines that were synced silently before.
+	 */
+	private fireDidChange(): void {
+		for (const entry of this.trackedModels.values()) {
+			entry.hasUnreportedChanges = false;
+		}
 		this._onDidChangeBookmarks.fire();
 	}
 

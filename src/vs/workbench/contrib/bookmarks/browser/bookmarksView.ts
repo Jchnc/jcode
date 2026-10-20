@@ -22,6 +22,7 @@ import { IViewDescriptorService } from '../../../common/views.js';
 import { ACTIVE_GROUP, IEditorService, SIDE_GROUP } from '../../../services/editor/common/editorService.js';
 import { IOpenerService } from '../../../../platform/opener/common/opener.js';
 import { BOOKMARKS_VIEW_ITEM_MENU, BookmarkItemKind, CONTEXT_CODE_BOOKMARK_ITEM_KIND, IBookmarkActionContext, ICodeBookmarksService } from '../common/bookmarks.js';
+import { getCurrentBookmark } from './bookmarksNavigation.js';
 import { BookmarkElement, BookmarksTree, IBookmarksTreeContextMenuEvent, IBookmarksTreeOpenEvent } from './bookmarksTree.js';
 
 export class BookmarksView extends ViewPane {
@@ -52,6 +53,8 @@ export class BookmarksView extends ViewPane {
 		this._register(this.bookmarksService.onDidChangeBookmarks(() => this.refresh()));
 		this._register(this.onDidChangeBodyVisibility(visible => {
 			if (visible) {
+				// Catch up with edits made while the view was hidden, or just before it was shown.
+				this.bookmarksService.sync();
 				this.refresh();
 			}
 		}));
@@ -70,6 +73,7 @@ export class BookmarksView extends ViewPane {
 		this._register(tree.onDidRequestContextMenu(event => this.showContextMenu(event)));
 
 		this.emptyContainer = this.renderEmptyState(container);
+		this.bookmarksService.sync();
 		this.refresh();
 	}
 
@@ -119,7 +123,9 @@ export class BookmarksView extends ViewPane {
 		return empty;
 	}
 
-	private async openBookmark({ bookmark, editorOptions, sideBySide }: IBookmarksTreeOpenEvent): Promise<void> {
+	private async openBookmark({ bookmark: listed, editorOptions, sideBySide }: IBookmarksTreeOpenEvent): Promise<void> {
+		// The row may show a line from before an edit that was just made.
+		const bookmark = getCurrentBookmark(this.bookmarksService, listed);
 		await this.editorService.openEditor({
 			resource: bookmark.resource,
 			options: { ...editorOptions, selection: new Range(bookmark.lineNumber, bookmark.column, bookmark.lineNumber, bookmark.column) }

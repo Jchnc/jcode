@@ -33,9 +33,9 @@ import { IViewsService } from '../../../services/views/common/viewsService.js';
 import { VIEW_CONTAINER } from '../../files/browser/explorerViewlet.js';
 import { IUriIdentityService } from '../../../../platform/uriIdentity/common/uriIdentity.js';
 import { FocusedViewContext } from '../../../common/contextkeys.js';
-import { BOOKMARKS_VIEW_ITEM_INLINE_MENU, BOOKMARKS_VIEW_ITEM_MENU, BookmarkItemKind, CONTEXT_CODE_BOOKMARK_ITEM_KIND, CONTEXT_CODE_BOOKMARKS_PRESENT, CONTEXT_CODE_BOOKMARKS_STALE_PRESENT, findAdjacentBookmark, getBookmarkLabel, ICodeBookmark, ICodeBookmarksService, isBookmarkActionContext } from '../common/bookmarks.js';
+import { BOOKMARKS_VIEW_ITEM_INLINE_MENU, BOOKMARKS_VIEW_ITEM_MENU, BookmarkItemKind, CONTEXT_CODE_BOOKMARK_ITEM_KIND, CONTEXT_CODE_BOOKMARKS_PRESENT, CONTEXT_CODE_BOOKMARKS_STALE_PRESENT, getBookmarkLabel, ICodeBookmark, ICodeBookmarksService, isBookmarkActionContext } from '../common/bookmarks.js';
 import { ALT_CLICK_TOGGLES_BOOKMARK_SETTING, BookmarkGlyphMarginContribution } from './bookmarksGlyphMargin.js';
-import { getBookmarkFileOrder, openBookmark } from './bookmarksNavigation.js';
+import { findBookmarkToNavigateTo, getBookmarkFileOrder, openBookmark } from './bookmarksNavigation.js';
 import { showBookmarksQuickPick } from './bookmarksQuickPick.js';
 import { CodeBookmarksService } from './bookmarksService.js';
 import { BookmarksView } from './bookmarksView.js';
@@ -415,7 +415,7 @@ function registerNavigationAction(id: string, title: ILocalizedString, direction
 			const editor = getActiveCodeEditor(editorService);
 			const model = editor?.getModel();
 			const position = editor?.getPosition();
-			const bookmark = findAdjacentBookmark(service.bookmarks, model && position ? { resource: model.uri, lineNumber: position.lineNumber } : undefined, direction, fileOrder);
+			const bookmark = findBookmarkToNavigateTo(service, model && position ? { resource: model.uri, lineNumber: position.lineNumber } : undefined, direction, fileOrder);
 			if (!bookmark) {
 				notificationService.info(localize('noBookmarks', "There are no active bookmarks in this workspace."));
 				return;

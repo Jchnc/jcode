@@ -10,6 +10,7 @@ import { URI } from '../../../../../base/common/uri.js';
 import { mock, upcastPartial } from '../../../../../base/test/common/mock.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { isResourceEditorInput } from '../../../../common/editor.js';
+import { ITextEditorOptions } from '../../../../../platform/editor/common/editor.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { ILabelService } from '../../../../../platform/label/common/label.js';
 import { INotificationHandle, INotificationService } from '../../../../../platform/notification/common/notification.js';
@@ -28,10 +29,12 @@ suite('Go to Bookmark quick pick', () => {
 		return { id: `${path}:${lineNumber}`, resource: URI.file(path), lineNumber, column: 1, lineText: `  text ${lineNumber}`, beforeText: '', afterText: '', stale: false, createdAt: lineNumber, ...extra };
 	}
 
-	function setup(initial: ICodeBookmark[]) {
+	function setup(initial: ICodeBookmark[], linesInsertedAbove = 0) {
 		const disposables = store.add(new DisposableStore());
 		let bookmarks = initial;
+		let pendingLinesInserted = linesInsertedAbove;
 		const log: string[] = [];
+		const openedLines: number[] = [];
 
 		const onDidChangeActive = disposables.add(new Emitter<IQuickPickItem[]>());
 		const onDidTriggerItemButton = disposables.add(new Emitter<IQuickPickItemButtonEvent<IQuickPickItem>>());
@@ -69,11 +72,20 @@ suite('Go to Bookmark quick pick', () => {
 		const services = {
 			bookmarksService: upcastPartial<ICodeBookmarksService>({
 				get bookmarks() { return bookmarks; },
+				sync() {
+					// Edits that the service has not picked up yet move every bookmark down.
+					bookmarks = bookmarks.map(candidate => ({ ...candidate, lineNumber: candidate.lineNumber + pendingLinesInserted }));
+					pendingLinesInserted = 0;
+				},
 				remove(id: string) { bookmarks = bookmarks.filter(candidate => candidate.id !== id); }
 			}),
 			quickInputService: upcastPartial<IQuickInputService>({ createQuickPick: (() => picker) as IQuickInputService['createQuickPick'] }),
 			editorService: new class extends mock<IEditorService>() {
-				override async openEditor(input: unknown): Promise<undefined> { log.push(`open ${isResourceEditorInput(input) ? input.resource.path : ''}`); return undefined; }
+				override async openEditor(input: unknown): Promise<undefined> {
+					log.push(`open ${isResourceEditorInput(input) ? input.resource.path : ''}`);
+					openedLines.push((isResourceEditorInput(input) && (input.options as ITextEditorOptions | undefined)?.selection?.startLineNumber) || 0);
+					return undefined;
+				}
 			},
 			instantiationService: upcastPartial<IInstantiationService>({ createInstance: (() => editorState) as IInstantiationService['createInstance'] }),
 			notificationService: upcastPartial<INotificationService>({
@@ -88,7 +100,8 @@ suite('Go to Bookmark quick pick', () => {
 
 		const closed = showBookmarksQuickPick(services);
 		return {
-			picker, log, closed,
+			picker, log, closed, openedLines,
+			insertLinesAbove: (count: number) => { pendingLinesInserted += count; },
 			items: () => picker.items.map(item => ({ label: item.label, description: item.description, detail: item.detail })),
 			activate: (index: number) => { picker.activeItems = [picker.items[index]]; },
 			select: (index: number) => { selectedItems = [picker.items[index]]; onDidAccept.fire({ inBackground: false }); },
@@ -122,6 +135,17 @@ suite('Go to Bookmark quick pick', () => {
 
 		hide(QuickInputHideReason.Blur);
 		await closed;
+	});
+
+	test('lists and opens bookmarks on their lines right after an edit that has not settled', async () => {
+		const { items, insertLinesAbove, select, closed, openedLines } = setup([bookmark('/src/a.ts', 3), bookmark('/src/a.ts', 5)], 2);
+		const listed = items().map(item => item.description);
+
+		insertLinesAbove(1);
+		select(1);
+		await closed;
+
+		assert.deepStrictEqual({ listed, openedLines }, { listed: ['/src/a.ts:5', '/src/a.ts:7'], openedLines: [8] });
 	});
 
 	test('previews the highlighted bookmark and goes back when the picker is dismissed', async () => {

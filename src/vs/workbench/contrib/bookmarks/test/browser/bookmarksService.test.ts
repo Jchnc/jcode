@@ -22,6 +22,7 @@ import { MockContextKeyService } from '../../../../../platform/keybinding/test/c
 import { InMemoryStorageService, IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { IUriIdentityService } from '../../../../../platform/uriIdentity/common/uriIdentity.js';
 import { UriIdentityService } from '../../../../../platform/uriIdentity/common/uriIdentityService.js';
+import { findBookmarkToNavigateTo } from '../../browser/bookmarksNavigation.js';
 import { CodeBookmarksService } from '../../browser/bookmarksService.js';
 
 suite('CodeBookmarksService', () => {
@@ -110,6 +111,53 @@ suite('CodeBookmarksService', () => {
 
 		assert.deepStrictEqual(service.bookmarks.map(bookmark => bookmark.lineNumber), [4]);
 	}));
+
+	test('applies edits that have not settled yet when synced, and tells listeners once', () => runWithFakedTimers({ useFakeTimers: true }, async () => {
+		const { model, service } = setup();
+		service.toggle(resource, 3);
+		let changes = 0;
+		store.add(service.onDidChangeBookmarks(() => changes++));
+
+		model.applyEdits([{ range: new Range(1, 1, 1, 1), text: 'inserted\n' }]);
+		const beforeSync = service.bookmarks.map(bookmark => bookmark.lineNumber);
+		service.sync();
+		const afterSync = { lineNumbers: service.bookmarks.map(bookmark => bookmark.lineNumber), changes };
+		service.sync();
+		await timeout(250);
+
+		assert.deepStrictEqual({ beforeSync, afterSync, finalChanges: changes }, {
+			beforeSync: [3],
+			afterSync: { lineNumbers: [4], changes: 1 },
+			finalChanges: 1
+		});
+	}));
+
+	test('tells listeners about lines that a lookup applied before the edits settled', () => runWithFakedTimers({ useFakeTimers: true }, async () => {
+		const { model, service } = setup();
+		service.toggle(resource, 3);
+		let changes = 0;
+		store.add(service.onDidChangeBookmarks(() => changes++));
+
+		model.applyEdits([{ range: new Range(1, 1, 1, 1), text: 'inserted\n' }]);
+		service.find(resource, 1);
+		const afterLookup = changes;
+		await timeout(250);
+
+		assert.deepStrictEqual({ afterLookup, afterSettling: changes }, { afterLookup: 0, afterSettling: 1 });
+	}));
+
+	test('navigates to the exact line right after lines were inserted above a bookmark', () => {
+		const { model, service } = setup();
+		service.toggle(resource, 3);
+		service.toggle(resource, 5);
+		const fileOrder = { getResourceKey: (uri: URI) => uri.toString(), getResourceLabel: (uri: URI) => uri.path };
+
+		model.applyEdits([{ range: new Range(1, 1, 1, 1), text: 'one\ntwo\n' }]);
+		const next = findBookmarkToNavigateTo(service, { resource, lineNumber: 1 }, 1, fileOrder);
+		const previous = findBookmarkToNavigateTo(service, { resource, lineNumber: 8 }, -1, fileOrder);
+
+		assert.deepStrictEqual({ next: next?.lineNumber, previous: previous?.lineNumber }, { next: 5, previous: 7 });
+	});
 
 	test('keeps a bookmark on its line when only the text of the line changes', () => {
 		const { model, service } = setup();
