@@ -212,7 +212,29 @@
 }
 
 .jcode-personalization .personalization-section-header {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: var(--vscode-spacing-size80) var(--vscode-spacing-size160);
 	padding: 0 0 var(--vscode-spacing-size120);
+}
+
+.jcode-personalization .personalization-section-heading {
+	flex: 1 1 240px;
+	min-width: 0;
+}
+
+.jcode-personalization .personalization-section-reset {
+	flex: 0 0 auto;
+	color: var(--vscode-textLink-foreground);
+	font-size: var(--vscode-fontSize-label1);
+	white-space: nowrap;
+}
+
+.jcode-personalization .personalization-section-reset[aria-disabled='true'] {
+	opacity: 0.5;
+	cursor: default;
 }
 
 .jcode-personalization .personalization-section-description {

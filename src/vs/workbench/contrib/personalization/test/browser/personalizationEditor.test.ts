@@ -30,32 +30,38 @@ suite('Personalization editor', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
 
 	const tabPosition = 'workbench.editor.tabPosition';
+	const sideBarLocation = 'workbench.sideBar.location';
 
 	/** A configuration whose writes stay pending until the test completes them. */
 	class PendingConfigurationService extends TestConfigurationService {
 		readonly updates: { key: string; value: unknown; target: ConfigurationTarget | IConfigurationOverrides | IConfigurationUpdateOverrides | undefined }[] = [];
 		readonly saved = new DeferredPromise<void>();
-		userValue: string | undefined;
+		readonly userValues = new Map<string, string>();
 
 		override inspect<T>(key: string): IConfigurationValue<T> {
-			return { value: (this.userValue ?? 'top') as T, defaultValue: 'top' as T, userValue: this.userValue as T };
+			const userValue = this.userValues.get(key);
+			return { value: (userValue ?? 'top') as T, defaultValue: 'top' as T, userValue: userValue as T };
 		}
 
 		override async updateValue(key: string, value: unknown, target?: ConfigurationTarget | IConfigurationOverrides | IConfigurationUpdateOverrides): Promise<void> {
 			this.updates.push({ key, value, target });
 			await this.saved.p;
-			this.userValue = typeof value === 'string' ? value : undefined;
+			if (typeof value === 'string') { this.userValues.set(key, value); }
+			else { this.userValues.delete(key); }
 			this.onDidChangeConfigurationEmitter.fire({ source: ConfigurationTarget.USER, affectedKeys: new Set([key]), change: { keys: [key], overrides: [] }, affectsConfiguration: () => true });
 		}
 	}
 
-	function createEditor(userValue?: string) {
+	function createEditor(userValues: Record<string, string> = {}) {
 		const registry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration);
-		if (!registry.getConfigurationProperties()[tabPosition]) {
-			const node: IConfigurationNode = {
-				id: 'personalizationEditorTest',
-				properties: { [tabPosition]: { type: 'string', default: 'top', enum: ['top', 'left', 'right'], scope: ConfigurationScope.WINDOW } }
-			};
+		const properties: IConfigurationNode['properties'] = {};
+		for (const key of [tabPosition, sideBarLocation]) {
+			if (!registry.getConfigurationProperties()[key]) {
+				properties[key] = { type: 'string', default: 'top', enum: ['top', 'left', 'right'], scope: ConfigurationScope.WINDOW };
+			}
+		}
+		if (Object.keys(properties).length) {
+			const node: IConfigurationNode = { id: 'personalizationEditorTest', properties };
 			registry.registerConfiguration(node);
 			store.add(toDisposable(() => registry.deregisterConfigurations([node])));
 		}
@@ -63,7 +69,7 @@ suite('Personalization editor', () => {
 		mainWindow.document.body.appendChild(parent);
 		store.add(toDisposable(() => parent.remove()));
 		const configurationService = new PendingConfigurationService();
-		configurationService.userValue = userValue;
+		for (const [key, value] of Object.entries(userValues)) { configurationService.userValues.set(key, value); }
 		const colorTheme = new class extends mock<IWorkbenchColorTheme>() {
 			override readonly label = 'Test Theme';
 			override readonly type = ColorScheme.DARK;
@@ -148,7 +154,7 @@ suite('Personalization editor', () => {
 	});
 
 	test('moves focus to the setting when resetting it disables the reset button', async () => {
-		const { configurationService, control } = createEditor('left');
+		const { configurationService, control } = createEditor({ [tabPosition]: 'left' });
 		const reset = control(`${tabPosition}:reset`);
 		reset.focus();
 		reset.click();
@@ -163,6 +169,46 @@ suite('Personalization editor', () => {
 			updates: [{ key: tabPosition, value: undefined, target: ConfigurationTarget.USER }],
 			resetDisabled: true,
 			focusedKey: `${tabPosition}:top`,
+		});
+	});
+
+	test('resets only the settings a section manages, at the selected scope', async () => {
+		const { configurationService, control, parent } = createEditor({ [tabPosition]: 'left', [sideBarLocation]: 'right' });
+		const resets = { appearance: control('section:appearance:reset'), tabs: control('section:tabs:reset'), layout: control('section:layout:reset') };
+		const inert = () => Object.values(resets).map(reset => reset.getAttribute('aria-disabled') === 'true');
+		const before = inert();
+
+		resets.tabs.focus();
+		resets.tabs.click();
+		configurationService.saved.complete();
+		await timeout(0);
+		const afterTabs = { updates: configurationService.updates.map(update => update.key), inert: inert(), focusedKey: (mainWindow.document.activeElement as HTMLElement).dataset.focusKey, remaining: [...configurationService.userValues.keys()] };
+
+		parent.querySelectorAll<HTMLElement>('.personalization-scope button')[1].click();
+
+		assert.deepStrictEqual({ before, afterTabs, atWorkspaceScope: inert() }, {
+			before: [true, false, false],
+			afterTabs: { updates: [tabPosition], inert: [true, true, false], focusedKey: 'section:tabs:reset', remaining: [sideBarLocation] },
+			atWorkspaceScope: [true, true, true],
+		});
+	});
+
+	test('resets the workspace color without touching any setting', () => {
+		const { appearanceService, configurationService, control, parent } = createEditor({ [tabPosition]: 'left' });
+		const preview = appearanceService.beginPreview();
+		preview.update({ color: '#3b82f6', style: 'prominent' });
+		preview.apply();
+		const reset = control('section:workspace:reset');
+		const before = reset.getAttribute('aria-disabled');
+
+		reset.click();
+
+		assert.deepStrictEqual({ before, appearance: appearanceService.appearance, after: reset.getAttribute('aria-disabled'), updates: configurationService.updates, status: parent.querySelector('.personalization-status')?.textContent }, {
+			before: null,
+			appearance: undefined,
+			after: 'true',
+			updates: [],
+			status: 'Workspace color reset to defaults.',
 		});
 	});
 

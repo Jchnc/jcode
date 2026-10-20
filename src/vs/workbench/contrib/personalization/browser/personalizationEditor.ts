@@ -11,7 +11,7 @@ import { DisposableStore, MutableDisposable } from '../../../../base/common/life
 import { ThemeIcon } from '../../../../base/common/themables.js';
 import { localize } from '../../../../nls.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
-import { ConfigurationTarget, IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
+import { ConfigurationTarget, IConfigurationService, IConfigurationValue } from '../../../../platform/configuration/common/configuration.js';
 import { ConfigurationScope, Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { Registry } from '../../../../platform/registry/common/platform.js';
@@ -36,6 +36,18 @@ interface SettingChoice {
 interface FocusSnapshot {
 	readonly element: HTMLElement;
 	readonly key: string | undefined;
+}
+
+interface PersonalizationSection {
+	readonly element: HTMLElement;
+	readonly nav: HTMLButtonElement;
+	readonly body: HTMLElement;
+	readonly title: string;
+	readonly reset: HTMLButtonElement;
+	/** The settings this section manages, which Reset to Defaults clears at the selected scope. */
+	readonly keys: string[];
+	/** State kept outside the settings files that Reset to Defaults clears as well. */
+	extraReset?: { readonly isModified: () => boolean; readonly reset: () => void };
 }
 
 interface SettingControl {
@@ -63,7 +75,7 @@ export class PersonalizationEditor extends EditorPane {
 	private readonly updates: (() => void)[] = [];
 	private readonly pageDisposables = this._register(new DisposableStore());
 	private readonly pendingSettings = new Set<string>();
-	private readonly sections: { element: HTMLElement; nav: HTMLButtonElement }[] = [];
+	private readonly sections: PersonalizationSection[] = [];
 	private readonly targetButtons: HTMLButtonElement[] = [];
 	private readonly focusTargets = new Map<string, HTMLElement>();
 	private discardColorDraft = () => { };
@@ -105,7 +117,8 @@ export class PersonalizationEditor extends EditorPane {
 		append(pageHeader, $('p', undefined, localize('personalization.intro', "Make JCode feel right for the way you work.")));
 		this.status = append(pageHeader, $('.personalization-status', { role: 'status', 'aria-live': 'polite' }));
 		const appearance = this.section(nav, 'appearance', Codicon.paintcan, localize('personalization.appearance', "Appearance"), localize('personalization.appearanceDescription', "Choose the theme and file icons used across JCode."));
-		const themes = append(appearance, $('.personalization-theme-grid'));
+		appearance.keys.push('workbench.colorTheme', 'workbench.iconTheme');
+		const themes = append(appearance.body, $('.personalization-theme-grid'));
 		this.themeButton(themes, localize('personalization.colorTheme', "Color theme"), 'workbench.action.selectTheme', () => this.workbenchThemeService.getColorTheme().label);
 		this.themeButton(themes, localize('personalization.fileIcons', "File icons"), 'workbench.action.selectIconTheme', () => this.workbenchThemeService.getFileIconTheme().label);
 		const workspace = this.section(nav, 'workspace', Codicon.symbolColor, localize('personalization.workspaceColor', "Workspace color"), localize('personalization.workspaceDescription', "Give this workspace a recognizable color. Saved locally, without changing its settings files."));
@@ -142,12 +155,17 @@ export class PersonalizationEditor extends EditorPane {
 		return button;
 	}
 
-	private section(nav: HTMLElement, id: string, icon: ThemeIcon, title: string, description: string): HTMLElement {
+	private section(nav: HTMLElement, id: string, icon: ThemeIcon, title: string, description: string): PersonalizationSection {
 		const element = append(this.content, $('section.personalization-section', { 'aria-label': title }));
 		element.dataset.section = id;
 		const header = append(element, $('.personalization-section-header'));
-		append(header, $('h2', undefined, title));
-		append(header, $('p.personalization-section-description', undefined, description));
+		const heading = append(header, $('.personalization-section-heading'));
+		const headingId = `personalization-section-${this.group.id}-${id}`;
+		append(heading, $('h2', { id: headingId }, title));
+		append(heading, $('p.personalization-section-description', undefined, description));
+		const reset = this.button(header, localize('personalization.resetSectionLabel', "Reset to Defaults"), () => { void this.resetSection(section); }, `section:${id}:reset`);
+		reset.className = 'personalization-section-reset';
+		reset.setAttribute('aria-describedby', headingId);
 		const body = append(element, $('.personalization-section-body'));
 		const button = this.button(nav, title, () => {
 			element.scrollIntoView({ block: 'start', behavior: 'smooth' }); this.updateActiveSection(element);
@@ -157,8 +175,9 @@ export class PersonalizationEditor extends EditorPane {
 		const navIcon = append(button, $('span.personalization-nav-icon', { 'aria-hidden': 'true' }));
 		navIcon.classList.add(...ThemeIcon.asClassNameArray(icon));
 		append(button, $('span', undefined, title));
-		this.sections.push({ element, nav: button });
-		return body;
+		const section: PersonalizationSection = { element, nav: button, body, title, reset, keys: [] };
+		this.sections.push(section);
+		return section;
 	}
 
 	private updateActiveSection(selected?: HTMLElement): void {
@@ -191,7 +210,16 @@ export class PersonalizationEditor extends EditorPane {
 		this.updates.push(() => { name.textContent = getName(); });
 	}
 
-	private createWorkspaceColors(parent: HTMLElement): void {
+	private createWorkspaceColors(section: PersonalizationSection): void {
+		const parent = section.body;
+		section.extraReset = {
+			isModified: () => !!this.appearanceService.appearance,
+			reset: () => {
+				const preview = this.appearanceService.beginPreview();
+				try { preview.update(undefined); preview.apply(); }
+				finally { preview.dispose(); }
+			}
+		};
 		const palette = append(parent, $('.personalization-palette', { role: 'group', 'aria-label': localize('personalization.palette', "Workspace colors") }));
 		const buttons: { button: HTMLButtonElement; swatch: IWorkspaceColorSwatch; value: string | undefined }[] = [];
 		for (const preset of [undefined, ...WORKSPACE_COLOR_PALETTE]) {
@@ -388,8 +416,9 @@ export class PersonalizationEditor extends EditorPane {
 		this.status.textContent = localize('personalization.intensitySaved', "Workspace color intensity updated.");
 	}
 
-	private setting(parent: HTMLElement, key: string, title: string, description: string, choices?: readonly SettingChoice[], kind?: 'placement' | 'range', range?: readonly [number, number, number], isRelevant?: () => boolean): SettingControl {
-		const row = append(parent, $('.personalization-setting'));
+	private setting(section: PersonalizationSection, key: string, title: string, description: string, choices?: readonly SettingChoice[], kind?: 'placement' | 'range', range?: readonly [number, number, number], isRelevant?: () => boolean): SettingControl {
+		section.keys.push(key);
+		const row = append(section.body, $('.personalization-setting'));
 		row.dataset.setting = key;
 		const text = append(row, $('.personalization-setting-text'));
 		const id = `personalization-control-${this.group.id}-${this.nextControlId++}`;
@@ -445,23 +474,37 @@ export class PersonalizationEditor extends EditorPane {
 		this.workspaceTarget.disabled = !hasWorkspace;
 		this.targetButtons.forEach((button, index) => button.setAttribute('aria-pressed', String(index === (this.target === ConfigurationTarget.USER ? 0 : 1))));
 		this.scopeDescription.textContent = this.target === ConfigurationTarget.USER ? localize('personalization.userScopeDescription', "Use these choices in every workspace.") : localize('personalization.workspaceScopeDescription', "Override your choices in this workspace.");
-		const registry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).getConfigurationProperties();
 		for (const control of this.controls) {
-			const config = this.configurationService.inspect<PersonalizationValue>(control.key);
-			const scope = registry[control.key]?.scope;
-			const userOnly = this.target === ConfigurationTarget.WORKSPACE && (scope === ConfigurationScope.APPLICATION || scope === ConfigurationScope.MACHINE || scope === ConfigurationScope.APPLICATION_MACHINE);
-			const policy = config?.policyValue !== undefined;
-			const disabled = userOnly || policy || !registry[control.key];
+			const { config, policy, userOnly, disabled, ownValue } = this.inspectSetting(control.key);
 			control.refresh(getPersonalizationValue(config, this.target), disabled);
 			this.setBusy(control, this.pendingSettings.has(control.key));
-			const ownValue = this.target === ConfigurationTarget.WORKSPACE ? config?.workspaceValue : config?.userValue;
 			control.reset.disabled = disabled || ownValue === undefined;
 			control.hint.textContent = policy ? localize('personalization.managed', "Managed by your organization.") : userOnly ? localize('personalization.userOnly', "Available in User settings.") : this.target === ConfigurationTarget.USER && config?.workspaceValue !== undefined ? localize('personalization.overridden', "This workspace has its own value.") : '';
 			control.row.hidden = control.isRelevant?.() === false;
 		}
 		for (const update of this.updates) { update(); }
+		for (const section of this.sections) {
+			// Stays focusable when there is nothing to reset, so activating it never drops focus.
+			if (section.keys.some(key => this.canReset(key)) || section.extraReset?.isModified()) { section.reset.removeAttribute('aria-disabled'); }
+			else { section.reset.setAttribute('aria-disabled', 'true'); }
+		}
 		this.updateActiveSection();
 		this.restoreFocus(focus);
+	}
+
+	/** What the selected scope allows for a setting, and what it holds there. */
+	private inspectSetting(key: string): { readonly config: IConfigurationValue<PersonalizationValue> | undefined; readonly policy: boolean; readonly userOnly: boolean; readonly disabled: boolean; readonly ownValue: PersonalizationValue | undefined } {
+		const property = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).getConfigurationProperties()[key];
+		const config = this.configurationService.inspect<PersonalizationValue>(key);
+		const scope = property?.scope;
+		const userOnly = this.target === ConfigurationTarget.WORKSPACE && (scope === ConfigurationScope.APPLICATION || scope === ConfigurationScope.MACHINE || scope === ConfigurationScope.APPLICATION_MACHINE);
+		const policy = config?.policyValue !== undefined;
+		return { config, policy, userOnly, disabled: userOnly || policy || !property, ownValue: this.target === ConfigurationTarget.WORKSPACE ? config?.workspaceValue : config?.userValue };
+	}
+
+	private canReset(key: string): boolean {
+		const { disabled, ownValue } = this.inspectSetting(key);
+		return !disabled && ownValue !== undefined;
 	}
 
 	/**
@@ -505,16 +548,40 @@ export class PersonalizationEditor extends EditorPane {
 	}
 
 	private async updateSetting(key: string, value: PersonalizationValue | undefined): Promise<void> {
-		if (this.pendingSettings.has(key)) { return; }
 		const target = this.target;
-		this.pendingSettings.add(key); this.refresh();
-		try {
-			await this.configurationService.updateValue(key, value, target);
+		if (await this.updateSettings(new Map([[key, value]]))) {
 			this.status.textContent = localize('personalization.saved', "Saved to {0} settings.", target === ConfigurationTarget.USER ? localize('personalization.user', "User") : localize('personalization.workspace', "Workspace"));
+		}
+	}
+
+	/** Saves settings at the selected scope, one after another. Settings that are already saving are skipped. */
+	private async updateSettings(values: ReadonlyMap<string, PersonalizationValue | undefined>): Promise<boolean> {
+		const keys = [...values.keys()].filter(key => !this.pendingSettings.has(key));
+		if (!keys.length) { return false; }
+		const target = this.target;
+		for (const key of keys) { this.pendingSettings.add(key); }
+		this.refresh();
+		try {
+			for (const key of keys) { await this.configurationService.updateValue(key, values.get(key), target); }
+			return true;
 		} catch (error) {
 			this.notificationService.error(error instanceof Error ? error : String(error));
 			this.status.textContent = localize('personalization.failed', "Could not save this change. Check the notification for details.");
-		} finally { this.pendingSettings.delete(key); this.refresh(); }
+			return false;
+		} finally {
+			for (const key of keys) { this.pendingSettings.delete(key); }
+			this.refresh();
+		}
+	}
+
+	/** Clears what a section manages: its settings at the selected scope, and its state kept outside the settings files. */
+	private async resetSection(section: PersonalizationSection): Promise<void> {
+		const keys = section.keys.filter(key => this.canReset(key));
+		const extra = section.extraReset?.isModified() ? section.extraReset : undefined;
+		if (!keys.length && !extra) { return; }
+		extra?.reset();
+		if (keys.length && !await this.updateSettings(new Map(keys.map(key => [key, undefined] as const)))) { return; }
+		this.status.textContent = localize('personalization.sectionReset', "{0} reset to defaults.", section.title);
 	}
 
 	private runCommand(id: string): void {

@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { localize, localize2 } from '../../../../nls.js';
+import { Categories } from '../../../../platform/action/common/actionCommonCategories.js';
 import { Action2, MenuId, registerAction2 } from '../../../../platform/actions/common/actions.js';
 import { SyncDescriptor } from '../../../../platform/instantiation/common/descriptors.js';
 import { IInstantiationService, ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
@@ -31,7 +32,8 @@ registerAction2(class extends Action2 {
 	constructor() {
 		super({
 			id: 'jcode.action.openPersonalization',
-			title: localize2('personalization.open', "JCode Personalization"),
+			title: localize2('personalization.open', "Personalize JCode"),
+			category: Categories.Preferences,
 			f1: true,
 			menu: [
 				{ id: MenuId.GlobalActivity, group: '2_configuration', order: 2.1 },
