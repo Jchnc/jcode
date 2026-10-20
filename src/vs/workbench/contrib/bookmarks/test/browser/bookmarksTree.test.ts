@@ -18,7 +18,7 @@ function bookmark(path: string, lineNumber: number, extra: Partial<ICodeBookmark
 }
 
 function group(bookmarks: readonly ICodeBookmark[]) {
-	return groupBookmarksByFile(bookmarks, resource => resource.toString(), resource => resource.path);
+	return groupBookmarksByFile(bookmarks, { getResourceKey: resource => resource.toString(), getResourceLabel: resource => resource.path });
 }
 
 suite('BookmarksTreeModel', () => {

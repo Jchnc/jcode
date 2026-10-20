@@ -29,6 +29,7 @@ import { WorkbenchObjectTree } from '../../../../platform/list/browser/listServi
 import { defaultCountBadgeStyles, IStyleOverride } from '../../../../platform/theme/browser/defaultStyles.js';
 import { IUriIdentityService } from '../../../../platform/uriIdentity/common/uriIdentity.js';
 import { IResourceLabel, ResourceLabels } from '../../../browser/labels.js';
+import { getBookmarkFileOrder } from './bookmarksOrder.js';
 import { BOOKMARKS_VIEW_ITEM_INLINE_MENU, BookmarkItemKind, CONTEXT_CODE_BOOKMARK_ITEM_KIND, getBookmarkLabel, IBookmarkActionContext, IBookmarkFileGroup, ICodeBookmark, groupBookmarksByFile } from '../common/bookmarks.js';
 
 const FILE_ROW_HEIGHT = 22;
@@ -352,7 +353,7 @@ export class BookmarksTree extends Disposable {
 	 * Shows the given bookmarks, touching only the rows that changed.
 	 */
 	setBookmarks(bookmarks: readonly ICodeBookmark[]): void {
-		const groups = groupBookmarksByFile(bookmarks, resource => this.uriIdentityService.extUri.getComparisonKey(resource), resource => this.labelService.getUriLabel(resource, { relative: true }));
+		const groups = groupBookmarksByFile(bookmarks, getBookmarkFileOrder(this.uriIdentityService, this.labelService));
 		const [focused] = this.tree.getFocus();
 		const hadFocus = DOM.isAncestorOfActiveElement(this.tree.getHTMLElement());
 		const previousOrder = this.order;

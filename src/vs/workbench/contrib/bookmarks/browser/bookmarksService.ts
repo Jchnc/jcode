@@ -7,12 +7,13 @@ import { RunOnceScheduler } from '../../../../base/common/async.js';
 import { Emitter } from '../../../../base/common/event.js';
 import { Disposable, DisposableStore, toDisposable } from '../../../../base/common/lifecycle.js';
 import { MarkdownString } from '../../../../base/common/htmlContent.js';
+import { ResourceMap } from '../../../../base/common/map.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
 import { URI } from '../../../../base/common/uri.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
 import { Range } from '../../../../editor/common/core/range.js';
-import { GlyphMarginLane, IModelDeltaDecoration, ITextModel, OverviewRulerLane, TrackedRangeStickiness } from '../../../../editor/common/model.js';
+import { GlyphMarginLane, IModelDecorationOptions, IModelDeltaDecoration, ITextModel, OverviewRulerLane, TrackedRangeStickiness } from '../../../../editor/common/model.js';
 import { IModelContentChangedEvent } from '../../../../editor/common/textModelEvents.js';
 import { IModelService } from '../../../../editor/common/services/model.js';
 import { localize } from '../../../../nls.js';
@@ -59,6 +60,17 @@ interface ITrackedModel {
 	bookmarks: Map<string, ITrackedBookmark>;
 }
 
+function createDecorationOptions(bookmark: ICodeBookmark): IModelDecorationOptions {
+	return {
+		description: 'jcode-code-bookmark',
+		glyphMarginClassName: `${ThemeIcon.asClassName(Codicon.bookmark)} jcode-bookmark-glyph`,
+		glyphMargin: { position: GlyphMarginLane.Center },
+		stickiness: TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+		hoverMessage: new MarkdownString(bookmark.note || localize('bookmarkHover', "Bookmark at line {0}", bookmark.lineNumber)),
+		overviewRuler: { color: themeColorFromId(bookmarkOverviewRuler), position: OverviewRulerLane.Center }
+	};
+}
+
 function captureModelAnchor(model: ITextModel, lineNumber: number): ICodeBookmarkAnchor {
 	return {
 		lineText: model.getLineContent(lineNumber),
@@ -76,11 +88,21 @@ export class CodeBookmarksService extends Disposable implements ICodeBookmarksSe
 	private _bookmarks: ICodeBookmark[];
 	private readonly hasBookmarksContext: IContextKey<boolean>;
 	private readonly hasStaleBookmarksContext: IContextKey<boolean>;
-	private readonly trackedModels = new Map<string, ITrackedModel>();
+	/**
+	 * The open models that have bookmarks. Models without bookmarks are not tracked.
+	 */
+	private readonly trackedModels = new ResourceMap<ITrackedModel>(resource => this.uriIdentityService.extUri.getComparisonKey(resource));
 	private readonly storeScheduler = this._register(new RunOnceScheduler(() => this.store(), 300));
 
 	get bookmarks(): readonly ICodeBookmark[] {
 		return this._bookmarks;
+	}
+
+	/**
+	 * The number of open models whose edits are being followed. Only exposed for tests.
+	 */
+	get trackedModelCount(): number {
+		return this.trackedModels.size;
 	}
 
 	constructor(
@@ -104,10 +126,8 @@ export class CodeBookmarksService extends Disposable implements ICodeBookmarksSe
 		this._register(this.modelService.onModelRemoved(model => this.untrackModel(model)));
 		this._register(toDisposable(() => {
 			for (const entry of this.trackedModels.values()) {
-				this.clearDecorations(entry);
-				entry.disposables.dispose();
+				this.releaseModel(entry);
 			}
-			this.trackedModels.clear();
 		}));
 		this._register(this.storageService.onWillSaveState(() => this.store()));
 		this._register(this.fileService.onDidRunOperation(event => {
@@ -220,9 +240,12 @@ export class CodeBookmarksService extends Disposable implements ICodeBookmarksSe
 		return this._bookmarks.filter(bookmark => !bookmark.stale && bookmark.lineNumber === lineNumber && this.uriIdentityService.extUri.isEqual(bookmark.resource, resource));
 	}
 
+	private hasBookmarks(resource: URI): boolean {
+		return this._bookmarks.some(bookmark => this.uriIdentityService.extUri.isEqual(bookmark.resource, resource));
+	}
+
 	private trackModel(model: ITextModel): void {
-		const key = model.uri.toString();
-		if (this.trackedModels.has(key)) {
+		if (this.trackedModels.has(model.uri) || !this.hasBookmarks(model.uri)) {
 			return;
 		}
 
@@ -234,19 +257,35 @@ export class CodeBookmarksService extends Disposable implements ICodeBookmarksSe
 			bookmarks: new Map()
 		};
 		disposables.add(model.onDidChangeContent(event => this.onDidChangeModelContent(entry, event)));
-		this.trackedModels.set(key, entry);
+		this.trackedModels.set(model.uri, entry);
 		this.refreshModel(entry);
 	}
 
 	private untrackModel(model: ITextModel): void {
-		const key = model.uri.toString();
-		const entry = this.trackedModels.get(key);
-		if (!entry) {
+		const entry = this.trackedModels.get(model.uri);
+		if (entry?.model !== model) {
 			return;
 		}
 		this.syncModel(entry, true);
 		entry.disposables.dispose();
-		this.trackedModels.delete(key);
+		this.trackedModels.delete(model.uri);
+	}
+
+	/**
+	 * Stops tracking the models that no longer have any bookmark.
+	 */
+	private releaseUnusedModels(): void {
+		for (const entry of this.trackedModels.values()) {
+			if (!this.hasBookmarks(entry.model.uri)) {
+				this.releaseModel(entry);
+			}
+		}
+	}
+
+	private releaseModel(entry: ITrackedModel): void {
+		this.clearDecorations(entry);
+		entry.disposables.dispose();
+		this.trackedModels.delete(entry.model.uri);
 	}
 
 	private clearDecorations(entry: ITrackedModel): void {
@@ -257,21 +296,24 @@ export class CodeBookmarksService extends Disposable implements ICodeBookmarksSe
 	}
 
 	private refreshTrackedModel(resource: URI): void {
-		const entry = this.getTrackedModel(resource);
+		const entry = this.trackedModels.get(resource);
 		if (entry) {
 			this.refreshModel(entry);
+			return;
+		}
+
+		// The model has no tracking yet when it just got its first bookmark.
+		const model = this.modelService.getModel(resource);
+		if (model) {
+			this.trackModel(model);
 		}
 	}
 
 	private syncTrackedModel(resource: URI): void {
-		const entry = this.getTrackedModel(resource);
+		const entry = this.trackedModels.get(resource);
 		if (entry) {
 			this.syncModel(entry, false);
 		}
-	}
-
-	private getTrackedModel(resource: URI): ITrackedModel | undefined {
-		return [...this.trackedModels.values()].find(entry => this.uriIdentityService.extUri.isEqual(entry.model.uri, resource));
 	}
 
 	private onDidChangeModelContent(entry: ITrackedModel, event: IModelContentChangedEvent): void {
@@ -414,14 +456,7 @@ export class CodeBookmarksService extends Disposable implements ICodeBookmarksSe
 
 		const decorations: IModelDeltaDecoration[] = resolved.map(bookmark => ({
 			range: new Range(bookmark.lineNumber, 1, bookmark.lineNumber, 1),
-			options: {
-				description: 'jcode-code-bookmark',
-				glyphMarginClassName: `${ThemeIcon.asClassName(Codicon.bookmark)} jcode-bookmark-glyph`,
-				glyphMargin: { position: GlyphMarginLane.Center },
-				stickiness: TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
-				hoverMessage: new MarkdownString(bookmark.note || localize('bookmarkHover', "Bookmark at line {0}", bookmark.lineNumber)),
-				overviewRuler: { color: themeColorFromId(bookmarkOverviewRuler), position: OverviewRulerLane.Center }
-			}
+			options: createDecorationOptions(bookmark)
 		}));
 		const decorationIds = model.deltaDecorations([...entry.bookmarks.values()].map(tracked => tracked.decorationId), decorations);
 		entry.bookmarks = new Map(resolved.map((bookmark, index) => [bookmark.id, {
@@ -441,6 +476,7 @@ export class CodeBookmarksService extends Disposable implements ICodeBookmarksSe
 			return;
 		}
 		let didChange = false;
+		const moved: { readonly decorationId: string; readonly bookmark: ICodeBookmark }[] = [];
 		this._bookmarks = this._bookmarks.map(bookmark => {
 			const tracked = entry.bookmarks.get(bookmark.id);
 			if (!tracked) {
@@ -451,8 +487,20 @@ export class CodeBookmarksService extends Disposable implements ICodeBookmarksSe
 				return bookmark;
 			}
 			didChange = true;
-			return { ...bookmark, ...anchor, lineNumber, stale: false };
+			const updated = { ...bookmark, ...anchor, lineNumber, stale: false };
+			if (bookmark.lineNumber !== lineNumber) {
+				moved.push({ decorationId: tracked.decorationId, bookmark: updated });
+			}
+			return updated;
 		});
+		if (moved.length > 0 && !entry.model.isDisposed()) {
+			// The hover of a bookmark mentions its line, so keep it in step with the line the bookmark moved to.
+			entry.model.changeDecorations(accessor => {
+				for (const { decorationId, bookmark } of moved) {
+					accessor.changeDecorationOptions(decorationId, createDecorationOptions(bookmark));
+				}
+			});
+		}
 		if (didChange) {
 			this.storeScheduler.schedule();
 			if (fire) {
@@ -462,17 +510,21 @@ export class CodeBookmarksService extends Disposable implements ICodeBookmarksSe
 	}
 
 	private handleMove(source: URI, target: URI): void {
-		let didChange = false;
+		const moved = new ResourceMap<URI>(resource => this.uriIdentityService.extUri.getComparisonKey(resource));
 		this._bookmarks = this._bookmarks.map(bookmark => {
 			if (!this.uriIdentityService.extUri.isEqualOrParent(bookmark.resource, source)) {
 				return bookmark;
 			}
 			const relativePath = this.uriIdentityService.extUri.relativePath(source, bookmark.resource);
-			didChange = true;
-			return { ...bookmark, resource: relativePath ? this.uriIdentityService.extUri.joinPath(target, relativePath) : target };
+			const resource = relativePath ? this.uriIdentityService.extUri.joinPath(target, relativePath) : target;
+			moved.set(resource, resource);
+			return { ...bookmark, resource };
 		});
-		if (didChange) {
+		if (moved.size > 0) {
 			this.mergeDuplicates();
+			for (const resource of moved.values()) {
+				this.refreshTrackedModel(resource);
+			}
 			this.fireChanged();
 		}
 	}
@@ -511,6 +563,7 @@ export class CodeBookmarksService extends Disposable implements ICodeBookmarksSe
 	}
 
 	private fireChanged(): void {
+		this.releaseUnusedModels();
 		this.updateContextKeys();
 		this.storeScheduler.schedule();
 		this._onDidChangeBookmarks.fire();

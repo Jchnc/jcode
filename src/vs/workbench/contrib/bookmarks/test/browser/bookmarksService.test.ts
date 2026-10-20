@@ -6,6 +6,7 @@
 import assert from 'assert';
 import { timeout } from '../../../../../base/common/async.js';
 import { DisposableStore } from '../../../../../base/common/lifecycle.js';
+import { IMarkdownString } from '../../../../../base/common/htmlContent.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { runWithFakedTimers } from '../../../../../base/test/common/timeTravelScheduler.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
@@ -249,6 +250,45 @@ suite('CodeBookmarksService', () => {
 			{ id: 'd', lineNumber: 9, stale: true, note: undefined },
 			{ id: 'f', lineNumber: 9, stale: true, note: undefined }
 		]);
+	});
+
+	test('only follows a model while it has bookmarks', () => {
+		const { model, service } = setup();
+		const withoutBookmarks = service.trackedModelCount;
+
+		service.toggle(resource, 2);
+		const withBookmark = { tracked: service.trackedModelCount, gutterDecorations: countGutterDecorations(model) };
+		service.toggle(resource, 2);
+
+		assert.deepStrictEqual({ withoutBookmarks, withBookmark, afterRemoval: service.trackedModelCount }, {
+			withoutBookmarks: 0,
+			withBookmark: { tracked: 1, gutterDecorations: 1 },
+			afterRemoval: 0
+		});
+	});
+
+	test('follows a model that already has stored bookmarks and stops when the service is disposed', () => {
+		const { model, service } = setup('alpha\nbeta', [{ id: 'a', resource: resource.toString(), lineNumber: 2, column: 1, lineText: 'beta', beforeText: 'alpha', afterText: '', stale: false, createdAt: 1 }]);
+		const tracked = { count: service.trackedModelCount, gutterDecorations: countGutterDecorations(model) };
+
+		service.dispose();
+
+		assert.deepStrictEqual({ tracked, afterDispose: { count: service.trackedModelCount, gutterDecorations: countGutterDecorations(model) } }, {
+			tracked: { count: 1, gutterDecorations: 1 },
+			afterDispose: { count: 0, gutterDecorations: 0 }
+		});
+	});
+
+	test('keeps the line number in the hover of a bookmark up to date', () => {
+		const { model, service } = setup();
+		const hover = () => model.getAllDecorations().map(decoration => (decoration.options.hoverMessage as IMarkdownString | null)?.value);
+		service.toggle(resource, 3);
+		const before = hover();
+
+		model.applyEdits([{ range: new Range(1, 1, 1, 1), text: 'inserted\n' }]);
+		service.find(resource, 4);
+
+		assert.deepStrictEqual({ before, after: hover() }, { before: ['Bookmark at line 3'], after: ['Bookmark at line 4'] });
 	});
 
 	test('removes only stale bookmarks', () => {

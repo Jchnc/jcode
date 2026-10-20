@@ -30,8 +30,10 @@ import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase 
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { IViewsService } from '../../../services/views/common/viewsService.js';
 import { VIEW_CONTAINER } from '../../files/browser/explorerViewlet.js';
+import { IUriIdentityService } from '../../../../platform/uriIdentity/common/uriIdentity.js';
 import { FocusedViewContext } from '../../../common/contextkeys.js';
-import { BOOKMARKS_VIEW_ITEM_INLINE_MENU, BOOKMARKS_VIEW_ITEM_MENU, BookmarkItemKind, CONTEXT_CODE_BOOKMARK_ITEM_KIND, CONTEXT_CODE_BOOKMARKS_PRESENT, CONTEXT_CODE_BOOKMARKS_STALE_PRESENT, getBookmarkLabel, ICodeBookmark, ICodeBookmarksService, isBookmarkActionContext } from '../common/bookmarks.js';
+import { BOOKMARKS_VIEW_ITEM_INLINE_MENU, BOOKMARKS_VIEW_ITEM_MENU, BookmarkItemKind, CONTEXT_CODE_BOOKMARK_ITEM_KIND, CONTEXT_CODE_BOOKMARKS_PRESENT, CONTEXT_CODE_BOOKMARKS_STALE_PRESENT, findAdjacentBookmark, getBookmarkLabel, ICodeBookmark, ICodeBookmarksService, isBookmarkActionContext } from '../common/bookmarks.js';
+import { getBookmarkFileOrder } from './bookmarksOrder.js';
 import { CodeBookmarksService } from './bookmarksService.js';
 import { BookmarksView } from './bookmarksView.js';
 
@@ -356,27 +358,19 @@ function registerNavigationAction(id: string, title: ILocalizedString, direction
 
 		async run(accessor: ServicesAccessor): Promise<void> {
 			const service = accessor.get(ICodeBookmarksService);
-			const bookmarks = service.bookmarks.filter(bookmark => !bookmark.stale).sort(compareBookmarks);
-			if (bookmarks.length === 0) {
-				accessor.get(INotificationService).info(localize('noBookmarks', "There are no active bookmarks in this workspace."));
-				return;
-			}
+			const editorService = accessor.get(IEditorService);
+			const notificationService = accessor.get(INotificationService);
+			const fileOrder = getBookmarkFileOrder(accessor.get(IUriIdentityService), accessor.get(ILabelService));
 
-			const editor = getActiveCodeEditor(accessor.get(IEditorService));
+			const editor = getActiveCodeEditor(editorService);
 			const model = editor?.getModel();
 			const position = editor?.getPosition();
-			let index = direction > 0 ? 0 : bookmarks.length - 1;
-			if (model && position) {
-				const current: ICodeBookmark = { ...bookmarks[0], resource: model.uri, lineNumber: position.lineNumber, column: position.column };
-				if (direction > 0) {
-					const next = bookmarks.findIndex(bookmark => compareBookmarks(bookmark, current) > 0);
-					index = next >= 0 ? next : 0;
-				} else {
-					const previous = bookmarks.findLastIndex(bookmark => compareBookmarks(bookmark, current) < 0);
-					index = previous >= 0 ? previous : bookmarks.length - 1;
-				}
+			const bookmark = findAdjacentBookmark(service.bookmarks, model && position ? { resource: model.uri, lineNumber: position.lineNumber } : undefined, direction, fileOrder);
+			if (!bookmark) {
+				notificationService.info(localize('noBookmarks', "There are no active bookmarks in this workspace."));
+				return;
 			}
-			await openBookmark(accessor.get(IEditorService), bookmarks[index]);
+			await openBookmark(editorService, bookmark);
 		}
 	});
 }
@@ -387,11 +381,6 @@ function getActiveCodeEditor(editorService: IEditorService): ICodeEditor | undef
 		return control.getModifiedEditor();
 	}
 	return isCodeEditor(control) ? control : undefined;
-}
-
-function compareBookmarks(left: ICodeBookmark, right: ICodeBookmark): number {
-	const resourceComparison = left.resource.toString().localeCompare(right.resource.toString());
-	return resourceComparison || left.lineNumber - right.lineNumber || left.column - right.column;
 }
 
 async function openBookmark(editorService: IEditorService, bookmark: ICodeBookmark): Promise<void> {

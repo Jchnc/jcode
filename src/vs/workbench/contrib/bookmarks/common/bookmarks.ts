@@ -191,22 +191,53 @@ export interface IBookmarkFileGroup {
 }
 
 /**
+ * Defines how files are told apart and ordered when bookmarks are listed, so that the Bookmarks
+ * view and the navigation commands agree on the order.
+ */
+export interface IBookmarkFileOrder {
+	getResourceKey(resource: URI): string;
+	getResourceLabel(resource: URI): string;
+}
+
+function compareFiles(left: { readonly key: string; readonly label: string }, right: { readonly key: string; readonly label: string }): number {
+	return left.label.localeCompare(right.label) || left.key.localeCompare(right.key);
+}
+
+/**
  * Groups bookmarks by file in the order they are listed: files by label, bookmarks by position.
  */
-export function groupBookmarksByFile(bookmarks: readonly ICodeBookmark[], getResourceKey: (resource: URI) => string, getResourceLabel: (resource: URI) => string): IBookmarkFileGroup[] {
+export function groupBookmarksByFile(bookmarks: readonly ICodeBookmark[], order: IBookmarkFileOrder): IBookmarkFileGroup[] {
 	const groups = new Map<string, { readonly key: string; readonly resource: URI; readonly label: string; readonly bookmarks: ICodeBookmark[] }>();
 	for (const bookmark of bookmarks) {
-		const key = getResourceKey(bookmark.resource);
+		const key = order.getResourceKey(bookmark.resource);
 		let group = groups.get(key);
 		if (!group) {
-			group = { key, resource: bookmark.resource, label: getResourceLabel(bookmark.resource), bookmarks: [] };
+			group = { key, resource: bookmark.resource, label: order.getResourceLabel(bookmark.resource), bookmarks: [] };
 			groups.set(key, group);
 		}
 		group.bookmarks.push(bookmark);
 	}
 	return [...groups.values()]
-		.sort((left, right) => left.label.localeCompare(right.label) || left.key.localeCompare(right.key))
+		.sort(compareFiles)
 		.map(group => ({ ...group, bookmarks: group.bookmarks.sort((left, right) => left.lineNumber - right.lineNumber || left.column - right.column || left.createdAt - right.createdAt) }));
+}
+
+/**
+ * Finds the bookmark to go to from a cursor position, following the order in which bookmarks are
+ * listed and wrapping around at either end. Stale bookmarks have no position and are skipped.
+ */
+export function findAdjacentBookmark(bookmarks: readonly ICodeBookmark[], cursor: { readonly resource: URI; readonly lineNumber: number } | undefined, direction: 1 | -1, order: IBookmarkFileOrder): ICodeBookmark | undefined {
+	const cursorFile = cursor && { key: order.getResourceKey(cursor.resource), label: order.getResourceLabel(cursor.resource) };
+	const positions = groupBookmarksByFile(bookmarks.filter(bookmark => !bookmark.stale), order).flatMap(group => group.bookmarks.map(bookmark => ({
+		bookmark,
+		// Whether the bookmark is after (positive) or before (negative) the cursor, and zero on the cursor line.
+		relativeToCursor: cursor && cursorFile ? compareFiles(group, cursorFile) || bookmark.lineNumber - cursor.lineNumber : 0
+	})));
+	if (!cursor) {
+		return (direction > 0 ? positions[0] : positions[positions.length - 1])?.bookmark;
+	}
+	const adjacent = direction > 0 ? positions.find(position => position.relativeToCursor > 0) : positions.findLast(position => position.relativeToCursor < 0);
+	return (adjacent ?? (direction > 0 ? positions[0] : positions[positions.length - 1]))?.bookmark;
 }
 
 export function captureBookmarkAnchor(lines: readonly string[], lineNumber: number): ICodeBookmarkAnchor {

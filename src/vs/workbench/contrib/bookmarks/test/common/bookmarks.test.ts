@@ -6,10 +6,12 @@
 import assert from 'assert';
 import { URI } from '../../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { captureBookmarkAnchor, findBookmarkLine, groupBookmarksByFile, ICodeBookmark, isBookmarkLineRemoved, mergeDuplicateBookmarks } from '../../common/bookmarks.js';
+import { captureBookmarkAnchor, findAdjacentBookmark, findBookmarkLine, groupBookmarksByFile, ICodeBookmark, isBookmarkLineRemoved, mergeDuplicateBookmarks } from '../../common/bookmarks.js';
 
 suite('Code bookmarks', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
+
+	const fileOrder = { getResourceKey: (resource: URI) => resource.toString(), getResourceLabel: (resource: URI) => resource.path };
 
 	test('relocates a bookmark using its source context', () => {
 		const original = ['function save() {', '\tvalidate();', '\tcommit();', '}'];
@@ -122,11 +124,39 @@ suite('Code bookmarks', () => {
 			bookmark('c', '/src/b.ts', 2, 5),
 			bookmark('d', '/src/a.ts', 3),
 			bookmark('e', '/src/b.ts', 2, 1)
-		], resource => resource.toString(), resource => resource.path);
+		], fileOrder);
 
 		assert.deepStrictEqual(groups.map(group => ({ label: group.label, bookmarks: group.bookmarks.map(candidate => candidate.id) })), [
 			{ label: '/src/a.ts', bookmarks: ['d', 'b'] },
 			{ label: '/src/b.ts', bookmarks: ['e', 'c', 'a'] }
 		]);
+	});
+
+	test('goes to the next and previous bookmark in the order they are listed', () => {
+		const bookmark = (id: string, path: string, lineNumber: number, stale = false): ICodeBookmark => ({ id, resource: URI.file(path), lineNumber, column: 1, lineText: '', beforeText: '', afterText: '', stale, createdAt: 0 });
+		const bookmarks = [bookmark('b9', '/b.ts', 9), bookmark('a4', '/a.ts', 4), bookmark('a20', '/a.ts', 20), bookmark('b2', '/b.ts', 2), bookmark('a8', '/a.ts', 8, true)];
+		const go = (path: string | undefined, lineNumber: number, direction: 1 | -1) => findAdjacentBookmark(bookmarks, path ? { resource: URI.file(path), lineNumber } : undefined, direction, fileOrder)?.id;
+
+		assert.deepStrictEqual({
+			nextInFile: go('/a.ts', 4, 1),
+			nextAcrossFiles: go('/a.ts', 20, 1),
+			nextWraps: go('/b.ts', 9, 1),
+			previousInFile: go('/b.ts', 9, -1),
+			previousAcrossFiles: go('/b.ts', 2, -1),
+			previousWraps: go('/a.ts', 4, -1),
+			fromFileWithoutBookmarks: [go('/0.ts', 1, 1), go('/c.ts', 1, -1), go('/ab.ts', 1, 1), go('/ab.ts', 1, -1)],
+			withoutCursor: [go(undefined, 1, 1), go(undefined, 1, -1)],
+			staleIgnored: go('/a.ts', 5, 1)
+		}, {
+			nextInFile: 'a20',
+			nextAcrossFiles: 'b2',
+			nextWraps: 'a4',
+			previousInFile: 'b2',
+			previousAcrossFiles: 'a20',
+			previousWraps: 'b9',
+			fromFileWithoutBookmarks: ['a4', 'b9', 'b2', 'a20'],
+			withoutCursor: ['a4', 'b9'],
+			staleIgnored: 'a20'
+		});
 	});
 });
