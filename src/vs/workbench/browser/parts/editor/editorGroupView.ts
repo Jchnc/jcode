@@ -1255,13 +1255,7 @@ export class EditorGroupView extends Themable implements IEditorGroupView {
 	}
 
 	setTabGroupCollapsed(groupId: string, collapsed: boolean): void {
-		const previousActiveEditor = this.model.activeEditor;
 		this.model.setTabGroupCollapsed(groupId, collapsed);
-
-		const activeEditor = this.model.activeEditor;
-		if (activeEditor && activeEditor !== previousActiveEditor) {
-			void this.openEditor(activeEditor, { preserveFocus: true });
-		}
 	}
 
 	renameTabGroup(groupId: string, name: string): void {

@@ -1399,30 +1399,11 @@ export class EditorGroupModel extends Disposable implements IEditorGroupModel {
 		}
 		this.pushTabGroupUndoState();
 
+		// Collapsing never changes the active editor: the active editor of a
+		// collapsed group stays visible as the group's only visible member.
 		group.collapsed = collapsed;
 
-		if (collapsed && this.activeEditor && this.editorTabGroups.get(this.activeEditor) === groupId) {
-			const activeEditorIndex = this.indexOf(this.activeEditor);
-			const nextActiveEditor = this.findVisibleEditor(activeEditorIndex + 1, 1, groupId) ?? this.findVisibleEditor(activeEditorIndex - 1, -1, groupId);
-
-			if (nextActiveEditor) {
-				this.setSelection(nextActiveEditor, []);
-			}
-		}
-
 		this._onDidModelChange.fire({ kind: GroupModelChangeKind.TAB_GROUP_CHANGED, tabGroup: group });
-	}
-
-	private findVisibleEditor(startIndex: number, direction: -1 | 1, excludedTabGroupId: string): EditorInput | undefined {
-		for (let index = startIndex; index >= 0 && index < this.editors.length; index += direction) {
-			const editor = this.editors[index];
-			const editorTabGroup = this.getTabGroupForEditor(editor);
-			if (editorTabGroup?.id !== excludedTabGroupId && editorTabGroup?.collapsed !== true) {
-				return editor;
-			}
-		}
-
-		return undefined;
 	}
 
 	renameTabGroup(groupId: string, name: string): void {

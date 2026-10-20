@@ -381,55 +381,56 @@ suite('EditorGroupModel', () => {
 		toDispose.dispose();
 	});
 
-	test('collapsing tab group activates nearest visible editor on the right', () => {
-		const group = createEditorGroupModel();
-		const editors = [input(), input(), input(), input(), input()];
-
-		for (let index = 0; index < editors.length; index++) {
-			group.openEditor(editors[index], { pinned: true, active: index === 2, index });
-		}
-
-		const tabGroup = group.createTabGroup(editors.slice(1, 4), 'Group');
-		assert.ok(tabGroup);
-
-		group.setTabGroupCollapsed(tabGroup.id, true);
-
-		assert.strictEqual(group.activeEditor, editors[4]);
-	});
-
-	test('collapsing tab group activates nearest visible editor on the left when none is visible on the right', () => {
-		const group = createEditorGroupModel();
-		const editors = [input(), input(), input(), input()];
-
-		for (let index = 0; index < editors.length; index++) {
-			group.openEditor(editors[index], { pinned: true, active: index === 2, index });
-		}
-
-		const tabGroup = group.createTabGroup(editors.slice(1), 'Group');
-		assert.ok(tabGroup);
-
-		group.setTabGroupCollapsed(tabGroup.id, true);
-
-		assert.strictEqual(group.activeEditor, editors[0]);
-	});
-
-	test('collapsing tab group skips other collapsed tab groups when activating an editor', () => {
+	test('collapsing the tab group of the active editor keeps it active', () => {
 		const group = createEditorGroupModel();
 		const editors = [input(), input(), input(), input(), input(), input()];
 
 		for (let index = 0; index < editors.length; index++) {
-			group.openEditor(editors[index], { pinned: true, active: index === 2, index });
+			group.openEditor(editors[index], { pinned: true, active: index === 1, index });
 		}
 
-		const activeTabGroup = group.createTabGroup(editors.slice(1, 4), 'Active Group');
-		const collapsedTabGroup = group.createTabGroup([editors[4]], 'Collapsed Group');
-		assert.ok(activeTabGroup);
-		assert.ok(collapsedTabGroup);
-		group.setTabGroupCollapsed(collapsedTabGroup.id, true);
+		const firstTabGroup = group.createTabGroup(editors.slice(0, 3), 'Group 1');
+		const secondTabGroup = group.createTabGroup(editors.slice(3), 'Group 2');
+		assert.ok(firstTabGroup);
+		assert.ok(secondTabGroup);
 
-		group.setTabGroupCollapsed(activeTabGroup.id, true);
+		group.setTabGroupCollapsed(firstTabGroup.id, true);
 
-		assert.strictEqual(group.activeEditor, editors[5]);
+		assert.deepStrictEqual({
+			active: group.activeEditor,
+			selection: group.selectedEditors,
+			collapsed: group.tabGroups.map(tabGroup => tabGroup.collapsed)
+		}, {
+			active: editors[1],
+			selection: [editors[1]],
+			collapsed: [true, false]
+		});
+	});
+
+	test('collapsing a tab group without the active editor keeps the active editor', () => {
+		const group = createEditorGroupModel();
+		const editors = [input(), input(), input(), input(), input(), input()];
+
+		for (let index = 0; index < editors.length; index++) {
+			group.openEditor(editors[index], { pinned: true, active: index === 1, index });
+		}
+
+		const firstTabGroup = group.createTabGroup(editors.slice(0, 3), 'Group 1');
+		const secondTabGroup = group.createTabGroup(editors.slice(3), 'Group 2');
+		assert.ok(firstTabGroup);
+		assert.ok(secondTabGroup);
+
+		group.setTabGroupCollapsed(secondTabGroup.id, true);
+
+		assert.deepStrictEqual({
+			active: group.activeEditor,
+			selection: group.selectedEditors,
+			collapsed: group.tabGroups.map(tabGroup => tabGroup.collapsed)
+		}, {
+			active: editors[1],
+			selection: [editors[1]],
+			collapsed: [false, true]
+		});
 	});
 
 	test('collapsing the only visible tab group keeps its active editor', () => {
