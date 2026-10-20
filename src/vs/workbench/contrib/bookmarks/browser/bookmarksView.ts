@@ -4,13 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as DOM from '../../../../base/browser/dom.js';
-import { DomScrollableElement } from '../../../../base/browser/ui/scrollbar/scrollableElement.js';
 import { Codicon } from '../../../../base/common/codicons.js';
-import { DisposableStore } from '../../../../base/common/lifecycle.js';
-import { basename, dirname } from '../../../../base/common/resources.js';
-import { ScrollbarVisibility } from '../../../../base/common/scrollable.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
-import { URI } from '../../../../base/common/uri.js';
 import { Range } from '../../../../editor/common/core/range.js';
 import { localize, localize2 } from '../../../../nls.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
@@ -20,24 +15,23 @@ import { IContextMenuService } from '../../../../platform/contextview/browser/co
 import { IHoverService } from '../../../../platform/hover/browser/hover.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { IKeybindingService } from '../../../../platform/keybinding/common/keybinding.js';
-import { ILabelService } from '../../../../platform/label/common/label.js';
-import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
 import { IThemeService } from '../../../../platform/theme/common/themeService.js';
 import { ViewPane } from '../../../browser/parts/views/viewPane.js';
 import { IViewletViewOptions } from '../../../browser/parts/views/viewsViewlet.js';
 import { IViewDescriptorService } from '../../../common/views.js';
-import { IEditorService } from '../../../services/editor/common/editorService.js';
+import { ACTIVE_GROUP, IEditorService, SIDE_GROUP } from '../../../services/editor/common/editorService.js';
 import { IOpenerService } from '../../../../platform/opener/common/opener.js';
-import { getBookmarkLabel, ICodeBookmark, ICodeBookmarksService } from '../common/bookmarks.js';
+import { BOOKMARKS_VIEW_ITEM_MENU, BookmarkItemKind, CONTEXT_CODE_BOOKMARK_ITEM_KIND, IBookmarkActionContext, ICodeBookmarksService } from '../common/bookmarks.js';
+import { BookmarkElement, BookmarksTree, IBookmarksTreeContextMenuEvent, IBookmarksTreeOpenEvent } from './bookmarksTree.js';
 
 export class BookmarksView extends ViewPane {
 	static readonly ID = 'workbench.view.jcodeBookmarks';
 	static readonly NAME = localize2('bookmarksViewName', "Bookmarks");
 
-	private container: HTMLElement | undefined;
-	private scrollable: DomScrollableElement | undefined;
-	private firstFocusable: HTMLElement | undefined;
-	private readonly renderDisposables = this._register(new DisposableStore());
+	private tree: BookmarksTree | undefined;
+	private treeContainer: HTMLElement | undefined;
+	private emptyContainer: HTMLElement | undefined;
+	private emptyAction: HTMLButtonElement | undefined;
 
 	constructor(
 		options: IViewletViewOptions,
@@ -52,167 +46,98 @@ export class BookmarksView extends ViewPane {
 		@IHoverService hoverService: IHoverService,
 		@ICodeBookmarksService private readonly bookmarksService: ICodeBookmarksService,
 		@IEditorService private readonly editorService: IEditorService,
-		@IQuickInputService private readonly quickInputService: IQuickInputService,
-		@ILabelService private readonly labelService: ILabelService,
 		@ICommandService private readonly commandService: ICommandService,
 	) {
 		super(options, keybindingService, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService);
-		this._register(this.bookmarksService.onDidChangeBookmarks(() => this.renderBookmarks()));
+		this._register(this.bookmarksService.onDidChangeBookmarks(() => this.refresh()));
+		this._register(this.onDidChangeBodyVisibility(visible => {
+			if (visible) {
+				this.refresh();
+			}
+		}));
 	}
 
 	protected override renderBody(container: HTMLElement): void {
 		super.renderBody(container);
 		container.classList.add('jcode-bookmarks-view');
-		this.container = DOM.$('.jcode-bookmarks-list', { role: 'list', 'aria-label': localize('bookmarkList', "Code bookmarks") });
-		this.scrollable = this._register(new DomScrollableElement(this.container, {
-			horizontal: ScrollbarVisibility.Hidden,
-			vertical: ScrollbarVisibility.Auto
+
+		this.treeContainer = DOM.append(container, DOM.$('.jcode-bookmarks-tree.show-file-icons'));
+		const tree = this.tree = this._register(this.instantiationService.createInstance(BookmarksTree, this.treeContainer, {
+			overrideStyles: this.getLocationBasedColors().listOverrideStyles,
+			onDidChangeVisibility: this.onDidChangeBodyVisibility
 		}));
-		const scrollableNode = this.scrollable.getDomNode();
-		scrollableNode.classList.add('jcode-bookmarks-scrollable');
-		container.appendChild(scrollableNode);
-		this.renderBookmarks();
+		this._register(tree.onDidOpenBookmark(event => this.openBookmark(event)));
+		this._register(tree.onDidRequestContextMenu(event => this.showContextMenu(event)));
+
+		this.emptyContainer = this.renderEmptyState(container);
+		this.refresh();
 	}
 
 	protected override layoutBody(height: number, width: number): void {
 		super.layoutBody(height, width);
-		if (this.scrollable) {
-			const scrollableNode = this.scrollable.getDomNode();
-			scrollableNode.style.width = `${width}px`;
-			scrollableNode.style.height = `${height}px`;
-			if (this.container) {
-				this.container.style.width = `${width}px`;
-				this.container.style.height = `${height}px`;
-			}
-			this.scrollable.scanDomNode();
-		}
+		this.tree?.layout(height, width);
 	}
 
 	override focus(): void {
 		super.focus();
-		this.firstFocusable?.focus();
+		if (this.bookmarksService.bookmarks.length > 0) {
+			this.tree?.focus();
+		} else {
+			this.emptyAction?.focus();
+		}
 	}
 
-	private renderBookmarks(): void {
-		if (!this.container) {
-			return;
-		}
-		this.renderDisposables.clear();
-		DOM.clearNode(this.container);
-		this.firstFocusable = undefined;
-
-		if (this.bookmarksService.bookmarks.length === 0) {
-			this.renderEmptyState(this.container);
-			this.scrollable?.scanDomNode();
-			return;
-		}
-
-		for (const group of this.groupBookmarks()) {
-			const section = DOM.append(this.container, DOM.$('section.jcode-bookmarks-group', { role: 'group', 'aria-label': group.label }));
-			const header = DOM.append(section, DOM.$('.jcode-bookmarks-file'));
-			const icon = DOM.append(header, DOM.$('span.jcode-bookmarks-file-icon', { 'aria-hidden': 'true' }));
-			icon.classList.add(...ThemeIcon.asClassNameArray(Codicon.file));
-			const labels = DOM.append(header, DOM.$('.jcode-bookmarks-file-labels'));
-			DOM.append(labels, DOM.$('span.jcode-bookmarks-file-name', undefined, basename(group.resource)));
-			DOM.append(labels, DOM.$('span.jcode-bookmarks-file-path', undefined, this.labelService.getUriLabel(dirname(group.resource), { relative: true })));
-
-			for (const bookmark of group.bookmarks) {
-				this.renderBookmark(section, bookmark);
-			}
-		}
-		this.scrollable?.scanDomNode();
+	/**
+	 * The bookmark that has keyboard focus in the view, if any.
+	 */
+	getFocusedBookmarkId(): string | undefined {
+		return this.tree?.getFocusedBookmark()?.id;
 	}
 
-	private renderEmptyState(parent: HTMLElement): void {
+	private refresh(): void {
+		if (!this.tree || !this.isBodyVisible()) {
+			return;
+		}
+
+		const bookmarks = this.bookmarksService.bookmarks;
+		const isEmpty = bookmarks.length === 0;
+		if (this.treeContainer && this.emptyContainer) {
+			DOM.setVisibility(!isEmpty, this.treeContainer);
+			DOM.setVisibility(isEmpty, this.emptyContainer);
+		}
+		this.tree.setBookmarks(bookmarks);
+	}
+
+	private renderEmptyState(parent: HTMLElement): HTMLElement {
 		const empty = DOM.append(parent, DOM.$('.jcode-bookmarks-empty'));
 		const icon = DOM.append(empty, DOM.$('span.jcode-bookmarks-empty-icon', { 'aria-hidden': 'true' }));
 		icon.classList.add(...ThemeIcon.asClassNameArray(Codicon.bookmark));
 		DOM.append(empty, DOM.$('h3', undefined, localize('bookmarksEmptyTitle', "No bookmarks yet")));
 		DOM.append(empty, DOM.$('p', undefined, localize('bookmarksEmptyDescription', "Bookmark important lines to return to them from anywhere in your workspace.")));
-		const action = DOM.append(empty, DOM.$('button.jcode-bookmarks-empty-action', { type: 'button' }, localize('bookmarkCurrentLine', "Bookmark Current Line"))) as HTMLButtonElement;
-		this.firstFocusable = action;
-		this.renderDisposables.add(DOM.addDisposableListener(action, DOM.EventType.CLICK, () => this.commandService.executeCommand('jcode.bookmarks.toggle')));
+		const action = this.emptyAction = DOM.append(empty, DOM.$('button.jcode-bookmarks-empty-action', { type: 'button' }, localize('bookmarkCurrentLine', "Bookmark Current Line"))) as HTMLButtonElement;
+		this._register(DOM.addDisposableListener(action, DOM.EventType.CLICK, () => this.commandService.executeCommand('jcode.bookmarks.toggle')));
+		return empty;
 	}
 
-	private renderBookmark(parent: HTMLElement, bookmark: ICodeBookmark): void {
-		const row = DOM.append(parent, DOM.$('.jcode-bookmark-row', { role: 'listitem' }));
-		if (bookmark.stale) {
-			row.classList.add('stale');
-		}
-
-		const primary = getBookmarkLabel(bookmark);
-		const main = DOM.append(row, DOM.$('button.jcode-bookmark-main', {
-			type: 'button',
-			'title': bookmark.stale ? localize('staleBookmarkTitle', "The bookmarked line was deleted or can no longer be found. Relocate the bookmark to the current line, or remove it.") : localize('openBookmarkTitle', "Open bookmark")
-		})) as HTMLButtonElement;
-		if (bookmark.stale) {
-			main.setAttribute('aria-label', localize('staleBookmarkAriaLabel', "{0}, stale bookmark, was on line {1}", primary, bookmark.lineNumber));
-		}
-		this.firstFocusable ??= main;
-		const marker = DOM.append(main, DOM.$('span.jcode-bookmark-marker', { 'aria-hidden': 'true' }));
-		marker.classList.add(...ThemeIcon.asClassNameArray(bookmark.stale ? Codicon.warning : Codicon.bookmark));
-		const content = DOM.append(main, DOM.$('.jcode-bookmark-content'));
-		DOM.append(content, DOM.$('span.jcode-bookmark-primary', undefined, primary));
-		const secondaryParts = [bookmark.stale ? localize('bookmarkStaleLine', "Was on line {0}", bookmark.lineNumber) : localize('bookmarkLine', "Line {0}", bookmark.lineNumber)];
-		if (bookmark.note && bookmark.lineText.trim()) {
-			secondaryParts.push(bookmark.lineText.trim());
-		}
-		if (bookmark.stale) {
-			secondaryParts.push(localize('bookmarkStale', "Stale"));
-		}
-		DOM.append(content, DOM.$('span.jcode-bookmark-secondary', undefined, secondaryParts.join(' · ')));
-		this.renderDisposables.add(DOM.addDisposableListener(main, DOM.EventType.CLICK, () => this.openBookmark(bookmark)));
-
-		const actions = DOM.append(row, DOM.$('.jcode-bookmark-actions'));
-		if (bookmark.stale) {
-			this.actionButton(actions, Codicon.target, localize('relocateBookmarkToLine', "Relocate Bookmark to Current Line"), () => this.commandService.executeCommand('jcode.bookmarks.relocate', bookmark.id));
-		}
-		this.actionButton(actions, Codicon.edit, localize('editBookmarkNote', "Edit Bookmark Note"), () => this.editNote(bookmark));
-		this.actionButton(actions, Codicon.trash, localize('removeBookmark', "Remove Bookmark"), () => this.bookmarksService.remove(bookmark.id));
-	}
-
-	private actionButton(parent: HTMLElement, icon: ThemeIcon, label: string, action: () => void | Promise<void>): HTMLButtonElement {
-		const button = DOM.append(parent, DOM.$('button.jcode-bookmark-action', { type: 'button', 'aria-label': label, title: label })) as HTMLButtonElement;
-		button.classList.add(...ThemeIcon.asClassNameArray(icon));
-		this.renderDisposables.add(DOM.addDisposableListener(button, DOM.EventType.CLICK, event => {
-			event.stopPropagation();
-			void action();
-		}));
-		return button;
-	}
-
-	private async openBookmark(bookmark: ICodeBookmark): Promise<void> {
+	private async openBookmark({ bookmark, editorOptions, sideBySide }: IBookmarksTreeOpenEvent): Promise<void> {
 		await this.editorService.openEditor({
 			resource: bookmark.resource,
-			options: { pinned: true, selection: new Range(bookmark.lineNumber, bookmark.column, bookmark.lineNumber, bookmark.column) }
-		});
+			options: { ...editorOptions, selection: new Range(bookmark.lineNumber, bookmark.column, bookmark.lineNumber, bookmark.column) }
+		}, sideBySide ? SIDE_GROUP : ACTIVE_GROUP);
 	}
 
-	private async editNote(bookmark: ICodeBookmark): Promise<void> {
-		const note = await this.quickInputService.input({
-			title: localize('bookmarkNoteTitle', "Bookmark Note"),
-			prompt: localize('bookmarkNotePrompt', "Add context that will help you recognize this location later."),
-			placeHolder: localize('bookmarkNotePlaceholder', "What is important here?"),
-			value: bookmark.note ?? ''
+	private showContextMenu({ element, anchor }: IBookmarksTreeContextMenuEvent): void {
+		if (!(element instanceof BookmarkElement)) {
+			return;
+		}
+		const { bookmark } = element;
+		const context: IBookmarkActionContext = { bookmarkId: bookmark.id };
+		this.contextMenuService.showContextMenu({
+			menuId: BOOKMARKS_VIEW_ITEM_MENU,
+			menuActionOptions: { shouldForwardArgs: true },
+			contextKeyService: this.scopedContextKeyService.createOverlay([[CONTEXT_CODE_BOOKMARK_ITEM_KIND.key, bookmark.stale ? BookmarkItemKind.StaleBookmark : BookmarkItemKind.Bookmark]]),
+			getAnchor: () => anchor,
+			getActionsContext: () => context
 		});
-		if (note !== undefined) {
-			this.bookmarksService.updateNote(bookmark.id, note);
-		}
-	}
-
-	private groupBookmarks(): { resource: URI; label: string; bookmarks: ICodeBookmark[] }[] {
-		const groups = new Map<string, { resource: URI; label: string; bookmarks: ICodeBookmark[] }>();
-		for (const bookmark of this.bookmarksService.bookmarks) {
-			const key = bookmark.resource.toString();
-			let group = groups.get(key);
-			if (!group) {
-				group = { resource: bookmark.resource, label: this.labelService.getUriLabel(bookmark.resource, { relative: true }), bookmarks: [] };
-				groups.set(key, group);
-			}
-			group.bookmarks.push(bookmark);
-		}
-		return [...groups.values()]
-			.sort((left, right) => left.label.localeCompare(right.label))
-			.map(group => ({ ...group, bookmarks: group.bookmarks.sort((left, right) => left.lineNumber - right.lineNumber) }));
 	}
 }

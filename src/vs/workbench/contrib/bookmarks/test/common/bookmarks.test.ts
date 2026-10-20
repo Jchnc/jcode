@@ -6,7 +6,7 @@
 import assert from 'assert';
 import { URI } from '../../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { captureBookmarkAnchor, findBookmarkLine, ICodeBookmark, isBookmarkLineRemoved, mergeDuplicateBookmarks } from '../../common/bookmarks.js';
+import { captureBookmarkAnchor, findBookmarkLine, groupBookmarksByFile, ICodeBookmark, isBookmarkLineRemoved, mergeDuplicateBookmarks } from '../../common/bookmarks.js';
 
 suite('Code bookmarks', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -111,5 +111,22 @@ suite('Code bookmarks', () => {
 			bothNotes: [{ id: 'b', note: 'second · first' }],
 			staleStaysApart: [{ id: 'a', note: undefined }, { id: 'b', note: undefined }, { id: 'd', note: undefined }]
 		});
+	});
+
+	test('groups bookmarks by file label and sorts them by position', () => {
+		const bookmark = (id: string, path: string, lineNumber: number, column = 1): ICodeBookmark => ({ id, resource: URI.file(path), lineNumber, column, lineText: '', beforeText: '', afterText: '', stale: false, createdAt: 0 });
+
+		const groups = groupBookmarksByFile([
+			bookmark('a', '/src/b.ts', 9),
+			bookmark('b', '/src/a.ts', 12),
+			bookmark('c', '/src/b.ts', 2, 5),
+			bookmark('d', '/src/a.ts', 3),
+			bookmark('e', '/src/b.ts', 2, 1)
+		], resource => resource.toString(), resource => resource.path);
+
+		assert.deepStrictEqual(groups.map(group => ({ label: group.label, bookmarks: group.bookmarks.map(candidate => candidate.id) })), [
+			{ label: '/src/a.ts', bookmarks: ['d', 'b'] },
+			{ label: '/src/b.ts', bookmarks: ['e', 'c', 'a'] }
+		]);
 	});
 });

@@ -30,7 +30,8 @@ import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase 
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { IViewsService } from '../../../services/views/common/viewsService.js';
 import { VIEW_CONTAINER } from '../../files/browser/explorerViewlet.js';
-import { CONTEXT_CODE_BOOKMARKS_PRESENT, CONTEXT_CODE_BOOKMARKS_STALE_PRESENT, getBookmarkLabel, ICodeBookmark, ICodeBookmarksService } from '../common/bookmarks.js';
+import { FocusedViewContext } from '../../../common/contextkeys.js';
+import { BOOKMARKS_VIEW_ITEM_INLINE_MENU, BOOKMARKS_VIEW_ITEM_MENU, BookmarkItemKind, CONTEXT_CODE_BOOKMARK_ITEM_KIND, CONTEXT_CODE_BOOKMARKS_PRESENT, CONTEXT_CODE_BOOKMARKS_STALE_PRESENT, getBookmarkLabel, ICodeBookmark, ICodeBookmarksService, isBookmarkActionContext } from '../common/bookmarks.js';
 import { CodeBookmarksService } from './bookmarksService.js';
 import { BookmarksView } from './bookmarksView.js';
 
@@ -42,6 +43,11 @@ const SHOW_BOOKMARKS_ID = 'jcode.bookmarks.show';
 const REMOVE_ALL_BOOKMARKS_ID = 'jcode.bookmarks.removeAll';
 const REMOVE_STALE_BOOKMARKS_ID = 'jcode.bookmarks.removeStale';
 const RELOCATE_BOOKMARK_ID = 'jcode.bookmarks.relocate';
+const EDIT_BOOKMARK_NOTE_ID = 'jcode.bookmarks.editNote';
+const REMOVE_BOOKMARK_ID = 'jcode.bookmarks.remove';
+
+const IS_BOOKMARK_ITEM = CONTEXT_CODE_BOOKMARK_ITEM_KIND.notEqualsTo(BookmarkItemKind.File);
+const IS_FOCUSED_IN_BOOKMARKS_VIEW = FocusedViewContext.isEqualTo(BookmarksView.ID);
 
 const bookmarksViewIcon = registerIcon('jcode-bookmarks-view-icon', Codicon.bookmark, localize('bookmarksViewIcon', "View icon of the Bookmarks view."));
 
@@ -139,14 +145,85 @@ registerAction2(class extends Action2 {
 		if (!bookmark) {
 			return;
 		}
-		const note = await accessor.get(IQuickInputService).input({
-			title: localize('bookmarkNoteTitle', "Bookmark Note"),
-			prompt: localize('bookmarkNotePrompt', "Add context that will help you recognize this location later."),
-			placeHolder: localize('bookmarkNotePlaceholder', "What is important here?"),
-			value: bookmark.note ?? ''
+		await promptForBookmarkNote(service, accessor.get(IQuickInputService), bookmark);
+	}
+});
+
+async function promptForBookmarkNote(service: ICodeBookmarksService, quickInputService: IQuickInputService, bookmark: ICodeBookmark): Promise<void> {
+	const note = await quickInputService.input({
+		title: localize('bookmarkNoteTitle', "Bookmark Note"),
+		prompt: localize('bookmarkNotePrompt', "Add context that will help you recognize this location later."),
+		placeHolder: localize('bookmarkNotePlaceholder', "What is important here?"),
+		value: bookmark.note ?? ''
+	});
+	if (note !== undefined) {
+		service.updateNote(bookmark.id, note);
+	}
+}
+
+/**
+ * Finds the bookmark an action was invoked on, as passed by the Bookmarks view.
+ */
+function getContextBookmark(accessor: ServicesAccessor, context: unknown): ICodeBookmark | undefined {
+	const id = typeof context === 'string' ? context : isBookmarkActionContext(context) ? context.bookmarkId : undefined;
+	return id ? accessor.get(ICodeBookmarksService).bookmarks.find(bookmark => bookmark.id === id) : undefined;
+}
+
+/**
+ * Finds the bookmark an action was invoked on: the one passed by the Bookmarks view, else the one
+ * that has keyboard focus in the view.
+ */
+function resolveBookmark(accessor: ServicesAccessor, context: unknown): ICodeBookmark | undefined {
+	const bookmark = getContextBookmark(accessor, context);
+	if (bookmark) {
+		return bookmark;
+	}
+	const id = accessor.get(IViewsService).getActiveViewWithId<BookmarksView>(BookmarksView.ID)?.getFocusedBookmarkId();
+	return id ? accessor.get(ICodeBookmarksService).bookmarks.find(candidate => candidate.id === id) : undefined;
+}
+
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: EDIT_BOOKMARK_NOTE_ID,
+			title: localize2('editBookmarkNote', "Edit Bookmark Note"),
+			icon: Codicon.edit,
+			keybinding: { primary: KeyCode.F2, weight: KeybindingWeight.WorkbenchContrib, when: IS_FOCUSED_IN_BOOKMARKS_VIEW },
+			menu: [
+				{ id: BOOKMARKS_VIEW_ITEM_INLINE_MENU, group: 'inline', order: 2, when: IS_BOOKMARK_ITEM },
+				{ id: BOOKMARKS_VIEW_ITEM_MENU, group: '1_modification', order: 2, when: IS_BOOKMARK_ITEM }
+			]
 		});
-		if (note !== undefined) {
-			service.updateNote(bookmark.id, note);
+	}
+
+	async run(accessor: ServicesAccessor, context?: unknown): Promise<void> {
+		const service = accessor.get(ICodeBookmarksService);
+		const quickInputService = accessor.get(IQuickInputService);
+		const bookmark = resolveBookmark(accessor, context);
+		if (bookmark) {
+			await promptForBookmarkNote(service, quickInputService, bookmark);
+		}
+	}
+});
+
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: REMOVE_BOOKMARK_ID,
+			title: localize2('removeBookmark', "Remove Bookmark"),
+			icon: Codicon.trash,
+			keybinding: { primary: KeyCode.Delete, mac: { primary: KeyMod.CtrlCmd | KeyCode.Backspace }, weight: KeybindingWeight.WorkbenchContrib, when: IS_FOCUSED_IN_BOOKMARKS_VIEW },
+			menu: [
+				{ id: BOOKMARKS_VIEW_ITEM_INLINE_MENU, group: 'inline', order: 3, when: IS_BOOKMARK_ITEM },
+				{ id: BOOKMARKS_VIEW_ITEM_MENU, group: '3_remove', order: 1, when: IS_BOOKMARK_ITEM }
+			]
+		});
+	}
+
+	run(accessor: ServicesAccessor, context?: unknown): void {
+		const bookmark = resolveBookmark(accessor, context);
+		if (bookmark) {
+			accessor.get(ICodeBookmarksService).remove(bookmark.id);
 		}
 	}
 });
@@ -222,12 +299,17 @@ registerAction2(class extends Action2 {
 		super({
 			id: RELOCATE_BOOKMARK_ID,
 			title: localize2('relocateBookmark', "Relocate Bookmark"),
+			icon: Codicon.target,
 			f1: true,
-			precondition: CONTEXT_CODE_BOOKMARKS_STALE_PRESENT
+			precondition: CONTEXT_CODE_BOOKMARKS_STALE_PRESENT,
+			menu: [
+				{ id: BOOKMARKS_VIEW_ITEM_INLINE_MENU, group: 'inline', order: 1, when: CONTEXT_CODE_BOOKMARK_ITEM_KIND.isEqualTo(BookmarkItemKind.StaleBookmark) },
+				{ id: BOOKMARKS_VIEW_ITEM_MENU, group: '1_modification', order: 1, when: CONTEXT_CODE_BOOKMARK_ITEM_KIND.isEqualTo(BookmarkItemKind.StaleBookmark) }
+			]
 		});
 	}
 
-	async run(accessor: ServicesAccessor, bookmarkId?: unknown): Promise<void> {
+	async run(accessor: ServicesAccessor, context?: unknown): Promise<void> {
 		const service = accessor.get(ICodeBookmarksService);
 		const notificationService = accessor.get(INotificationService);
 		const quickInputService = accessor.get(IQuickInputService);
@@ -241,7 +323,7 @@ registerAction2(class extends Action2 {
 			return;
 		}
 
-		const id = typeof bookmarkId === 'string' ? bookmarkId : await pickStaleBookmark(service, quickInputService, labelService);
+		const id = getContextBookmark(accessor, context)?.id ?? await pickStaleBookmark(service, quickInputService, labelService);
 		if (!id) {
 			return;
 		}

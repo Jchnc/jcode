@@ -7,11 +7,44 @@ import { Event } from '../../../../base/common/event.js';
 import { URI } from '../../../../base/common/uri.js';
 import { IRange } from '../../../../editor/common/core/range.js';
 import { localize } from '../../../../nls.js';
+import { MenuId } from '../../../../platform/actions/common/actions.js';
 import { RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 
 export const CONTEXT_CODE_BOOKMARKS_PRESENT = new RawContextKey<boolean>('jcode.bookmarks.hasBookmarks', false, true);
 export const CONTEXT_CODE_BOOKMARKS_STALE_PRESENT = new RawContextKey<boolean>('jcode.bookmarks.hasStaleBookmarks', false, true);
+
+/**
+ * The kind of item in the Bookmarks view an action is invoked on.
+ */
+export const enum BookmarkItemKind {
+	File = 'file',
+	Bookmark = 'bookmark',
+	StaleBookmark = 'staleBookmark'
+}
+
+export const CONTEXT_CODE_BOOKMARK_ITEM_KIND = new RawContextKey<string>('jcode.bookmarks.itemKind', '', true);
+
+/**
+ * The context menu of an item in the Bookmarks view.
+ */
+export const BOOKMARKS_VIEW_ITEM_MENU = new MenuId('JCodeBookmarksViewItem');
+
+/**
+ * The actions shown inline on a hovered or focused item in the Bookmarks view.
+ */
+export const BOOKMARKS_VIEW_ITEM_INLINE_MENU = new MenuId('JCodeBookmarksViewItemInline');
+
+/**
+ * The argument passed to actions that are invoked on a bookmark in the Bookmarks view.
+ */
+export interface IBookmarkActionContext {
+	readonly bookmarkId: string;
+}
+
+export function isBookmarkActionContext(value: unknown): value is IBookmarkActionContext {
+	return typeof value === 'object' && value !== null && typeof (value as Partial<IBookmarkActionContext>).bookmarkId === 'string';
+}
 
 export interface ICodeBookmarkAnchor {
 	readonly lineText: string;
@@ -145,6 +178,35 @@ function mergeBookmarks(first: ICodeBookmark, second: ICodeBookmark): ICodeBookm
 	const [kept, other] = keepFirst ? [first, second] : [second, first];
 	const note = kept.note && other.note && kept.note !== other.note ? `${kept.note} · ${other.note}` : kept.note || other.note;
 	return { ...kept, note };
+}
+
+/**
+ * The bookmarks of a single file as they are listed.
+ */
+export interface IBookmarkFileGroup {
+	readonly key: string;
+	readonly resource: URI;
+	readonly label: string;
+	readonly bookmarks: readonly ICodeBookmark[];
+}
+
+/**
+ * Groups bookmarks by file in the order they are listed: files by label, bookmarks by position.
+ */
+export function groupBookmarksByFile(bookmarks: readonly ICodeBookmark[], getResourceKey: (resource: URI) => string, getResourceLabel: (resource: URI) => string): IBookmarkFileGroup[] {
+	const groups = new Map<string, { readonly key: string; readonly resource: URI; readonly label: string; readonly bookmarks: ICodeBookmark[] }>();
+	for (const bookmark of bookmarks) {
+		const key = getResourceKey(bookmark.resource);
+		let group = groups.get(key);
+		if (!group) {
+			group = { key, resource: bookmark.resource, label: getResourceLabel(bookmark.resource), bookmarks: [] };
+			groups.set(key, group);
+		}
+		group.bookmarks.push(bookmark);
+	}
+	return [...groups.values()]
+		.sort((left, right) => left.label.localeCompare(right.label) || left.key.localeCompare(right.key))
+		.map(group => ({ ...group, bookmarks: group.bookmarks.sort((left, right) => left.lineNumber - right.lineNumber || left.column - right.column || left.createdAt - right.createdAt) }));
 }
 
 export function captureBookmarkAnchor(lines: readonly string[], lineNumber: number): ICodeBookmarkAnchor {
