@@ -36,6 +36,7 @@ import { ILogService, LogLevel } from '../../../../platform/log/common/log.js';
 import { mainWindow } from '../../../../base/browser/window.js';
 import { parse, stringify } from '../../../../base/common/marshalling.js';
 import { IEditorTabGroup } from '../../../common/editor/editorTabGroup.js';
+import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { IGroupModelChangeEvent, isGroupEditorCloseEvent } from '../../../common/editor/editorGroupModel.js';
 import { HasSavedTabGroupsContext } from '../../../common/contextkeys.js';
 
@@ -130,7 +131,8 @@ export class HistoryService extends Disposable implements IHistoryService {
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
 		@IContextKeyService private readonly contextKeyService: IContextKeyService,
-		@ILogService private readonly logService: ILogService
+		@ILogService private readonly logService: ILogService,
+		@INotificationService private readonly notificationService: INotificationService
 	) {
 		super();
 
@@ -1097,17 +1099,37 @@ export class HistoryService extends Disposable implements IHistoryService {
 
 		const targetGroup = (groupId !== undefined ? this.editorGroupService.getGroup(groupId) : undefined) ?? this.editorGroupService.activeGroup;
 
+		// Editors that are open in the target group already are reused. The ones that are
+		// pinned to the front or in another tab group stay where they are, as pulling them
+		// into the reopened group would take them away from the user.
+		const entries = [...savedGroup.editors].sort((first, second) => first.index - second.index);
+		const existingEditors = targetGroup.getEditors(EditorsOrder.SEQUENTIAL);
+		const occupiedEditors = new Set<EditorInput>();
+		const entriesToOpen = entries.filter(entry => {
+			const existingEditor = existingEditors.find(editor => editor.matches(entry.editor));
+			if (existingEditor && (targetGroup.isSticky(existingEditor) || (isEditorGroupView(targetGroup) && targetGroup.getTabGroupForEditor(existingEditor)))) {
+				occupiedEditors.add(existingEditor);
+				return false;
+			}
+			return true;
+		});
+		if (entriesToOpen.length === 0) {
+			if (occupiedEditors.size > 0) {
+				this.notificationService.warn(localize('savedTabGroup.reopenImpossible', "Could not reopen the tab group \"{0}\" because all of its tabs are already open as pinned tabs or in other tab groups.", savedGroup.name));
+			}
+			return;
+		}
+
 		// Open all editors in one batch, pinned and without activating them, so that
 		// the target group does not flicker through every editor of the saved group
-		const entries = [...savedGroup.editors].sort((first, second) => first.index - second.index);
 		const firstIndex = targetGroup.count;
-		await this.editorService.openEditors(entries.map((entry, offset) => ({
+		await this.editorService.openEditors(entriesToOpen.map((entry, offset) => ({
 			...entry.editor,
 			options: { ...entry.editor.options, pinned: true, inactive: true, index: firstIndex + offset }
 		})), targetGroup);
 
 		const openedEditors = targetGroup.getEditors(EditorsOrder.SEQUENTIAL);
-		const reopenedEditors = [...new Set(coalesce(entries.map(entry => openedEditors.find(editor => editor.matches(entry.editor)))))];
+		const reopenedEditors = [...new Set(coalesce(entriesToOpen.map(entry => openedEditors.find(editor => editor.matches(entry.editor)))))];
 		if (reopenedEditors.length > 0 && isEditorGroupView(targetGroup)) {
 			const reopenedGroup = targetGroup.createTabGroup(reopenedEditors, savedGroup.name, savedGroup.color, {
 				id: savedGroup.id,
@@ -1120,6 +1142,11 @@ export class HistoryService extends Disposable implements IHistoryService {
 			});
 			if (reopenedGroup) {
 				this.deleteSavedTabGroup(id);
+				if (occupiedEditors.size > 0) {
+					this.notificationService.info(occupiedEditors.size === 1 ?
+						localize('savedTabGroup.reopenedWithoutTab', "Reopened the tab group \"{0}\" without \"{1}\", which is already open as a pinned tab or in another tab group.", savedGroup.name, [...occupiedEditors][0].getName()) :
+						localize('savedTabGroup.reopenedWithoutTabs', "Reopened the tab group \"{0}\" without {1} tabs that are already open as pinned tabs or in other tab groups.", savedGroup.name, occupiedEditors.size));
+				}
 
 				// Reveal the group by activating its first editor once, unless the group
 				// is collapsed and its editors are hidden on purpose

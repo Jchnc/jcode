@@ -32,14 +32,31 @@ import { SideBySideEditorInput } from '../../../../common/editor/sideBySideEdito
 import { IEditorGroupView } from '../../../../browser/parts/editor/editor.js';
 import { IEditorTabGroupCreateOptions } from '../../../../common/editor/editorTabGroup.js';
 import { IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
+import { INotification, INotificationHandle, INotificationService } from '../../../../../platform/notification/common/notification.js';
+import { TestNotificationService } from '../../../../../platform/notification/test/common/testNotificationService.js';
+import Severity from '../../../../../base/common/severity.js';
+
+/** Notification service that remembers what it is asked to show. */
+class RecordingNotificationService extends TestNotificationService {
+
+	readonly notifications: { severity: Severity; message: string }[] = [];
+
+	override notify(notification: INotification): INotificationHandle {
+		this.notifications.push({ severity: notification.severity, message: String(notification.message) });
+		return super.notify(notification);
+	}
+}
 
 suite('HistoryService', function () {
 
 	const TEST_EDITOR_ID = 'MyTestEditorForEditorHistory';
 	const TEST_EDITOR_INPUT_ID = 'testEditorInputForHistoyService';
 
-	async function createServices(scope = GoScope.DEFAULT, configureSearchExclude = false): Promise<[EditorPart, HistoryService, EditorService, ITextFileService, IInstantiationService, TestConfigurationService]> {
+	async function createServices(scope = GoScope.DEFAULT, configureSearchExclude = false, notificationService?: INotificationService): Promise<[EditorPart, HistoryService, EditorService, ITextFileService, IInstantiationService, TestConfigurationService]> {
 		const instantiationService = workbenchInstantiationService(undefined, disposables);
+		if (notificationService) {
+			instantiationService.stub(INotificationService, notificationService);
+		}
 
 		const part = await createEditorPart(instantiationService, disposables);
 		instantiationService.stub(IEditorGroupsService, part);
@@ -989,6 +1006,104 @@ suite('HistoryService', function () {
 			return workbenchTeardown(instantiationService);
 		});
 	}
+
+	async function createClosedSavedTabGroup(part: EditorPart): Promise<{ savedGroupId: string; targetGroup: IEditorGroupView }> {
+		const { group } = await createTabGroupWithSavedFlag(part, true);
+		const savedGroupId = group.tabGroups[0].id;
+		await group.closeAllEditors();
+
+		return { savedGroupId, targetGroup: group };
+	}
+
+	/** Opens file editors, which are the kind of editors that reopening a saved tab group opens as well. */
+	async function openFileEditors(editorService: IEditorService, group: IEditorGroupView, ...names: string[]): Promise<EditorInput[]> {
+		const editors: EditorInput[] = [];
+		for (const name of names) {
+			const pane = await editorService.openEditor({ resource: URI.parse(`foo://${name}`), options: { pinned: true } }, group);
+			assert.ok(pane?.input);
+			editors.push(pane.input);
+		}
+
+		return editors;
+	}
+
+	test('saved tab groups reuse the editors that are open in the editor group already', async () => {
+		const [part, historyService, editorService, , instantiationService] = await createServices();
+		const { savedGroupId, targetGroup } = await createClosedSavedTabGroup(part);
+		const [, openTab3, , openTab2] = await openFileEditors(editorService, targetGroup, 'first', 'tab3', 'last', 'tab2');
+
+		await historyService.reopenSavedTabGroup(savedGroupId, targetGroup.id);
+
+		assert.deepStrictEqual({
+			editors: targetGroup.editors.map(editor => editor.resource?.authority),
+			reusedEditors: [targetGroup.editors.includes(openTab2), targetGroup.editors.includes(openTab3)],
+			tabGroups: getTabGroupsOfEditorGroup(targetGroup).map(({ id, saved, members }) => ({ id, saved, members })),
+			savedGroups: getSavedTabGroupSnapshots(historyService)
+		}, {
+			editors: ['first', 'last', 'tab1', 'tab2', 'tab3'],
+			reusedEditors: [true, true],
+			tabGroups: [{ id: savedGroupId, saved: true, members: ['tab1', 'tab2', 'tab3'] }],
+			savedGroups: []
+		});
+
+		return workbenchTeardown(instantiationService);
+	});
+
+	test('saved tab groups leave editors in other tab groups and pinned tabs alone', async () => {
+		const notificationService = new RecordingNotificationService();
+		const [part, historyService, editorService, , instantiationService] = await createServices(GoScope.DEFAULT, false, notificationService);
+		const { savedGroupId, targetGroup } = await createClosedSavedTabGroup(part);
+		const [pinnedTab, groupedTab, other] = await openFileEditors(editorService, targetGroup, 'tab1', 'tab2', 'other');
+		targetGroup.stickEditor(pinnedTab);
+		const existingTabGroup = targetGroup.createTabGroup([groupedTab, other], 'Existing', 'red');
+		assert.ok(existingTabGroup);
+
+		await historyService.reopenSavedTabGroup(savedGroupId, targetGroup.id);
+
+		assert.deepStrictEqual({
+			editors: targetGroup.editors.map(editor => editor.resource?.authority),
+			sticky: targetGroup.stickyCount,
+			tabGroups: getTabGroupsOfEditorGroup(targetGroup).map(({ id, name, members }) => ({ id, name, members })),
+			savedGroups: getSavedTabGroupSnapshots(historyService),
+			notifications: notificationService.notifications
+		}, {
+			editors: ['tab1', 'tab2', 'other', 'tab3'],
+			sticky: 1,
+			tabGroups: [
+				{ id: existingTabGroup.id, name: 'Existing', members: ['tab2', 'other'] },
+				{ id: savedGroupId, name: 'Work', members: ['tab3'] }
+			],
+			savedGroups: [],
+			notifications: [{ severity: Severity.Info, message: 'Reopened the tab group "Work" without 2 tabs that are already open as pinned tabs or in other tab groups.' }]
+		});
+
+		return workbenchTeardown(instantiationService);
+	});
+
+	test('saved tab groups stay saved when all of their editors are in other tab groups', async () => {
+		const notificationService = new RecordingNotificationService();
+		const [part, historyService, editorService, , instantiationService] = await createServices(GoScope.DEFAULT, false, notificationService);
+		const { savedGroupId, targetGroup } = await createClosedSavedTabGroup(part);
+		const existingEditors = await openFileEditors(editorService, targetGroup, 'tab1', 'tab2', 'tab3');
+		const existingTabGroup = targetGroup.createTabGroup(existingEditors, 'Existing', 'red');
+		assert.ok(existingTabGroup);
+
+		await historyService.reopenSavedTabGroup(savedGroupId, targetGroup.id);
+
+		assert.deepStrictEqual({
+			editors: targetGroup.editors.map(editor => editor.resource?.authority),
+			tabGroups: getTabGroupsOfEditorGroup(targetGroup).map(({ id, members }) => ({ id, members })),
+			savedGroups: getSavedTabGroupSnapshots(historyService).map(({ name }) => name),
+			notifications: notificationService.notifications
+		}, {
+			editors: ['tab1', 'tab2', 'tab3'],
+			tabGroups: [{ id: existingTabGroup.id, members: ['tab1', 'tab2', 'tab3'] }],
+			savedGroups: ['Work'],
+			notifications: [{ severity: Severity.Warning, message: 'Could not reopen the tab group "Work" because all of its tabs are already open as pinned tabs or in other tab groups.' }]
+		});
+
+		return workbenchTeardown(instantiationService);
+	});
 
 	test('getHistory', async () => {
 
