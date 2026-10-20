@@ -299,10 +299,11 @@ function registerEditorMoveCopyCommand(): void {
 				index = group.count - 1;
 				break;
 			case 'left':
-				index = index - (args.value ?? 1);
-				break;
 			case 'right':
-				index = index + (args.value ?? 1);
+				if (isEditorGroupView(group)) {
+					return moveEditorByTabs(group, editor, args.to, args.value ?? 1);
+				}
+				index = args.to === 'left' ? index - (args.value ?? 1) : index + (args.value ?? 1);
 				break;
 			case 'center':
 				index = Math.round(group.count / 2) - 1;
@@ -1479,6 +1480,85 @@ function registerOtherEditorCommands(): void {
 
 export function getTabGroupMembers(groupView: IEditorGroupView, groupId: string): EditorInput[] {
 	return groupView.getEditors(EditorsOrder.SEQUENTIAL).filter(editor => groupView.getTabGroupForEditor(editor)?.id === groupId);
+}
+
+/**
+ * Moves an editor by the given number of tabs to the left or to the right, one tab at a time.
+ */
+export function moveEditorByTabs(groupView: IEditorGroupView, editor: EditorInput, direction: 'left' | 'right', count: number): void {
+	for (let step = 0; step < count; step++) {
+		const indexBefore = groupView.getIndexOfEditor(editor);
+		const tabGroupBefore = groupView.getTabGroupForEditor(editor);
+
+		moveEditorByOneTab(groupView, editor, direction);
+
+		if (groupView.getIndexOfEditor(editor) === indexBefore && groupView.getTabGroupForEditor(editor) === tabGroupBefore) {
+			return; // the editor cannot go any further
+		}
+	}
+}
+
+/**
+ * Moves an editor one tab to the left or to the right. Tab groups behave like they do in
+ * a browser, so that every step is visible and no tab is skipped over by accident:
+ *
+ * - At the edge of its tab group an editor first leaves the group without moving. This
+ *   includes an editor that is the only member of a group.
+ * - Next to an unlocked tab group an editor first joins the group without moving.
+ * - A collapsed tab group is skipped as a whole, because an editor never travels through
+ *   its hidden tabs. An editor that is shown in place of a collapsed group leaves it first,
+ *   to the side it moves to.
+ *
+ * A locked tab group keeps its editors and is skipped as a whole by the editors next to it.
+ */
+function moveEditorByOneTab(groupView: IEditorGroupView, editor: EditorInput, direction: 'left' | 'right'): void {
+	const step = direction === 'left' ? -1 : 1;
+	const index = groupView.getIndexOfEditor(editor);
+	const nextEditor = groupView.getEditorByIndex(index + step);
+	const tabGroupsEnabled = groupView.groupsView.partOptions.tabGroups.enabled;
+	const moveTo = (targetIndex: number) => groupView.moveEditor(editor, groupView, { index: Math.max(0, Math.min(targetIndex, groupView.count - 1)) });
+	const getEdgeIndex = (tabGroup: IEditorTabGroup) => {
+		const memberIndexes = getTabGroupMembers(groupView, tabGroup.id).map(member => groupView.getIndexOfEditor(member));
+
+		return step < 0 ? Math.min(...memberIndexes) : Math.max(...memberIndexes);
+	};
+
+	// Hidden tab groups are of no concern and sticky editors never belong to a tab group,
+	// but a sticky editor that leaves the sticky editors still skips a collapsed group
+	if (!tabGroupsEnabled || groupView.isSticky(editor)) {
+		const nextTabGroup = tabGroupsEnabled && nextEditor && !groupView.isSticky(nextEditor) ? groupView.getTabGroupForEditor(nextEditor) : undefined;
+		moveTo(nextTabGroup?.collapsed ? getEdgeIndex(nextTabGroup) : index + step);
+		return;
+	}
+
+	const tabGroup = groupView.getTabGroupForEditor(editor);
+	if (tabGroup && !tabGroup.locked) {
+		if (tabGroup.collapsed || index === getEdgeIndex(tabGroup)) {
+			groupView.removeFromTabGroup([editor]); // the editor stays where it is
+
+			// The editor shown in place of a collapsed group can be any of its members: once it
+			// left the group, it goes to the side of the group it moves to (unless already there)
+			if (tabGroup.collapsed && getTabGroupMembers(groupView, tabGroup.id).length > 0) {
+				const edgeIndex = getEdgeIndex(tabGroup);
+				const indexAfterLeaving = groupView.getIndexOfEditor(editor);
+				if (step < 0 ? indexAfterLeaving > edgeIndex : indexAfterLeaving < edgeIndex) {
+					moveTo(edgeIndex);
+				}
+			}
+		} else {
+			moveTo(index + step);
+		}
+		return;
+	}
+
+	const nextTabGroup = !tabGroup && nextEditor ? groupView.getTabGroupForEditor(nextEditor) : undefined;
+	if (nextTabGroup?.collapsed) {
+		moveTo(getEdgeIndex(nextTabGroup));
+	} else if (nextTabGroup && !nextTabGroup.locked) {
+		groupView.addToTabGroup(nextTabGroup.id, [editor]); // the editor stays where it is
+	} else {
+		moveTo(index + step);
+	}
 }
 
 /**
