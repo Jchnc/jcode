@@ -141,8 +141,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 	}
 	const feeds = generateFeeds(await collectReleases(repository));
 	if (!feeds.size) {
-		throw new Error('No published JCode releases found.');
+		// Draft releases are not visible here: publish the draft that Build JCode Release creates, which runs this again.
+		console.log('::notice title=No published JCode release yet::Publishing the site without update feeds. Run Build JCode Release, then publish the draft release; publishing runs this workflow again and adds the feeds.');
 	}
+	await mkdir(output, { recursive: true });
 	for (const [file, content] of feeds) {
 		const target = join(output, file);
 		await mkdir(join(target, '..'), { recursive: true });
