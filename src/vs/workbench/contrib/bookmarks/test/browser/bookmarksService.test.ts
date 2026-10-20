@@ -300,30 +300,43 @@ suite('CodeBookmarksService', () => {
 		]);
 	});
 
-	test('only follows a model while it has bookmarks', () => {
+	test('only follows a model while it has bookmarks', () => runWithFakedTimers({ useFakeTimers: true }, async () => {
 		const { model, service } = setup();
-		const withoutBookmarks = service.trackedModelCount;
+		let changes = 0;
+		store.add(service.onDidChangeBookmarks(() => changes++));
+		// Following a model is seen in the listeners being told, once the edits settle, that a bookmark moved.
+		const insertLineAbove = async () => {
+			changes = 0;
+			model.applyEdits([{ range: new Range(1, 1, 1, 1), text: 'inserted\n' }]);
+			await timeout(250);
+			return changes;
+		};
 
-		service.toggle(resource, 2);
-		const withBookmark = { tracked: service.trackedModelCount, gutterDecorations: countGutterDecorations(model) };
-		service.toggle(resource, 2);
+		const withoutBookmarks = { reported: await insertLineAbove(), gutterDecorations: countGutterDecorations(model) };
+		service.toggle(resource, 3);
+		const withBookmark = { reported: await insertLineAbove(), gutterDecorations: countGutterDecorations(model), lineNumbers: service.bookmarks.map(bookmark => bookmark.lineNumber) };
+		service.toggle(resource, 4);
+		const afterRemoval = { reported: await insertLineAbove(), gutterDecorations: countGutterDecorations(model) };
 
-		assert.deepStrictEqual({ withoutBookmarks, withBookmark, afterRemoval: service.trackedModelCount }, {
-			withoutBookmarks: 0,
-			withBookmark: { tracked: 1, gutterDecorations: 1 },
-			afterRemoval: 0
+		assert.deepStrictEqual({ withoutBookmarks, withBookmark, afterRemoval }, {
+			withoutBookmarks: { reported: 0, gutterDecorations: 0 },
+			withBookmark: { reported: 1, gutterDecorations: 1, lineNumbers: [4] },
+			afterRemoval: { reported: 0, gutterDecorations: 0 }
 		});
-	});
+	}));
 
 	test('follows a model that already has stored bookmarks and stops when the service is disposed', () => {
 		const { model, service } = setup('alpha\nbeta', [{ id: 'a', resource: resource.toString(), lineNumber: 2, column: 1, lineText: 'beta', beforeText: 'alpha', afterText: '', stale: false, createdAt: 1 }]);
-		const tracked = { count: service.trackedModelCount, gutterDecorations: countGutterDecorations(model) };
+		const gutterLines = () => model.getAllDecorations().filter(decoration => decoration.options.description === 'jcode-code-bookmark').map(decoration => decoration.range.startLineNumber);
 
+		model.applyEdits([{ range: new Range(1, 1, 1, 1), text: 'inserted\n' }]);
+		service.sync();
+		const tracked = { gutterLines: gutterLines(), lineNumbers: service.bookmarks.map(bookmark => bookmark.lineNumber) };
 		service.dispose();
 
-		assert.deepStrictEqual({ tracked, afterDispose: { count: service.trackedModelCount, gutterDecorations: countGutterDecorations(model) } }, {
-			tracked: { count: 1, gutterDecorations: 1 },
-			afterDispose: { count: 0, gutterDecorations: 0 }
+		assert.deepStrictEqual({ tracked, afterDispose: gutterLines() }, {
+			tracked: { gutterLines: [3], lineNumbers: [3] },
+			afterDispose: []
 		});
 	});
 

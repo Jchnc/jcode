@@ -7,6 +7,7 @@ import './media/bookmarks.css';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { URI } from '../../../../base/common/uri.js';
 import { ICodeEditor, isCodeEditor, isDiffEditor } from '../../../../editor/browser/editorBrowser.js';
+import { ICodeEditorService } from '../../../../editor/browser/services/codeEditorService.js';
 import { EditorContributionInstantiation, registerEditorContribution } from '../../../../editor/browser/editorExtensions.js';
 import { EditorContextKeys } from '../../../../editor/common/editorContextKeys.js';
 import { ILocalizedString, localize, localize2 } from '../../../../nls.js';
@@ -16,6 +17,7 @@ import { IAccessibilityService } from '../../../../platform/accessibility/common
 import { Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
 import { ContextKeyExpr } from '../../../../platform/contextkey/common/contextkey.js';
 import { IDialogService } from '../../../../platform/dialogs/common/dialogs.js';
+import { IFileService } from '../../../../platform/files/common/files.js';
 import { SyncDescriptor } from '../../../../platform/instantiation/common/descriptors.js';
 import { IInstantiationService, ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { KeyChord, KeyCode, KeyMod } from '../../../../base/common/keyCodes.js';
@@ -37,6 +39,7 @@ import { BOOKMARKS_VIEW_ITEM_INLINE_MENU, BOOKMARKS_VIEW_ITEM_MENU, BookmarkItem
 import { ALT_CLICK_TOGGLES_BOOKMARK_SETTING, BookmarkGlyphMarginContribution } from './bookmarksGlyphMargin.js';
 import { findBookmarkToNavigateTo, getBookmarkFileOrder, openBookmark } from './bookmarksNavigation.js';
 import { showBookmarksQuickPick } from './bookmarksQuickPick.js';
+import { getBookmarkTarget } from './bookmarksTarget.js';
 import { CodeBookmarksService } from './bookmarksService.js';
 import { BookmarksView } from './bookmarksView.js';
 
@@ -118,7 +121,11 @@ registerAction2(class extends Action2 {
 
 	run(accessor: ServicesAccessor, context?: unknown): void {
 		if (isEditorLineNumberContext(context)) {
-			accessor.get(ICodeBookmarksService).toggle(context.uri, context.lineNumber, 1);
+			// In the original side of a diff editor the line may belong to another file, or to none.
+			const target = getBookmarkTarget({ codeEditorService: accessor.get(ICodeEditorService), fileService: accessor.get(IFileService), uriIdentityService: accessor.get(IUriIdentityService) }, context.uri, context.lineNumber);
+			if (target) {
+				accessor.get(ICodeBookmarksService).toggle(target.resource, target.lineNumber, 1);
+			}
 			return;
 		}
 
@@ -258,6 +265,8 @@ registerAction2(class extends Action2 {
 			icon: Codicon.search,
 			f1: true,
 			precondition: CONTEXT_CODE_BOOKMARKS_PRESENT,
+			// Ctrl+K L sits next to Toggle Bookmark (Ctrl+K B) and no other binding uses it.
+			keybinding: { primary: KeyChord(KeyMod.CtrlCmd | KeyCode.KeyK, KeyCode.KeyL), weight: KeybindingWeight.WorkbenchContrib },
 			menu: {
 				id: MenuId.ViewTitle,
 				group: 'navigation',

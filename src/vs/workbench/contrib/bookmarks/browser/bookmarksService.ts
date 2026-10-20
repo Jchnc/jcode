@@ -102,13 +102,6 @@ export class CodeBookmarksService extends Disposable implements ICodeBookmarksSe
 		return this._bookmarks;
 	}
 
-	/**
-	 * The number of open models whose edits are being followed. Only exposed for tests.
-	 */
-	get trackedModelCount(): number {
-		return this.trackedModels.size;
-	}
-
 	constructor(
 		@IStorageService private readonly storageService: IStorageService,
 		@IModelService private readonly modelService: IModelService,

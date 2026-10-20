@@ -294,6 +294,40 @@ export function isBookmarkLineRemoved(edit: IBookmarkTextEdit, lineNumber: numbe
 }
 
 /**
+ * A change of a diff, in the shape in which diff editors report it: a range that is empty is
+ * given as an end line of 0, with the start line being the line before the empty range.
+ */
+export interface IBookmarkDiffChange {
+	readonly originalStartLineNumber: number;
+	readonly originalEndLineNumber: number;
+	readonly modifiedStartLineNumber: number;
+	readonly modifiedEndLineNumber: number;
+}
+
+/**
+ * Finds the line of the modified side of a diff that has the same text as a line of the original side.
+ *
+ * @param changes The changes of the diff, in the order of the text.
+ * @returns The line, or `undefined` when the line is part of a change and so has no counterpart.
+ */
+export function mapOriginalLineToModified(lineNumber: number, changes: readonly IBookmarkDiffChange[]): number | undefined {
+	let lineDelta = 0;
+	for (const change of changes) {
+		const originalLength = change.originalEndLineNumber === 0 ? 0 : change.originalEndLineNumber - change.originalStartLineNumber + 1;
+		const modifiedLength = change.modifiedEndLineNumber === 0 ? 0 : change.modifiedEndLineNumber - change.modifiedStartLineNumber + 1;
+		const lastLineBefore = originalLength === 0 ? change.originalStartLineNumber : change.originalStartLineNumber - 1;
+		if (lineNumber <= lastLineBefore) {
+			break;
+		}
+		if (lineNumber <= change.originalStartLineNumber + originalLength - 1) {
+			return undefined;
+		}
+		lineDelta += modifiedLength - originalLength;
+	}
+	return lineNumber + lineDelta;
+}
+
+/**
  * A bookmarked line as it was right before an edit.
  */
 export interface IEditedBookmark {

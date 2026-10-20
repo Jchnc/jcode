@@ -6,11 +6,15 @@
 import * as DOM from '../../../../base/browser/dom.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { ICodeEditor, IMouseTarget, MouseTargetType } from '../../../../editor/browser/editorBrowser.js';
+import { ICodeEditorService } from '../../../../editor/browser/services/codeEditorService.js';
 import { IEditorContribution } from '../../../../editor/common/editorCommon.js';
 import { ITextModel } from '../../../../editor/common/model.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
+import { IFileService } from '../../../../platform/files/common/files.js';
+import { IUriIdentityService } from '../../../../platform/uriIdentity/common/uriIdentity.js';
 import { IDebugService } from '../../debug/common/debug.js';
 import { ICodeBookmarksService } from '../common/bookmarks.js';
+import { getBookmarkTarget, IBookmarkTargetServices } from './bookmarksTarget.js';
 
 export const ALT_CLICK_TOGGLES_BOOKMARK_SETTING = 'jcode.bookmarks.toggleOnAltClick';
 
@@ -44,13 +48,19 @@ export function getAltClickedBookmarkLine(event: Pick<MouseEvent, 'button' | 'al
 export class BookmarkGlyphMarginContribution extends Disposable implements IEditorContribution {
 	static readonly ID = 'editor.contrib.jcodeBookmarkGlyphMargin';
 
+	private readonly targetServices: IBookmarkTargetServices;
+
 	constructor(
 		private readonly editor: ICodeEditor,
 		@ICodeBookmarksService private readonly bookmarksService: ICodeBookmarksService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@IDebugService private readonly debugService: IDebugService,
+		@ICodeEditorService codeEditorService: ICodeEditorService,
+		@IFileService fileService: IFileService,
+		@IUriIdentityService uriIdentityService: IUriIdentityService,
 	) {
 		super();
+		this.targetServices = { codeEditorService, fileService, uriIdentityService };
 		this._register(DOM.addDisposableListener(editor.getContainerDomNode(), DOM.EventType.MOUSE_DOWN, event => this.onMouseDown(event), true));
 	}
 
@@ -65,7 +75,11 @@ export class BookmarkGlyphMarginContribution extends Disposable implements IEdit
 			return;
 		}
 		DOM.EventHelper.stop(event, true);
-		this.bookmarksService.toggle(model.uri, lineNumber, 1);
+		// In the original side of a diff editor the line may belong to another file, or to none.
+		const target = getBookmarkTarget(this.targetServices, model.uri, lineNumber, this.editor);
+		if (target) {
+			this.bookmarksService.toggle(target.resource, target.lineNumber, 1);
+		}
 	}
 
 	/**

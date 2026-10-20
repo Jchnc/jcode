@@ -14,7 +14,7 @@ import { ITextEditorOptions } from '../../../../../platform/editor/common/editor
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { ILabelService } from '../../../../../platform/label/common/label.js';
 import { INotificationHandle, INotificationService } from '../../../../../platform/notification/common/notification.js';
-import { IQuickInputService, IQuickPick, IQuickPickDidAcceptEvent, IQuickPickItem, IQuickPickItemButtonEvent, QuickInputHideReason } from '../../../../../platform/quickinput/common/quickInput.js';
+import { IQuickInputService, IQuickPick, IQuickPickDidAcceptEvent, IQuickPickItem, IQuickPickItemButtonEvent, QuickInputHideReason, QuickPickFocus } from '../../../../../platform/quickinput/common/quickInput.js';
 import { IUriIdentityService } from '../../../../../platform/uriIdentity/common/uriIdentity.js';
 import { extUri } from '../../../../../base/common/resources.js';
 import { PickerEditorState } from '../../../../browser/quickaccess.js';
@@ -42,12 +42,19 @@ suite('Go to Bookmark quick pick', () => {
 		const onDidHide = disposables.add(new Emitter<{ reason: QuickInputHideReason }>());
 		let activeItems: readonly IQuickPickItem[] = [];
 		let selectedItems: readonly IQuickPickItem[] = [];
+		// Like the real list, the fake leaves out the items that the typed text filters out.
+		let isShown = (_item: IQuickPickItem) => true;
 		const picker = upcastPartial<IQuickPick<IQuickPickItem>>({
 			items: [],
 			get activeItems() { return activeItems; },
 			set activeItems(items: readonly IQuickPickItem[]) {
-				activeItems = items;
-				onDidChangeActive.fire([...items]);
+				activeItems = items.filter(isShown);
+				onDidChangeActive.fire([...activeItems]);
+			},
+			focus(focus: QuickPickFocus) {
+				const shown = picker.items.filter(isShown);
+				const step = focus === QuickPickFocus.Next ? 1 : -1;
+				picker.activeItems = [shown[(shown.indexOf(activeItems[0]) + step + shown.length) % shown.length]];
 			},
 			get selectedItems() { return selectedItems; },
 			onDidChangeActive: onDidChangeActive.event,
@@ -102,6 +109,7 @@ suite('Go to Bookmark quick pick', () => {
 		return {
 			picker, log, closed, openedLines,
 			insertLinesAbove: (count: number) => { pendingLinesInserted += count; },
+			filter: (predicate: (item: IQuickPickItem) => boolean) => { isShown = predicate; },
 			items: () => picker.items.map(item => ({ label: item.label, description: item.description, detail: item.detail })),
 			activate: (index: number) => { picker.activeItems = [picker.items[index]]; },
 			select: (index: number) => { selectedItems = [picker.items[index]]; onDidAccept.fire({ inBackground: false }); },
@@ -184,6 +192,42 @@ suite('Go to Bookmark quick pick', () => {
 		quickPick.removeItem(1);
 
 		assert.deepStrictEqual({ items: quickPick.items().map(item => item.label), active: quickPick.activeLabels }, { items: ['text 1', 'text 3'], active: ['text 3'] });
+
+		quickPick.hide(QuickInputHideReason.Blur);
+		await quickPick.closed;
+	});
+
+	test('highlights the next item that is still shown when an item is removed while a filter is typed', async () => {
+		const quickPick = setup([bookmark('/src/a.ts', 1), bookmark('/src/b.ts', 2), bookmark('/src/c.ts', 3), bookmark('/src/d.ts', 4)]);
+		quickPick.filter(item => item.label === 'text 1' || item.label === 'text 4');
+		quickPick.activate(0);
+
+		quickPick.removeItem(0);
+		const afterFirst = { items: quickPick.items().map(item => item.label), active: quickPick.activeLabels };
+		quickPick.removeItem(2);
+
+		assert.deepStrictEqual({
+			afterFirst,
+			afterLast: { items: quickPick.items().map(item => item.label), active: quickPick.activeLabels },
+			// Looking for the neighbor goes through the list, which must not open the items on the way.
+			opened: quickPick.log.filter(entry => entry.startsWith('preview'))
+		}, {
+			afterFirst: { items: ['text 2', 'text 3', 'text 4'], active: ['text 4'] },
+			afterLast: { items: ['text 2', 'text 3'], active: [] },
+			opened: ['preview /src/a.ts', 'preview /src/d.ts']
+		});
+
+		quickPick.hide(QuickInputHideReason.Blur);
+		await quickPick.closed;
+	});
+
+	test('highlights the previous item that is still shown when the last shown item is removed', async () => {
+		const quickPick = setup([bookmark('/src/a.ts', 1), bookmark('/src/b.ts', 2), bookmark('/src/c.ts', 3), bookmark('/src/d.ts', 4)]);
+		quickPick.filter(item => item.label !== 'text 3');
+
+		quickPick.removeItem(3);
+
+		assert.deepStrictEqual({ items: quickPick.items().map(item => item.label), active: quickPick.activeLabels }, { items: ['text 1', 'text 2', 'text 3'], active: ['text 2'] });
 
 		quickPick.hide(QuickInputHideReason.Blur);
 		await quickPick.closed;

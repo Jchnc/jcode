@@ -13,7 +13,7 @@ import { TextEditorSelectionRevealType } from '../../../../platform/editor/commo
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { ILabelService } from '../../../../platform/label/common/label.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
-import { IQuickInputService, IQuickPickItem, QuickInputHideReason } from '../../../../platform/quickinput/common/quickInput.js';
+import { IQuickInputService, IQuickPick, IQuickPickItem, QuickInputHideReason, QuickPickFocus } from '../../../../platform/quickinput/common/quickInput.js';
 import { IUriIdentityService } from '../../../../platform/uriIdentity/common/uriIdentity.js';
 import { PickerEditorState } from '../../../browser/quickaccess.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
@@ -32,6 +32,23 @@ export interface IBookmarksQuickPickServices {
 	readonly notificationService: INotificationService;
 	readonly labelService: ILabelService;
 	readonly uriIdentityService: IUriIdentityService;
+}
+
+/**
+ * Finds the item to highlight once an item is removed: the next one that the text typed so far leaves visible,
+ * or else the one before it.
+ */
+function findVisibleNeighbor(picker: IQuickPick<IBookmarkQuickPickItem>, removed: IBookmarkQuickPickItem): IBookmarkQuickPickItem | undefined {
+	const items = picker.items;
+	const removedIndex = items.indexOf(removed);
+	const find = (focus: QuickPickFocus, isInDirection: (index: number) => boolean): IBookmarkQuickPickItem | undefined => {
+		picker.activeItems = [removed];
+		picker.focus(focus);
+		const [neighbor] = picker.activeItems;
+		// The list wraps around, so an item on the other side of the removed one is not a neighbor.
+		return neighbor && isInDirection(items.indexOf(neighbor)) ? neighbor : undefined;
+	};
+	return find(QuickPickFocus.Next, index => index > removedIndex) ?? find(QuickPickFocus.Previous, index => index < removedIndex);
 }
 
 /**
@@ -74,8 +91,9 @@ export function showBookmarksQuickPick(services: IBookmarksQuickPickServices): P
 		picker.sortByLabel = false;
 		picker.items = items;
 
+		let isProbingActiveItem = false;
 		disposables.add(picker.onDidChangeActive(async ([item]) => {
-			if (item) {
+			if (item && !isProbingActiveItem) {
 				const { bookmark } = item;
 				editorState.set();
 				await editorState.openTransientEditor({
@@ -93,17 +111,25 @@ export function showBookmarksQuickPick(services: IBookmarksQuickPickServices): P
 
 		let restoreOnHide = false;
 		disposables.add(picker.onDidTriggerItemButton(({ item }) => {
-			const index = picker.items.indexOf(item);
 			bookmarksService.remove(item.bookmark.id);
-			const remaining = createItems();
+			const remaining = picker.items.filter(candidate => candidate !== item);
 			if (remaining.length === 0) {
 				// Nothing is left to go to, so go back to where the user was, as when the picker is dismissed.
 				restoreOnHide = true;
 				picker.hide();
 				return;
 			}
+
+			// Moving through the list is how to tell which items the text typed so far leaves visible.
+			let neighbor: IBookmarkQuickPickItem | undefined;
+			isProbingActiveItem = true;
+			try {
+				neighbor = findVisibleNeighbor(picker, item);
+			} finally {
+				isProbingActiveItem = false;
+			}
 			picker.items = remaining;
-			picker.activeItems = [remaining[Math.min(index, remaining.length - 1)]];
+			picker.activeItems = neighbor ? [neighbor] : [];
 		}));
 
 		disposables.add(picker.onDidAccept(() => {
