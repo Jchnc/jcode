@@ -13,6 +13,7 @@ import { EDITOR_TAB_GROUP_COLORS } from '../../../common/editor/editorTabGroup.j
 import { TAB_AUTO_GROUP_RULES_SETTING } from '../common/tabAutoGroupRules.js';
 import { ITabSessionsService } from '../common/tabSessionsService.js';
 import { TabAutoGroupContribution } from './tabAutoGroup.js';
+import './tabSearchActions.js';
 import './tabSessionsActions.js';
 import { TabSessionsService } from './tabSessionsService.js';
 

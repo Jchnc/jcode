@@ -1687,7 +1687,7 @@ function createSavedTabGroupButtons(): ISavedTabGroupButtons {
 }
 
 /** A dot in the color of a tab group, which quick pick items can show as their icon. */
-function createTabGroupColorIcon(color: string): { dark: URI; light: URI } {
+export function createTabGroupColorIcon(color: string): { dark: URI; light: URI } {
 	const fill = getEditorTabGroupColor(color).replace(/[^#%(),.\s\w/-]/g, '');
 	const icon = URI.parse(`data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5" fill="${fill}"/></svg>`)}`);
 	return { dark: icon, light: icon };
