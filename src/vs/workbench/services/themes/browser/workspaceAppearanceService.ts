@@ -92,15 +92,26 @@ export class WorkspaceAppearanceService extends Disposable implements IWorkspace
 		const onWorkspaceChange = () => {
 			if (this.workspaceId !== contextService.getWorkspace().id) {
 				this.workspaceId = contextService.getWorkspace().id;
-				const preview = this.activePreview;
-				this.activePreview = undefined;
-				preview?.end(WorkspaceAppearancePreviewEnd.Cancelled);
+				this.cancelActivePreview();
 				this.changeEmitter.fire();
 			}
 		};
 		this._register(contextService.onDidChangeWorkbenchState(onWorkspaceChange));
 		this._register(contextService.onDidChangeWorkspaceFolders(onWorkspaceChange));
 		this._register(contextService.onDidChangeWorkspaceName(onWorkspaceChange));
+	}
+
+	/** Ends the active preview without saving it, and without announcing a change: callers decide whether the shown appearance changed. */
+	private cancelActivePreview(): void {
+		const preview = this.activePreview;
+		this.activePreview = undefined;
+		preview?.end(WorkspaceAppearancePreviewEnd.Cancelled);
+	}
+
+	override dispose(): void {
+		// A preview that outlives its service would keep its end event and listeners alive.
+		this.cancelActivePreview();
+		super.dispose();
 	}
 
 	get appearance(): IWorkspaceAppearance | undefined {

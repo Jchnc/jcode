@@ -111,6 +111,26 @@ suite('WorkspaceAppearanceService', () => {
 		});
 	});
 
+	test('ends an active preview as cancelled when the service is disposed', () => {
+		const { service, saved, changes } = createService();
+		const preview = service.beginPreview();
+		const ends: WorkspaceAppearancePreviewEnd[] = [];
+		store.add(preview.onDidEnd(reason => ends.push(reason)));
+		preview.update(azure);
+		const changesBefore = changes();
+
+		service.dispose();
+		const applied = preview.apply();
+
+		assert.deepStrictEqual({ active: preview.isActive, ends, applied, saved: saved(), changesAfterDispose: changes() - changesBefore }, {
+			active: false,
+			ends: [WorkspaceAppearancePreviewEnd.Cancelled],
+			applied: false,
+			saved: undefined,
+			changesAfterDispose: 0,
+		});
+	});
+
 	test('ends an active preview as cancelled when the workspace changes', () => {
 		const { service, saved, switchWorkspace } = createService();
 		const preview = service.beginPreview();

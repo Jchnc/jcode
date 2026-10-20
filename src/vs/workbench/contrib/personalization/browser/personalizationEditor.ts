@@ -75,6 +75,8 @@ export class PersonalizationEditor extends EditorPane {
 	private readonly updates: (() => void)[] = [];
 	private readonly pageDisposables = this._register(new DisposableStore());
 	private readonly pendingSettings = new Set<string>();
+	/** The newest value chosen on each range control that has not finished saving, which the control keeps showing meanwhile. */
+	private readonly unsavedRangeValues = new Map<string, { readonly value: number; readonly target: ConfigurationTarget }>();
 	private readonly sections: PersonalizationSection[] = [];
 	private readonly targetButtons: HTMLButtonElement[] = [];
 	private readonly focusTargets = new Map<string, HTMLElement>();
@@ -448,7 +450,7 @@ export class PersonalizationEditor extends EditorPane {
 			this.registerFocusTarget(key, input);
 			const output = append(field, $('output'));
 			this.pageDisposables.add(addDisposableListener(input, EventType.INPUT, () => { output.textContent = localize('personalization.pixels', "{0} px", input.value); }));
-			this.pageDisposables.add(addDisposableListener(input, EventType.CHANGE, () => { void this.updateSetting(key, Number(input.value)); }));
+			this.pageDisposables.add(addDisposableListener(input, EventType.CHANGE, () => { void this.updateRangeSetting(key, Number(input.value)); }));
 			elements = [input];
 			primary = () => input;
 			refresh = (value, disabled) => { input.value = String(value); input.disabled = disabled; output.textContent = localize('personalization.pixels', "{0} px", value); };
@@ -476,7 +478,8 @@ export class PersonalizationEditor extends EditorPane {
 		this.scopeDescription.textContent = this.target === ConfigurationTarget.USER ? localize('personalization.userScopeDescription', "Use these choices in every workspace.") : localize('personalization.workspaceScopeDescription', "Override your choices in this workspace.");
 		for (const control of this.controls) {
 			const { config, policy, userOnly, disabled, ownValue } = this.inspectSetting(control.key);
-			control.refresh(getPersonalizationValue(config, this.target), disabled);
+			const unsaved = this.unsavedRangeValues.get(control.key);
+			control.refresh(unsaved?.target === this.target ? unsaved.value : getPersonalizationValue(config, this.target), disabled);
 			this.setBusy(control, this.pendingSettings.has(control.key));
 			control.reset.disabled = disabled || ownValue === undefined;
 			control.hint.textContent = policy ? localize('personalization.managed', "Managed by your organization.") : userOnly ? localize('personalization.userOnly', "Available in User settings.") : this.target === ConfigurationTarget.USER && config?.workspaceValue !== undefined ? localize('personalization.overridden', "This workspace has its own value.") : '';
@@ -549,16 +552,50 @@ export class PersonalizationEditor extends EditorPane {
 
 	private async updateSetting(key: string, value: PersonalizationValue | undefined): Promise<void> {
 		const target = this.target;
-		if (await this.updateSettings(new Map([[key, value]]))) {
-			this.status.textContent = localize('personalization.saved', "Saved to {0} settings.", target === ConfigurationTarget.USER ? localize('personalization.user', "User") : localize('personalization.workspace', "Workspace"));
+		if (await this.updateSettings(new Map([[key, value]]), target)) {
+			this.reportSaved(target);
 		}
 	}
 
-	/** Saves settings at the selected scope, one after another. Settings that are already saving are skipped. */
-	private async updateSettings(values: ReadonlyMap<string, PersonalizationValue | undefined>): Promise<boolean> {
+	/**
+	 * Saves a range control's value. It keeps changing while an earlier value is still saving, so the
+	 * newest value is kept meanwhile and saved once that save finishes, rather than being ignored.
+	 */
+	private async updateRangeSetting(key: string, value: number): Promise<void> {
+		const request = { value, target: this.target };
+		const draining = this.unsavedRangeValues.has(key);
+		if (!draining && this.pendingSettings.has(key)) {
+			// Something else is saving this setting, such as a reset: it is busy like any other control.
+			return;
+		}
+		this.unsavedRangeValues.set(key, request);
+		if (draining) {
+			// The save in flight picks this value up when it finishes.
+			return;
+		}
+		let latest: typeof request | undefined = request;
+		while (latest) {
+			const saved = await this.updateSettings(new Map([[key, latest.value]]), latest.target);
+			const next = this.unsavedRangeValues.get(key);
+			if (next === latest) {
+				this.unsavedRangeValues.delete(key);
+				this.refresh();
+				if (saved) { this.reportSaved(latest.target); }
+				latest = undefined;
+			} else {
+				latest = next;
+			}
+		}
+	}
+
+	private reportSaved(target: ConfigurationTarget): void {
+		this.status.textContent = localize('personalization.saved', "Saved to {0} settings.", target === ConfigurationTarget.USER ? localize('personalization.user', "User") : localize('personalization.workspace', "Workspace"));
+	}
+
+	/** Saves settings at a scope, one after another. Settings that are already saving are skipped. */
+	private async updateSettings(values: ReadonlyMap<string, PersonalizationValue | undefined>, target = this.target): Promise<boolean> {
 		const keys = [...values.keys()].filter(key => !this.pendingSettings.has(key));
 		if (!keys.length) { return false; }
-		const target = this.target;
 		for (const key of keys) { this.pendingSettings.add(key); }
 		this.refresh();
 		try {

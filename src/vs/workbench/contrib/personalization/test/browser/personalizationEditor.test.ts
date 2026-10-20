@@ -31,34 +31,52 @@ suite('Personalization editor', () => {
 
 	const tabPosition = 'workbench.editor.tabPosition';
 	const sideBarLocation = 'workbench.sideBar.location';
+	const verticalTabsWidth = 'workbench.editor.verticalTabsWidth';
 
 	/** A configuration whose writes stay pending until the test completes them. */
 	class PendingConfigurationService extends TestConfigurationService {
 		readonly updates: { key: string; value: unknown; target: ConfigurationTarget | IConfigurationOverrides | IConfigurationUpdateOverrides | undefined }[] = [];
 		readonly saved = new DeferredPromise<void>();
-		readonly userValues = new Map<string, string>();
+		/** When set, every write waits for its own entry here instead of for {@link saved}, so a test can finish them one at a time. */
+		readonly writes: DeferredPromise<void>[] | undefined;
+		readonly userValues = new Map<string, string | number>();
+
+		constructor(oneWriteAtATime = false) {
+			super();
+			this.writes = oneWriteAtATime ? [] : undefined;
+		}
 
 		override inspect<T>(key: string): IConfigurationValue<T> {
 			const userValue = this.userValues.get(key);
-			return { value: (userValue ?? 'top') as T, defaultValue: 'top' as T, userValue: userValue as T };
+			const defaultValue = key === verticalTabsWidth ? 240 : 'top';
+			return { value: (userValue ?? defaultValue) as T, defaultValue: defaultValue as T, userValue: userValue as T };
 		}
 
 		override async updateValue(key: string, value: unknown, target?: ConfigurationTarget | IConfigurationOverrides | IConfigurationUpdateOverrides): Promise<void> {
 			this.updates.push({ key, value, target });
-			await this.saved.p;
-			if (typeof value === 'string') { this.userValues.set(key, value); }
+			if (this.writes) {
+				const write = new DeferredPromise<void>();
+				this.writes.push(write);
+				await write.p;
+			} else {
+				await this.saved.p;
+			}
+			if (typeof value === 'string' || typeof value === 'number') { this.userValues.set(key, value); }
 			else { this.userValues.delete(key); }
 			this.onDidChangeConfigurationEmitter.fire({ source: ConfigurationTarget.USER, affectedKeys: new Set([key]), change: { keys: [key], overrides: [] }, affectsConfiguration: () => true });
 		}
 	}
 
-	function createEditor(userValues: Record<string, string> = {}) {
+	function createEditor(userValues: Record<string, string> = {}, oneWriteAtATime = false) {
 		const registry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration);
 		const properties: IConfigurationNode['properties'] = {};
 		for (const key of [tabPosition, sideBarLocation]) {
 			if (!registry.getConfigurationProperties()[key]) {
 				properties[key] = { type: 'string', default: 'top', enum: ['top', 'left', 'right'], scope: ConfigurationScope.WINDOW };
 			}
+		}
+		if (!registry.getConfigurationProperties()[verticalTabsWidth]) {
+			properties[verticalTabsWidth] = { type: 'number', default: 240, minimum: 140, maximum: 500, scope: ConfigurationScope.WINDOW };
 		}
 		if (Object.keys(properties).length) {
 			const node: IConfigurationNode = { id: 'personalizationEditorTest', properties };
@@ -68,7 +86,7 @@ suite('Personalization editor', () => {
 		const parent = mainWindow.document.createElement('div');
 		mainWindow.document.body.appendChild(parent);
 		store.add(toDisposable(() => parent.remove()));
-		const configurationService = new PendingConfigurationService();
+		const configurationService = new PendingConfigurationService(oneWriteAtATime);
 		for (const [key, value] of Object.entries(userValues)) { configurationService.userValues.set(key, value); }
 		const colorTheme = new class extends mock<IWorkbenchColorTheme>() {
 			override readonly label = 'Test Theme';
@@ -150,6 +168,34 @@ suite('Personalization editor', () => {
 		}, {
 			whileSaving: { focusedKey: `${tabPosition}:left`, disabled: false, ariaDisabled: 'true', busy: 'true', updates: 1 },
 			afterSaving: { focusedKey: `${tabPosition}:left`, ariaDisabled: null, busy: null, pressed: 'true' }
+		});
+	});
+
+	test('saves the newest vertical tab width chosen while an earlier one is saving', async () => {
+		const { configurationService, control, parent } = createEditor({}, true);
+		const slider = control<HTMLInputElement>(verticalTabsWidth);
+		const drag = (width: number) => {
+			slider.value = String(width);
+			slider.dispatchEvent(new mainWindow.Event('change', { bubbles: true }));
+		};
+		const state = () => ({ updates: configurationService.updates.map(update => update.value), shown: slider.value, busy: slider.closest('.personalization-setting')!.getAttribute('aria-busy') });
+		const complete = async (index: number) => {
+			configurationService.writes![index].complete();
+			await timeout(0);
+		};
+
+		drag(300);
+		drag(350);
+		drag(400);
+		const whileFirstSaves = state();
+		await complete(0);
+		const whileLastSaves = state();
+		await complete(1);
+
+		assert.deepStrictEqual({ whileFirstSaves, whileLastSaves, afterwards: { ...state(), saved: configurationService.userValues.get(verticalTabsWidth), status: parent.querySelector('.personalization-status')?.textContent } }, {
+			whileFirstSaves: { updates: [300], shown: '400', busy: 'true' },
+			whileLastSaves: { updates: [300, 400], shown: '400', busy: 'true' },
+			afterwards: { updates: [300, 400], shown: '400', busy: null, saved: 400, status: 'Saved to User settings.' },
 		});
 	});
 
