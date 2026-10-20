@@ -18,10 +18,13 @@ import { ConfigurationScope, Extensions as ConfigurationExtensions, IConfigurati
 import { TestConfigurationService } from '../../../../../platform/configuration/test/common/testConfigurationService.js';
 import { INotificationHandle, IPromptChoice, NotificationMessage, Severity } from '../../../../../platform/notification/common/notification.js';
 import { TestNotificationService } from '../../../../../platform/notification/test/common/testNotificationService.js';
+import { NullHoverService } from '../../../../../platform/hover/test/browser/nullHoverService.js';
 import { Registry } from '../../../../../platform/registry/common/platform.js';
 import { NullTelemetryServiceShape } from '../../../../../platform/telemetry/common/telemetryUtils.js';
 import { ColorScheme } from '../../../../../platform/theme/common/theme.js';
+import { EditorInput } from '../../../../common/editor/editorInput.js';
 import { IEditorGroup } from '../../../../services/editor/common/editorGroupsService.js';
+import { IEditorService } from '../../../../services/editor/common/editorService.js';
 import { IWorkbenchColorTheme, IWorkbenchFileIconTheme, IWorkbenchThemeService } from '../../../../services/themes/common/workbenchThemeService.js';
 import { WorkspaceAppearanceService } from '../../../../services/themes/browser/workspaceAppearanceService.js';
 import { StorageScope } from '../../../../../platform/storage/common/storage.js';
@@ -37,6 +40,7 @@ suite('Personalization editor', () => {
 	const verticalTabsWidth = 'workbench.editor.verticalTabsWidth';
 	const modernUI = 'workbench.experimental.modernUI';
 	const tabStyle = 'workbench.experimental.modernUIEditorTabStyle';
+	const autoGroupRules = 'workbench.editor.tabGroups.autoGroupRules';
 
 	/** A configuration whose writes stay pending until the test completes them. */
 	class PendingConfigurationService extends TestConfigurationService {
@@ -44,7 +48,7 @@ suite('Personalization editor', () => {
 		readonly saved = new DeferredPromise<void>();
 		/** When set, every write waits for its own entry here instead of for {@link saved}, so a test can finish them one at a time. */
 		readonly writes: DeferredPromise<void>[] | undefined;
-		readonly userValues = new Map<string, string | number>();
+		readonly userValues = new Map<string, string | number | readonly object[]>();
 		modernUIEnabled = true;
 
 		constructor(oneWriteAtATime = false) {
@@ -71,7 +75,7 @@ suite('Personalization editor', () => {
 			} else {
 				await this.saved.p;
 			}
-			if (typeof value === 'string' || typeof value === 'number') { this.userValues.set(key, value); }
+			if (typeof value === 'string' || typeof value === 'number' || Array.isArray(value)) { this.userValues.set(key, value); }
 			else { this.userValues.delete(key); }
 			this.onDidChangeConfigurationEmitter.fire({ source: ConfigurationTarget.USER, affectedKeys: new Set([key]), change: { keys: [key], overrides: [] }, affectsConfiguration: () => true });
 		}
@@ -88,7 +92,7 @@ suite('Personalization editor', () => {
 		}
 	}
 
-	function createEditor(userValues: Record<string, string | number> = {}, oneWriteAtATime = false, folders: URI[] = []) {
+	function createEditor(userValues: Record<string, string | number> = {}, oneWriteAtATime = false, folders: URI[] = [], openEditors: EditorInput[] = []) {
 		const registry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration);
 		const properties: IConfigurationNode['properties'] = {};
 		for (const key of [tabPosition, sideBarLocation]) {
@@ -100,6 +104,9 @@ suite('Personalization editor', () => {
 			if (!registry.getConfigurationProperties()[key]) {
 				properties[key] = { type: 'string', default: 'connected', enum: ['connected', 'pill'], scope: ConfigurationScope.WINDOW };
 			}
+		}
+		if (!registry.getConfigurationProperties()[autoGroupRules]) {
+			properties[autoGroupRules] = { type: 'array', default: [], scope: ConfigurationScope.WINDOW };
 		}
 		if (!registry.getConfigurationProperties()[modernUI]) {
 			properties[modernUI] = { type: 'boolean', default: true, scope: ConfigurationScope.WINDOW };
@@ -146,7 +153,12 @@ suite('Personalization editor', () => {
 			new class extends mock<ICommandService>() { }(),
 			contextService,
 			appearanceService,
-			notificationService
+			notificationService,
+			new class extends mock<IEditorService>() {
+				override readonly editors = openEditors;
+				override readonly onDidEditorsChange = Event.None;
+			}(),
+			NullHoverService
 		));
 		editor.create(parent);
 		editor.layout(new Dimension(900, 700));
@@ -261,6 +273,38 @@ suite('Personalization editor', () => {
 			afterChoosing: { checked: ['true', 'false'], tabStops: [0, -1], disabled: [false, false], noteHidden: true, saved: 'connected' },
 			whenOff: { checked: ['true', 'false'], tabStops: [0, -1], disabled: [true, true], noteHidden: false },
 			turnedOn: { key: modernUI, value: true, target: ConfigurationTarget.USER },
+		});
+	});
+
+	test('adds an auto-grouping rule only once it is complete, and removes it again', async () => {
+		const { configurationService, control, parent } = createEditor();
+		const type = (input: HTMLInputElement, value: string) => {
+			input.value = value;
+			input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+			input.dispatchEvent(new mainWindow.Event('change', { bubbles: true }));
+		};
+		const empty = parent.querySelector<HTMLElement>('.autogroup-empty')!;
+		const emptyShown = !empty.hidden;
+		control('autogroup:add-empty').click();
+		const [name, pattern] = Array.from(parent.querySelectorAll<HTMLInputElement>('.autogroup-rule input'));
+		type(name, ' API ');
+		const afterName = configurationService.updates.length;
+		type(pattern, 'src/{api');
+		const unbalanced = { saved: configurationService.updates.length, error: parent.querySelector('.autogroup-error:not(:empty)')?.textContent };
+		type(pattern, 'src/api/**');
+		configurationService.saved.complete();
+		await timeout(0);
+		parent.querySelector<HTMLButtonElement>('.autogroup-radio[aria-label="Blue"]')!.click();
+		await timeout(0);
+		parent.querySelector<HTMLButtonElement>('.autogroup-action[aria-label="Delete Rule 1"]')!.click();
+		await timeout(0);
+
+		assert.deepStrictEqual({ emptyShown, afterName, unbalanced, updates: configurationService.updates.map(update => update.value), emptyAgain: !empty.hidden }, {
+			emptyShown: true,
+			afterName: 0,
+			unbalanced: { saved: 0, error: 'Close every { with a }.' },
+			updates: [[{ name: 'API', pattern: 'src/api/**' }], [{ name: 'API', pattern: 'src/api/**', color: 'blue' }], undefined],
+			emptyAgain: true,
 		});
 	});
 

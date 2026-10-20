@@ -15,8 +15,10 @@ import { Registry } from '../../../../platform/registry/common/platform.js';
 import { IStorageService } from '../../../../platform/storage/common/storage.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { testWorkspace } from '../../../../platform/workspace/test/common/testWorkspace.js';
+import { EditorInput } from '../../../common/editor/editorInput.js';
 import { PersonalizationEditor } from '../../../contrib/personalization/browser/personalizationEditor.js';
 import { IEditorGroup } from '../../../services/editor/common/editorGroupsService.js';
+import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { WorkspaceAppearanceService } from '../../../services/themes/browser/workspaceAppearanceService.js';
 import { IWorkbenchFileIconTheme, IWorkbenchThemeService } from '../../../services/themes/common/workbenchThemeService.js';
 import { IWorkspaceAppearanceService } from '../../../services/themes/common/workspaceAppearance.js';
@@ -82,9 +84,9 @@ function registerFixtureSettings(): { dispose(): void } {
 	return toDisposable(() => registry.deregisterConfigurations([node]));
 }
 
-function renderPersonalization({ container, disposableStore, theme }: ComponentFixtureContext, width: number, userValues: Record<string, unknown> = {}): void {
+function renderPersonalization({ container, disposableStore, theme }: ComponentFixtureContext, width: number, userValues: Record<string, unknown> = {}, openEditors: EditorInput[] = []): void {
 	container.style.width = `${width}px`;
-	container.style.height = '1500px';
+	container.style.height = '2300px';
 	disposableStore.add(registerFixtureSettings());
 
 	const configurationService = new FixtureConfigurationService(defaults, userValues);
@@ -107,6 +109,7 @@ function renderPersonalization({ container, disposableStore, theme }: ComponentF
 			registration.defineInstance(IWorkspaceContextService, contextService);
 			registration.defineInstance(IWorkspaceAppearanceService, appearanceService);
 			registration.defineInstance(IConfigurationService, configurationService);
+			registration.definePartialInstance(IEditorService, { editors: openEditors, onDidEditorsChange: Event.None });
 		}
 	});
 
@@ -116,7 +119,36 @@ function renderPersonalization({ container, disposableStore, theme }: ComponentF
 	}();
 	const editor = disposableStore.add(instantiationService.createInstance(PersonalizationEditor, group));
 	editor.create(container);
-	editor.layout(new Dimension(width, 1500));
+	editor.layout(new Dimension(width, 2300));
+}
+
+/** An editor with a file, which is all that auto-grouping rules look at. */
+class FixtureEditorInput extends EditorInput {
+	constructor(private readonly uri: URI) {
+		super();
+	}
+
+	override get typeId(): string {
+		return 'fixture.personalization';
+	}
+
+	override get resource(): URI {
+		return this.uri;
+	}
+}
+
+const sampleRules = [
+	{ name: 'API', pattern: 'src/api/**', color: 'blue', icon: 'globe' },
+	{ name: 'Tests', pattern: '**/*.test.ts', color: 'green', icon: 'beaker' },
+	{ name: 'Docs', pattern: 'docs/**/*.md' }
+];
+
+const sampleEditors = ['src/api/users.ts', 'src/api/users.test.ts', 'src/app.test.ts', 'src/main.ts', 'docs/guide/start.md'].map(path => new FixtureEditorInput(URI.file('/workspace/' + path)));
+
+/** Shows a rule that was just added, which opens with its color and icon choices. */
+function renderWithNewRule(context: ComponentFixtureContext, width: number): void {
+	renderPersonalization(context, width, { 'workbench.editor.tabGroups.autoGroupRules': sampleRules.slice(0, 1) }, sampleEditors);
+	context.container.querySelector<HTMLButtonElement>('[data-focus-key="autogroup:add"]')?.click();
 }
 
 export default defineThemedFixtureGroup({ path: 'workbench/personalization/' }, {
@@ -124,6 +156,26 @@ export default defineThemedFixtureGroup({ path: 'workbench/personalization/' }, 
 		labels: { kind: 'screenshot' },
 		additionalThemes: ['darkHighContrast', 'lightHighContrast'],
 		render: context => renderPersonalization(context, 960, { 'workbench.experimental.modernUIEditorTabStyle': 'pill' }),
+	}),
+	WithRules: defineComponentFixture({
+		labels: { kind: 'screenshot' },
+		render: context => renderPersonalization(context, 960, { 'workbench.editor.tabGroups.autoGroupRules': sampleRules }, sampleEditors),
+	}),
+	WithRulesNarrow: defineComponentFixture({
+		labels: { kind: 'screenshot' },
+		render: context => renderPersonalization(context, 480, { 'workbench.editor.tabGroups.autoGroupRules': sampleRules }, sampleEditors),
+	}),
+	AddingRule: defineComponentFixture({
+		labels: { kind: 'screenshot' },
+		render: context => renderWithNewRule(context, 960),
+	}),
+	AddingRuleNarrow: defineComponentFixture({
+		labels: { kind: 'screenshot' },
+		render: context => renderWithNewRule(context, 480),
+	}),
+	TabGroupsOff: defineComponentFixture({
+		labels: { kind: 'screenshot' },
+		render: context => renderPersonalization(context, 960, { 'workbench.editor.tabGroups.enabled': false, 'workbench.editor.tabGroups.autoGroupRules': sampleRules }, sampleEditors),
 	}),
 	ModernUIOff: defineComponentFixture({
 		labels: { kind: 'screenshot' },

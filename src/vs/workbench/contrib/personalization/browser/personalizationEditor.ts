@@ -19,15 +19,20 @@ import { IStorageService } from '../../../../platform/storage/common/storage.js'
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
 import { defaultInputBoxStyles } from '../../../../platform/theme/browser/defaultStyles.js';
 import { editorBackground } from '../../../../platform/theme/common/colorRegistry.js';
+import { IHoverService } from '../../../../platform/hover/browser/hover.js';
 import { IWorkspaceContextService, WorkbenchState } from '../../../../platform/workspace/common/workspace.js';
 import { getRadioNavigationTarget, IWorkspaceColorSwatch, renderWorkspaceColorSwatch } from '../../../browser/workspaceColorSwatch.js';
 import { EditorPane } from '../../../browser/parts/editor/editorPane.js';
+import { EditorResourceAccessor, SideBySideEditor } from '../../../common/editor.js';
 import { WORKSPACE_COLOR_PALETTE, getWorkspaceColorPreset } from '../../../common/workspaceColorPalette.js';
+import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { IEditorGroup } from '../../../services/editor/common/editorGroupsService.js';
 import { LayoutSettings, ModernUIEditorTabStyle } from '../../../services/layout/browser/layoutService.js';
 import { IWorkbenchThemeService } from '../../../services/themes/common/workbenchThemeService.js';
 import { IWorkspaceAppearance, IWorkspaceAppearancePreview, IWorkspaceAppearanceService, parseWorkspaceColorInput, WORKSPACE_COLOR_AUTO_REMOTE_SETTING, WORKSPACE_COLOR_INPUT_MAX_LENGTH, WorkspaceAppearancePreviewEnd } from '../../../services/themes/common/workspaceAppearance.js';
+import { TAB_AUTO_GROUP_RULES_SETTING, toTabAutoGroupResource } from '../../tabGroups/common/tabAutoGroupRules.js';
 import { getPersonalizationValue, PersonalizationValue } from '../common/personalizationSettings.js';
+import { AutoGroupRulesList } from './autoGroupRulesList.js';
 
 interface SettingChoice {
 	readonly value: PersonalizationValue;
@@ -109,7 +114,9 @@ export class PersonalizationEditor extends EditorPane {
 		@ICommandService private readonly commandService: ICommandService,
 		@IWorkspaceContextService private readonly workspaceService: IWorkspaceContextService,
 		@IWorkspaceAppearanceService private readonly appearanceService: IWorkspaceAppearanceService,
-		@INotificationService private readonly notificationService: INotificationService
+		@INotificationService private readonly notificationService: INotificationService,
+		@IEditorService private readonly editorService: IEditorService,
+		@IHoverService private readonly hoverService: IHoverService
 	) {
 		super(PersonalizationEditor.ID, group, telemetryService, workbenchThemeService, storageService);
 	}
@@ -151,6 +158,8 @@ export class PersonalizationEditor extends EditorPane {
 		this.tabStylePicker(tabs);
 		this.setting(tabs, 'workbench.editor.tabGroups.enabled', localize('personalization.tabGroups', "Tab groups"), localize('personalization.tabGroupsDescription', "Organize related files into named, colored groups."), undefined, undefined, undefined, () => this.configurationService.getValue('workbench.editor.showTabs') === 'multiple');
 		this.setting(tabs, 'breadcrumbs.enabled', localize('personalization.breadcrumbs', "Breadcrumbs"), localize('personalization.breadcrumbsDescription', "Navigate the current file's folders and symbols above the editor."));
+		const grouping = this.section(nav, 'grouping', Codicon.layers, localize('personalization.grouping', "Auto-grouping"), localize('personalization.groupingDescription', "Put files into tab groups for you as you open them."));
+		this.autoGroupRules(grouping);
 		const layout = this.section(nav, 'layout', Codicon.layout, localize('personalization.layout', "Workbench layout"), localize('personalization.layoutDescription', "Place the main navigation and choose how much information fits on screen."));
 		this.setting(layout, 'workbench.sideBar.location', localize('personalization.sidebar', "Primary sidebar"), localize('personalization.sidebarDescription', "Choose the side for Explorer, Search, and other primary views."), [{ value: 'left', label: localize('personalization.left', "Left") }, { value: 'right', label: localize('personalization.right', "Right") }]);
 		this.setting(layout, 'workbench.activityBar.location', localize('personalization.activityBar', "Activity bar"), localize('personalization.activityBarDescription', "Place the view icons beside the sidebar, above it, or below it."), [
@@ -495,7 +504,7 @@ export class PersonalizationEditor extends EditorPane {
 			this.pageDisposables.add(addDisposableListener(input, EventType.CHANGE, () => { void this.updateRangeSetting(key, Number(input.value)); }));
 			elements = [input];
 			primary = () => input;
-			refresh = (value, disabled) => { input.value = String(value); input.disabled = disabled; output.textContent = localize('personalization.pixels', "{0} px", value); };
+			refresh = (value, disabled) => { input.value = String(value); input.disabled = disabled; output.textContent = localize('personalization.pixels', "{0} px", Number(value)); };
 		} else {
 			const toggle = this.button(field, '', () => { void this.updateSetting(key, !(getPersonalizationValue(this.configurationService.inspect<PersonalizationValue>(key), this.target) === true)); }, key);
 			toggle.className = 'personalization-toggle'; toggle.setAttribute('role', 'switch'); toggle.setAttribute('aria-labelledby', `${id}-label`); toggle.setAttribute('aria-describedby', `${id}-description`);
@@ -570,6 +579,53 @@ export class PersonalizationEditor extends EditorPane {
 				setFocusable(checked);
 				cards.forEach(({ button }, index) => { button.disabled = disabled; button.setAttribute('aria-checked', String(index === checked)); });
 				note.hidden = modernUIOn();
+			}
+		});
+	}
+
+	/** The files of the open editors, which is what auto-grouping rules are tried on. */
+	private getOpenResources() {
+		return this.editorService.editors.flatMap(editor => {
+			const resource = EditorResourceAccessor.getOriginalUri(editor, { supportSideBySide: SideBySideEditor.PRIMARY });
+			return resource ? [toTabAutoGroupResource(resource, this.workspaceService.getWorkspaceFolder(resource)?.uri)] : [];
+		});
+	}
+
+	/** The rules that put the files of a pattern into a tab group, as a list that is edited in place and saved once it is complete. */
+	private autoGroupRules(section: PersonalizationSection): void {
+		const key = TAB_AUTO_GROUP_RULES_SETTING;
+		section.keys.push(key);
+		const row = append(section.body, $('.personalization-setting.personalization-setting-stacked'));
+		row.dataset.setting = key;
+		const text = append(row, $('.personalization-setting-text'));
+		const id = `personalization-control-${this.group.id}-${this.nextControlId++}`;
+		append(text, $('span.personalization-control-label', { id: `${id}-label` }, localize('personalization.rules', "Rules")));
+		append(text, $('p', { id: `${id}-description` }, localize('personalization.rulesDescription', "Files that match a pattern join the tab group with the name of its rule. Rules apply to files you open from now on.")));
+		const hint = append(text, $('span.personalization-setting-hint'));
+		const field = append(row, $('.personalization-field.personalization-rules', { role: 'group', 'aria-labelledby': `${id}-label`, 'aria-describedby': `${id}-description ${id}-note` }));
+		const list = this.pageDisposables.add(new AutoGroupRulesList(field, id, {
+			save: rules => { void this.updateSetting(key, rules.length ? rules : undefined); },
+			getResources: () => this.getOpenResources(),
+			announce: message => { this.status.textContent = message; }
+		}, this.hoverService));
+		this.pageDisposables.add(this.editorService.onDidEditorsChange(() => list.refreshMatches()));
+		// The note comes before the list, so that it is seen without scrolling past every rule
+		const note = row.insertBefore($('.personalization-style-note.personalization-note-leading', { id: `${id}-note` }), field);
+		append(note, $('span.personalization-setting-hint', undefined, localize('personalization.rulesOff', "Rules apply when tab groups are on.")));
+		const turnOn = this.button(note, localize('personalization.turnOnTabGroups', "Turn On Tab Groups"), () => { void this.updateSetting('workbench.editor.tabGroups.enabled', true); }, 'workbench.editor.tabGroups.enabled:on');
+		turnOn.className = 'personalization-primary';
+		const reset = this.button(row, localize('personalization.reset', "Reset"), () => { void this.updateSetting(key, undefined); }, `${key}:reset`);
+		reset.className = 'personalization-reset'; reset.setAttribute('aria-label', localize('personalization.resetSetting', "Reset {0}", localize('personalization.rules', "Rules")));
+		const tabGroupsOn = () => this.configurationService.getValue('workbench.editor.tabGroups.enabled') !== false;
+		this.controls.push({
+			key, row, hint, reset,
+			elements: [turnOn, reset],
+			primary: () => list.primary,
+			isUnavailable: () => !tabGroupsOn(),
+			refresh: (value, disabled) => {
+				list.setRules(value, disabled);
+				note.hidden = tabGroupsOn();
+				turnOn.disabled = false;
 			}
 		});
 	}

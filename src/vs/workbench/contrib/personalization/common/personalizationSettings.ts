@@ -4,8 +4,9 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { ConfigurationTarget, IConfigurationValue } from '../../../../platform/configuration/common/configuration.js';
+import { ITabAutoGroupRule } from '../../tabGroups/common/tabAutoGroupRules.js';
 
-export type PersonalizationValue = string | number | boolean;
+export type PersonalizationValue = string | number | boolean | readonly ITabAutoGroupRule[];
 
 /** Display the selected scope, rather than a workspace override in the User controls. */
 export function getPersonalizationValue(config: IConfigurationValue<PersonalizationValue> | undefined, target: ConfigurationTarget): PersonalizationValue | undefined {
