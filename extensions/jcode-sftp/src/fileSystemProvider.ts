@@ -7,14 +7,25 @@ import { randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
 import picomatch from 'picomatch';
 import { utils, type FileEntryWithStats, type SFTPWrapper, type Stats } from 'ssh2';
-import { EventEmitter, FileChangeType, FileSystemError, FileSystemProvider, FileStat, FileType, l10n, Uri, workspace, type Disposable, type FileChangeEvent, type LogOutputChannel } from 'vscode';
+import { commands, EventEmitter, FileChangeType, FileSystemError, FileSystemProvider, FileStat, FileType, l10n, Uri, window, workspace, type Disposable, type FileChangeEvent, type LogOutputChannel } from 'vscode';
 import { SftpConnections } from './connection';
 import { linkCountCommand, parseLinkCount, planOwnership } from './saveStrategy';
+import { TreePoller, type PollLimits, type PollSource, type SnapshotEntry } from './treePoller';
 
-interface SnapshotEntry {
-	type: FileType;
-	mtime: number;
-	size: number;
+/** A watch request and the progress of its poller. */
+interface WatchRequest {
+	uri: Uri;
+	poller: TreePoller;
+	/** When the request is next polled, in milliseconds since the epoch. */
+	dueAt: number;
+	/** Set while polling fails so a persistent failure is logged once. */
+	failing: boolean;
+}
+
+/** Shares remote reads between the watch requests of one poll. */
+class PollCache {
+	readonly directories = new Map<string, Promise<FileEntryWithStats[] | undefined>>();
+	readonly links = new Map<string, Promise<{ stat: Stats; type: FileType }>>();
 }
 
 function fileType(stat: Stats): FileType {
@@ -93,10 +104,21 @@ function siblingPath(path: string, extension: 'tmp' | 'bak'): string {
 export class SftpFileSystemProvider implements FileSystemProvider {
 	private readonly changes = new EventEmitter<FileChangeEvent[]>();
 	readonly onDidChangeFile = this.changes.event;
-	private readonly watchers = new Set<Disposable>();
 	private readonly mutations = new Map<string, Promise<void>>();
+	private readonly requests = new Set<WatchRequest>();
+	private readonly settings: Disposable;
+	private timer: ReturnType<typeof setTimeout> | undefined;
+	private polling = false;
+	private disposed = false;
+	private limitWarned = false;
 
-	constructor(private readonly connections: SftpConnections, private readonly log: LogOutputChannel) { }
+	constructor(private readonly connections: SftpConnections, private readonly log: LogOutputChannel) {
+		this.settings = workspace.onDidChangeConfiguration(event => {
+			if (event.affectsConfiguration('jcodeSftp.pollInterval')) {
+				this.applyPollInterval();
+			}
+		});
+	}
 
 	private async run<T>(uri: Uri, action: (sftp: SFTPWrapper) => Promise<T>, retry = false): Promise<T> {
 		try {
@@ -414,97 +436,166 @@ export class SftpFileSystemProvider implements FileSystemProvider {
 	watch(uri: Uri, options: { recursive: boolean; excludes: readonly string[] }): Disposable {
 		const matchers = options.excludes.map(pattern => picomatch(pattern, { dot: true, nonegate: true }));
 		const excluded = (path: string): boolean => matchers.some(matches => matches(path) || matches(posix.relative(uri.path, path)));
-		let disposed = false;
-		let polling = false;
-		let previous: Map<string, SnapshotEntry> | undefined;
-		const poll = async (): Promise<void> => {
-			if (disposed || polling) {
-				return;
-			}
-			polling = true;
-			try {
-				const current = await this.snapshot(uri, options.recursive, excluded);
-				if (disposed) {
-					return;
-				}
-				if (previous) {
-					const events: FileChangeEvent[] = [];
-					for (const [path, entry] of current) {
-						const before = previous.get(path);
-						if (!before || before.type !== entry.type) {
-							events.push({ type: FileChangeType.Created, uri: uri.with({ path }) });
-						} else if (before.mtime !== entry.mtime || before.size !== entry.size) {
-							events.push({ type: FileChangeType.Changed, uri: uri.with({ path }) });
-						}
-					}
-					for (const path of previous.keys()) {
-						if (!current.has(path)) {
-							events.push({ type: FileChangeType.Deleted, uri: uri.with({ path }) });
-						}
-					}
-					if (events.length) {
-						this.changes.fire(events);
-					}
-				}
-				previous = current;
-			} catch (error) {
-				this.log.warn(`SSH/SFTP polling failed for ${uri.toString()}: ${String(error)}`);
-			} finally {
-				polling = false;
+		const request: WatchRequest = { uri, poller: new TreePoller(uri.path, options.recursive, excluded), dueAt: 0, failing: false };
+		this.requests.add(request);
+		this.schedule();
+		return {
+			dispose: () => {
+				this.requests.delete(request);
+				this.schedule();
 			}
 		};
-		const interval = setInterval(() => void poll(), workspace.getConfiguration('jcodeSftp').get('pollInterval', 10000));
-		void poll();
-		const watcher: Disposable = { dispose: () => { disposed = true; clearInterval(interval); this.watchers.delete(watcher); } };
-		this.watchers.add(watcher);
-		return watcher;
 	}
 
-	private async snapshot(uri: Uri, recursive: boolean, excluded: (path: string) => boolean): Promise<Map<string, SnapshotEntry>> {
-		return this.run(uri, async sftp => {
-			const result = new Map<string, SnapshotEntry>();
-			if (excluded(uri.path)) { return result; }
-			let root: { stat: Stats; type: FileType };
-			try {
-				root = await resolveStat(sftp, uri.path);
-			} catch (error) {
-				if (error instanceof FileSystemError && error.code === 'FileNotFound') {
-					return result;
+	private pollInterval(): number {
+		return Math.max(1000, workspace.getConfiguration('jcodeSftp').get('pollInterval', 10000));
+	}
+
+	/** Applies a changed interval to the next poll of every watch request without reconnecting. */
+	private applyPollInterval(): void {
+		const next = Date.now() + this.pollInterval();
+		for (const request of this.requests) {
+			request.dueAt = Math.min(request.dueAt, next);
+		}
+		this.schedule();
+	}
+
+	/** Arms the timer for the earliest watch request that is due. */
+	private schedule(): void {
+		clearTimeout(this.timer);
+		this.timer = undefined;
+		if (this.polling || this.disposed || !this.requests.size) {
+			return;
+		}
+		const due = Math.min(...Array.from(this.requests, request => request.dueAt));
+		this.timer = setTimeout(() => void this.poll(), Math.max(0, due - Date.now()));
+	}
+
+	/** Advances every due watch request by one bounded step and reports their changes together. */
+	private async poll(): Promise<void> {
+		if (this.polling || this.disposed) {
+			return;
+		}
+		this.polling = true;
+		try {
+			const configuration = workspace.getConfiguration('jcodeSftp');
+			const limits: PollLimits = { maxEntries: Math.max(100, configuration.get('pollMaxEntries', 5000)), entriesPerStep: 2000 };
+			const cache = new PollCache();
+			const unavailable = new Set<string>();
+			const events = new Map<string, FileChangeEvent>();
+			for (const request of [...this.requests]) {
+				const { uri } = request;
+				if (request.dueAt > Date.now()) {
+					continue;
 				}
-				throw error;
-			}
-			result.set(uri.path, { type: root.type, mtime: root.stat.mtime, size: root.stat.size });
-			if (!root.stat.isDirectory()) {
-				return result;
-			}
-			const queue = [uri.path];
-			while (queue.length) {
-				const directory = queue.shift()!;
-				for (const entry of await operation<FileEntryWithStats[]>(callback => sftp.readdir(directory, callback))) {
-					if (entry.filename === '.' || entry.filename === '..') {
-						continue;
+				try {
+					if (!unavailable.has(uri.authority)) {
+						const result = await request.poller.step(this.pollSource(uri, cache), limits);
+						request.failing = false;
+						for (const { type, path } of this.requests.has(request) ? result.changes : []) {
+							const changed = uri.with({ path });
+							events.set(`${type}:${changed.toString()}`, { type, uri: changed });
+						}
+						for (const directory of result.limited) {
+							this.warnPollLimit(uri, directory, limits.maxEntries);
+						}
 					}
-					const path = posix.join(directory, entry.filename);
-					if (excluded(path)) { continue; }
-					const { stat, type } = await resolveStat(sftp, path, entry.attrs);
-					result.set(path, { type, mtime: stat.mtime, size: stat.size });
-					// Watch a linked directory directly rather than following possible cycles here.
-					if (recursive && type === FileType.Directory) {
-						queue.push(path);
-					}
-					if (result.size > 5000) {
-						throw new Error(l10n.t('Remote poll exceeded 5000 entries. Change detection paused for this workspace.'));
+				} catch (error) {
+					// One failure is enough to skip this server's other requests until the next poll.
+					unavailable.add(uri.authority);
+					if (!request.failing) {
+						request.failing = true;
+						this.log.warn(`SSH/SFTP polling failed for ${uri.toString()}: ${String(error)}`);
 					}
 				}
+				request.dueAt = Date.now() + this.pollInterval();
 			}
-			return result;
-		}, true);
+			if (events.size) {
+				this.changes.fire([...events.values()]);
+			}
+		} finally {
+			this.polling = false;
+			this.schedule();
+		}
+	}
+
+	/** Tells the user once that polling skipped a folder, since the change is otherwise invisible. */
+	private warnPollLimit(uri: Uri, directory: string, maxEntries: number): void {
+		this.log.warn(`SSH/SFTP change detection skipped ${directory} on ${uri.authority} because it would exceed ${maxEntries} entries.`);
+		if (this.limitWarned) {
+			return;
+		}
+		this.limitWarned = true;
+		const openSettings = l10n.t('Open Settings');
+		void window.showWarningMessage(
+			l10n.t('SSH/SFTP change detection skipped {0} because it would exceed {1} entries. Exclude large folders with files.watcherExclude or raise jcodeSftp.pollMaxEntries.', directory, maxEntries),
+			openSettings
+		).then(choice => choice === openSettings ? commands.executeCommand('workbench.action.openSettings', '@id:jcodeSftp.pollMaxEntries,files.watcherExclude') : undefined);
+	}
+
+	private pollSource(uri: Uri, cache: PollCache): PollSource {
+		const key = (path: string): string => `${uri.authority}\0${path}`;
+		return {
+			stat: path => this.run(uri, async sftp => {
+				try {
+					const { stat, type } = await resolveStat(sftp, path);
+					return { type, mtime: stat.mtime, size: stat.size };
+				} catch (error) {
+					if (error instanceof FileSystemError && error.code === 'FileNotFound') {
+						return undefined;
+					}
+					throw error;
+				}
+			}, true),
+			list: async (path, include) => {
+				let directory = cache.directories.get(key(path));
+				if (!directory) {
+					directory = this.readEntries(uri, path);
+					cache.directories.set(key(path), directory);
+				}
+				const entries = await directory;
+				if (!entries) {
+					return undefined;
+				}
+				const listing = new Map<string, SnapshotEntry>();
+				for (const entry of entries) {
+					const entryPath = posix.join(path, entry.filename);
+					if (include(entryPath)) {
+						let link = entry.attrs.isSymbolicLink() ? cache.links.get(key(entryPath)) : undefined;
+						if (entry.attrs.isSymbolicLink() && !link) {
+							link = this.run(uri, sftp => resolveStat(sftp, entryPath, entry.attrs), true);
+							cache.links.set(key(entryPath), link);
+						}
+						const { stat, type } = await (link ?? { stat: entry.attrs, type: fileType(entry.attrs) });
+						listing.set(entryPath, { type, mtime: stat.mtime, size: stat.size });
+					}
+				}
+				return listing;
+			}
+		};
+	}
+
+	/** Lists a directory for polling: a missing one is empty and an unreadable one is skipped. */
+	private async readEntries(uri: Uri, path: string): Promise<FileEntryWithStats[] | undefined> {
+		try {
+			const entries = await this.run(uri, sftp => operation<FileEntryWithStats[]>(callback => sftp.readdir(path, callback)), true);
+			return entries.filter(entry => entry.filename !== '.' && entry.filename !== '..');
+		} catch (error) {
+			if (error instanceof FileSystemError && error.code === 'FileNotFound') {
+				return [];
+			}
+			if (error instanceof FileSystemError && error.code === 'NoPermissions') {
+				return undefined;
+			}
+			throw error;
+		}
 	}
 
 	dispose(): void {
-		for (const watcher of [...this.watchers]) {
-			watcher.dispose();
-		}
+		this.disposed = true;
+		clearTimeout(this.timer);
+		this.requests.clear();
+		this.settings.dispose();
 		this.changes.dispose();
 	}
 }

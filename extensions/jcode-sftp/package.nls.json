@@ -14,5 +14,6 @@
 	"command.import": "Import Connections from JSON...",
 	"command.export": "Export Connections to JSON...",
 	"configuration.title": "JCode Remote SSH/SFTP",
-	"configuration.pollInterval": "Interval in milliseconds for checking remote files and folders for changes."
+	"configuration.pollInterval": "Interval in milliseconds for checking remote files and folders for changes. Changes apply without reconnecting.",
+	"configuration.pollMaxEntries": "Most files and folders that change detection tracks for one watched folder. A folder that would exceed this is not checked for changes. Exclude large folders with `files.watcherExclude` to keep the rest up to date."
 }
