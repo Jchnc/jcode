@@ -859,6 +859,8 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 			}
 
 			this.tabDisposables = dispose(this.tabDisposables);
+			this.disposeTabGroupHeaders();
+			this.renderedTabGroupState = undefined;
 			this.tabResourceLabels.clear();
 			this.tabLabels = [];
 			this.activeTabLabel = undefined;

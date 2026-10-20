@@ -386,6 +386,22 @@ suite('MultiEditorTabsControl', () => {
 		});
 	});
 
+	test('closing the last tab disposes the tab group header listeners', () => {
+		const [first, second] = model.getEditors(EditorsOrder.SEQUENTIAL);
+		model.createTabGroup([first, second], 'Work', 'blue');
+		const header = tabGroupHeaders()[0];
+
+		// Closing several editors updates the model first and informs the tabs control afterwards
+		model.closeEditor(first);
+		model.closeEditor(second);
+		control.closeEditors([first, second]);
+
+		const click = new MouseEvent(EventType.CLICK, { bubbles: true, cancelable: true });
+		header.dispatchEvent(click);
+
+		assert.deepStrictEqual({ headers: tabGroupHeaders().length, headerListenerStillActive: click.defaultPrevented }, { headers: 0, headerListenerStillActive: false });
+	});
+
 	function connectedGroup(): HTMLElement {
 		const root = $('.monaco-workbench.modern-ui.modern-ui-tabs.modern-ui-connected-editor-tabs.floating-panels');
 		root.style.cssText = '--vscode-spacing-size20: 2px; --vscode-spacing-size40: 4px; --vscode-spacing-size60: 6px; --vscode-spacing-size80: 8px; --vscode-spacing-size160: 16px; --vscode-spacing-size200: 20px; --vscode-spacing-size280: 28px; --vscode-strokeThickness: 1px; --vscode-cornerRadius-small: 4px; --vscode-cornerRadius-medium: 6px; --vscode-cornerRadius-large: 8px; --vscode-fontSize-body1: 13px; --vscode-fontWeight-regular: 400;';
