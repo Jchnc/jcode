@@ -214,9 +214,10 @@ git switch custom/main
 git pull --ff-only origin custom/main
 git fetch --no-tags upstream main
 git merge --no-ff upstream/main
+bash build/jcode/prune-upstream-ci.sh
 ```
 
-Resolve conflicts while preserving the custom features. If dependency manifests changed, run `npm run install-fast`; then rebuild and run the relevant checks before pushing:
+JCode only runs its own GitHub Actions workflows (`.github/workflows/jcode-*.yml`): **Build JCode Release**, started by hand, and **Publish JCode Update Feed**, which runs when a release is published. `prune-upstream-ci.sh` removes the workflows, actions and Dependabot configuration that upstream adds or changes, and resolves the merge conflicts those files report. Resolve the remaining conflicts while preserving the custom features. If dependency manifests changed, run `npm run install-fast`; then rebuild and run the relevant checks before pushing:
 
 ```sh
 git push origin custom/main
